@@ -27,31 +27,33 @@ public class DefaultThemeContrastTests
 
     [Theory]
     // Root + view body text (#18181b) on every background it lands on.
-    [InlineData("body text on root bg",        "#18181b", "#ffffff", NormalTextRatio)]
-    [InlineData("body text on gutter",         "#18181b", "#fafafa", NormalTextRatio)]
-    [InlineData("body text on all-day row",    "#18181b", "#fdfdfd", NormalTextRatio)]
-    [InlineData("body text on today bg",       "#18181b", "#eef4ff", NormalTextRatio)]
-    [InlineData("body text on muted-cell bg",  "#18181b", "#fafafa", NormalTextRatio)]
-    [InlineData("body text on overflow chip",  "#18181b", "#f4f4f5", NormalTextRatio)]
+    [InlineData("body text on root bg", "#18181b", "#ffffff", NormalTextRatio)]
+    [InlineData("body text on gutter", "#18181b", "#fafafa", NormalTextRatio)]
+    [InlineData("body text on all-day row", "#18181b", "#fdfdfd", NormalTextRatio)]
+    [InlineData("body text on today bg", "#18181b", "#eef4ff", NormalTextRatio)]
+    [InlineData("body text on muted-cell bg", "#18181b", "#fafafa", NormalTextRatio)]
+    [InlineData("body text on overflow chip", "#18181b", "#f4f4f5", NormalTextRatio)]
     [InlineData("body text on unassigned row", "#52525b", "#f4f4f5", NormalTextRatio)]
+    // Year view out-of-month ("muted") day numbers on the white cell background.
+    [InlineData("year muted date on cell bg", "#71717a", "#ffffff", NormalTextRatio)]
     // Subtle text (#52525b) — date secondary labels, time-gutter labels, event-time strip.
-    [InlineData("subtle text on gutter",       "#52525b", "#fafafa", NormalTextRatio)]
-    [InlineData("subtle text on root bg",      "#52525b", "#ffffff", NormalTextRatio)]
-    [InlineData("subtle text on today bg",     "#52525b", "#eef4ff", NormalTextRatio)]
-    [InlineData("subtle text on all-day row",  "#52525b", "#fdfdfd", NormalTextRatio)]
+    [InlineData("subtle text on gutter", "#52525b", "#fafafa", NormalTextRatio)]
+    [InlineData("subtle text on root bg", "#52525b", "#ffffff", NormalTextRatio)]
+    [InlineData("subtle text on today bg", "#52525b", "#eef4ff", NormalTextRatio)]
+    [InlineData("subtle text on all-day row", "#52525b", "#fdfdfd", NormalTextRatio)]
     // Toolbar palette (declared on .calee-scheduler-toolbar).
-    [InlineData("toolbar text on toolbar bg",        "#18181b", "#ffffff", NormalTextRatio)]
-    [InlineData("toolbar text on button bg",         "#18181b", "#f4f4f5", NormalTextRatio)]
-    [InlineData("toolbar text on button hover bg",   "#18181b", "#e4e4e7", NormalTextRatio)]
-    [InlineData("toolbar text on active view btn",   "#18181b", "#dbeafe", NormalTextRatio)]
+    [InlineData("toolbar text on toolbar bg", "#18181b", "#ffffff", NormalTextRatio)]
+    [InlineData("toolbar text on button bg", "#18181b", "#f4f4f5", NormalTextRatio)]
+    [InlineData("toolbar text on button hover bg", "#18181b", "#e4e4e7", NormalTextRatio)]
+    [InlineData("toolbar text on active view btn", "#18181b", "#dbeafe", NormalTextRatio)]
     // Non-text contrast — focus outline must stand out against every background it draws on.
-    [InlineData("focus outline on root bg",    "#2563eb", "#ffffff", NonTextRatio)]
-    [InlineData("focus outline on gutter",     "#2563eb", "#fafafa", NonTextRatio)]
-    [InlineData("focus outline on today bg",   "#2563eb", "#eef4ff", NonTextRatio)]
+    [InlineData("focus outline on root bg", "#2563eb", "#ffffff", NonTextRatio)]
+    [InlineData("focus outline on gutter", "#2563eb", "#fafafa", NonTextRatio)]
+    [InlineData("focus outline on today bg", "#2563eb", "#eef4ff", NonTextRatio)]
     [InlineData("focus outline on muted-cell", "#2563eb", "#fafafa", NonTextRatio)]
     // Non-text contrast — current-time indicator vs surrounding bg.
-    [InlineData("current-time on root bg",     "#dc2626", "#ffffff", NonTextRatio)]
-    [InlineData("current-time on today bg",    "#dc2626", "#eef4ff", NonTextRatio)]
+    [InlineData("current-time on root bg", "#dc2626", "#ffffff", NonTextRatio)]
+    [InlineData("current-time on today bg", "#dc2626", "#eef4ff", NonTextRatio)]
     public void Default_Theme_Pair_Meets_Threshold(
         string label, string foreground, string background, double minimumRatio)
     {

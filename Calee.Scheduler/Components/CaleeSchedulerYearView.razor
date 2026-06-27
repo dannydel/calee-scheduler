@@ -9,8 +9,10 @@
     drives the density indicator; per-event positioning is intentionally absent.
 
       [role="grid"]                           outer year wrapper
-        [role="row"] x 12                     one per month
-          [role="rowheader"]                  the month-name strip — clickable per Q14
+        [role="rowgroup"] x 12                one per month (rows must not nest inside
+                                              rows, so each month is a rowgroup — NFR-06)
+          [role="row"]                        the month-name header row
+            [role="rowheader"]                clickable month name — drill-down per Q14
           [role="row"]                        the weekday header strip (S M T W T F S)
             [role="columnheader"] x 7
           [role="row"] x 6                    one per week within the month
@@ -46,29 +48,35 @@
             var month = Months[m];
 
             <div class="calee-scheduler-year-month"
-                 role="row"
+                 role="rowgroup"
                  data-calee-region="year-month"
                  data-calee-month-number="@month.MonthNumber">
 
-                @* Month header — clickable per FR-38 / Q14. Uses role="rowheader" so
-                   the surrounding role="row" gets a labeled head, and the click flips
-                   the drill-down callback per Q14. *@
-                <button type="button"
-                        class="calee-scheduler-year-month-header"
-                        role="rowheader"
-                        data-calee-region="year-month-header"
-                        aria-label="@MonthAccessibleName(month)"
-                        @onclick="@(() => HandleMonthClickAsync(month))">
-                    @MonthName(month)
-                </button>
+                @* Month header — clickable per FR-38 / Q14. The role="rowheader" lives in
+                   its own role="row" so the month name is a labeled head for the rowgroup
+                   without a rowheader sitting loose in the grid; the click flips the
+                   drill-down callback per Q14. *@
+                <div class="calee-scheduler-year-month-header-row" role="row">
+                    <button type="button"
+                            class="calee-scheduler-year-month-header"
+                            role="rowheader"
+                            data-calee-region="year-month-header"
+                            aria-label="@MonthAccessibleName(month)"
+                            @onclick="@(() => HandleMonthClickAsync(month))">
+                        @MonthName(month)
+                    </button>
+                </div>
 
-                @* Weekday label strip — single-letter labels keep the mini-month narrow. *@
+                @* Weekday label strip — single-letter labels keep the mini-month narrow.
+                   The columnheaders are NOT aria-hidden: a role="row" must own at least one
+                   visible required child, so hiding them left the row empty in the
+                   accessibility tree (axe aria-required-children, NFR-06). Each day cell
+                   still announces its full weekday via its own aria-label. *@
                 <div class="calee-scheduler-year-weekday-row" role="row">
                     @foreach (var label in WeekdayLabels())
                     {
                         <div class="calee-scheduler-year-weekday"
-                             role="columnheader"
-                             aria-hidden="true">
+                             role="columnheader">
                             @label
                         </div>
                     }

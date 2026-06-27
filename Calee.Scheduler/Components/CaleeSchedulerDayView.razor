@@ -254,22 +254,31 @@
                 </div>
             }
 
-            @* Overlap-overflow blocks — "+N" chips for events that exceed the column cap. *@
-            @foreach (var block in OverlapBlocks)
+            @* Overlap-overflow blocks — "+N" chips for events that exceed the column cap.
+               Wrapped in a single role="row" (rendered only when non-empty) so every
+               role="gridcell" has a row parent and the role="grid" ancestor never owns a
+               gridcell directly — satisfies axe aria-required-children /
+               aria-required-parent (NFR-06). *@
+            @if (OverlapBlocks.Count > 0)
             {
-                var blockWidth = 100.0 / Math.Max(1, block.StackCount);
-                var blockLeft = blockWidth * block.StackIndex;
-                var blockStyle = $"top: {block.TimeStartPercent:F4}%; height: {block.TimeSpanPercent:F4}%; left: {blockLeft:F4}%; width: {blockWidth:F4}%;";
-                <div role="gridcell" class="calee-scheduler-event-cell" @key="@($"overflow:{block.RegionStart.Ticks}")">
-                    <button type="button"
-                            class="calee-scheduler-overlap-block"
-                            style="@blockStyle"
-                            data-calee-region="overflow-chip"
-                            aria-label="@OverlapBlockAccessibleName(block)"
-                            @onclick="@(() => HandleOverlapChipClickAsync(block))"
-                            @onclick:stopPropagation="true">
-                        +@block.Events.Count
-                    </button>
+                <div role="row" class="calee-scheduler-events-row">
+                    @foreach (var block in OverlapBlocks)
+                    {
+                        var blockWidth = 100.0 / Math.Max(1, block.StackCount);
+                        var blockLeft = blockWidth * block.StackIndex;
+                        var blockStyle = $"top: {block.TimeStartPercent:F4}%; height: {block.TimeSpanPercent:F4}%; left: {blockLeft:F4}%; width: {blockWidth:F4}%;";
+                        <div role="gridcell" class="calee-scheduler-event-cell" @key="@($"overflow:{block.RegionStart.Ticks}")">
+                            <button type="button"
+                                    class="calee-scheduler-overlap-block"
+                                    style="@blockStyle"
+                                    data-calee-region="overflow-chip"
+                                    aria-label="@OverlapBlockAccessibleName(block)"
+                                    @onclick="@(() => HandleOverlapChipClickAsync(block))"
+                                    @onclick:stopPropagation="true">
+                                +@block.Events.Count
+                            </button>
+                        </div>
+                    }
                 </div>
             }
 

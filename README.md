@@ -2,6 +2,8 @@
 
 A Blazor scheduling component suite for internal .NET applications — Day, Week, Month, Year, Agenda, and Timeline views.
 
+**▶ [Live demo](https://dannydel.github.io/calee-scheduler/)** — the demo app built as Blazor WebAssembly and deployed to GitHub Pages on every push to `main`.
+
 - Generic-typed components (`<CaleeScheduler TEvent="MyEvent" ... />`); ships a default `CalendarEvent` record for consumers who do not need a custom type.
 - Standalone views or a composed root scheduler with a shared toolbar and view switcher.
 - Sweep-line overlap layout with lane reuse; events render correctly without consumer geometry math.

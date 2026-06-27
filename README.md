@@ -10,9 +10,9 @@ A Blazor scheduling component suite for internal .NET applications — Day, Week
 - WCAG 2.1 AA-oriented default markup: structural ARIA, roving tabindex, screen-reader-checked, contrast-verified default theme.
 - CSS isolation with documented theming levers: `--calee-scheduler-*` custom properties, attribute splatting, named class hooks, and `::deep` via `data-calee-region` attributes.
 - No transitive runtime dependencies beyond `Microsoft.AspNetCore.Components.*`.
-- Source-stable public API across all 1.x releases (NFR-07).
+- Source-stable public API across all 1.x releases.
 
-**Current state:** Phase 1 read-only rendering is complete, and the Phase 2 interaction/power-user surface is implemented in the library. The former Phase 1 "Resource" view is now "Timeline" (`IResource` → `ILane`, `CaleeSchedulerResourceView` → `CaleeSchedulerTimelineView`) per [ADR-0011](docs/adr/0011-lane-abstraction-supersedes-resource.md). The demo app includes one possible consumer-owned editor, action popover, command palette, shortcut help dialog, and undo stack; those are intentionally not part of the RCL.
+**Current state:** Phase 1 read-only rendering is complete, and the Phase 2 interaction/power-user surface is implemented in the library. The former Phase 1 "Resource" view is now "Timeline" (`IResource` → `ILane`, `CaleeSchedulerResourceView` → `CaleeSchedulerTimelineView`). The demo app includes one possible consumer-owned editor, action popover, command palette, shortcut help dialog, and undo stack; those are intentionally not part of the RCL.
 
 ---
 
@@ -71,7 +71,7 @@ Add `@using Calee.Scheduler.Components` and `@using Calee.Scheduler.Contracts` t
 
 ### 2.1 NuGet feed
 
-Calee.Scheduler publishes to **nuget.org** (the public registry — not Tyler Tech's Artifactory). Just add the package:
+Calee.Scheduler publishes to **nuget.org** (the public registry). Just add the package:
 
 ```bash
 dotnet add package Calee.Scheduler
@@ -81,13 +81,11 @@ No internal feed setup required.
 
 ### 2.2 CSS
 
-All component styles ship via Blazor CSS isolation (FR-52). The component bundle is wired up automatically by the host app's framework reference — make sure the standard isolated-CSS link is present in `App.razor` (it is by default in a new `dotnet new blazor` project):
+All component styles ship via Blazor CSS isolation. The component bundle is wired up automatically by the host app's framework reference — make sure the standard isolated-CSS link is present in `App.razor` (it is by default in a new `dotnet new blazor` project):
 
 ```html
 <link rel="stylesheet" href="@Assets["YourApp.styles.css"]" />
 ```
-
-There is no separate `calee-scheduler.css` to register — the library's styles are bundled into the consumer's isolated stylesheet automatically.
 
 ### 2.3 Imports
 
@@ -118,9 +116,7 @@ builder.Services.AddCaleeScheduler(options =>
 
 Every property has a sane default; `AddCaleeScheduler()` with no arguments is valid. Contract violations (`StartHour > EndHour`, slot duration not in `{15, 30, 60}`, `MaxEventsPerDay < 1`, etc.) surface as `OptionsValidationException` on the first `IOptions<CaleeSchedulerOptions>.Value` access.
 
-`TimeZone` is intentionally **not** an option (PRD §4.3, ADR-0001). It is a required per-component parameter on every view. Picking it once at registration time would let "today" highlights and slot offsets silently disagree page-by-page when developer-machine local time differs from production server time.
-
-See PRD §4.3 for the full options surface.
+`TimeZone` is intentionally **not** an option. It is a required per-component parameter on every view. Picking it once at registration time would let "today" highlights and slot offsets silently disagree page-by-page when developer-machine local time differs from production server time.
 
 ---
 
@@ -130,7 +126,7 @@ All six views are usable standalone or composed under `CaleeScheduler`. The comp
 
 ### 4.1 Day
 
-A single day with hour slots, all-day row, current-time indicator, and per-day "+N earlier" / "+N later" overflow chips for events outside the visible hour range. (FR-01, FR-05, FR-06, FR-07, FR-19a)
+A single day with hour slots, all-day row, current-time indicator, and per-day "+N earlier" / "+N later" overflow chips for events outside the visible hour range.
 
 Minimal:
 
@@ -161,7 +157,7 @@ With typical parameters:
 
 ### 4.2 Week
 
-Seven consecutive days with hour slots, a configurable first-day-of-week (default Sunday), the same overflow + clipping semantics as Day. Multi-day all-day events render as continuous bars across the all-day row; multi-day timed events render as per-day chunks with arrow indicators on the cut edge. (FR-02, FR-04, FR-15)
+Seven consecutive days with hour slots, a configurable first-day-of-week (default Sunday), the same overflow + clipping semantics as Day. Multi-day all-day events render as continuous bars across the all-day row; multi-day timed events render as per-day chunks with arrow indicators on the cut edge.
 
 Minimal:
 
@@ -197,7 +193,7 @@ With typical parameters:
 
 ### 4.3 Month
 
-A six-week (42-cell) grid anchored at `FirstDayOfWeek`. Each cell shows up to `MaxEventsPerDay` chips; overflow surfaces as a "+N more" chip that fires `OnDayOverflowClicked(... OverflowKind.Month ...)`. Multi-day all-day events always render in full as continuous bars across the cells they span (the "+N more" budget shrinks accordingly). (FR-03, FR-18)
+A six-week (42-cell) grid anchored at `FirstDayOfWeek`. Each cell shows up to `MaxEventsPerDay` chips; overflow surfaces as a "+N more" chip that fires `OnDayOverflowClicked(... OverflowKind.Month ...)`. Multi-day all-day events always render in full as continuous bars across the cells they span (the "+N more" budget shrinks accordingly).
 
 Minimal:
 
@@ -227,7 +223,7 @@ With typical parameters:
 }
 ```
 
-Note: Month uses `EventChipTemplate`, not `EventTemplate` (chips are visually distinct from time-grid event blocks — see §6 and ADR-0002).
+Note: Month uses `EventChipTemplate`, not `EventTemplate` (chips are visually distinct from time-grid event blocks).
 
 ### 4.4 Year
 
@@ -281,7 +277,7 @@ With typical parameters:
 
 ### 4.6 Timeline view
 
-Rows = lanes, X-axis = time. Three selectable horizontal time scales: `Day` (hours), `Week` (weekday + date columns), `Month` (day-of-month columns). Events whose `LaneKey` returns `null` (or an Id not in `Lanes`) land in the trailing "Unassigned" row, hideable via `ShowUnassignedRow=false`. All-day events render as a thin banner strip on the lane's row label, never as a full-width band in the time grid. (FR-09c, FR-09d, FR-09e, ADR-0011 — supersedes ADR-0008)
+Rows = lanes, X-axis = time. Three selectable horizontal time scales: `Day` (hours), `Week` (weekday + date columns), `Month` (day-of-month columns). Events whose `LaneKey` returns `null` (or an Id not in `Lanes`) land in the trailing "Unassigned" row, hideable via `ShowUnassignedRow=false`. All-day events render as a thin banner strip on the lane's row label, never as a full-width band in the time grid.
 
 Minimal (TimeScale=Day):
 
@@ -330,7 +326,7 @@ Minimal (TimeScale=Day):
                             TimeScale="TimelineScale.Month" />
 ```
 
-The Timeline view is also reachable through `CaleeScheduler` itself — wiring both `Lanes` and `LaneKey` on the root makes the toolbar's view switcher surface the sixth "Timeline" entry. See §8 for the binding contract.
+The Timeline view is also reachable through `CaleeScheduler` itself — wiring both `Lanes` and `LaneKey` on the root makes the toolbar's view switcher surface the sixth "Timeline" entry.
 
 ---
 
@@ -342,7 +338,9 @@ The single most-asked question. Read this before shipping.
 
 The library has to know what day "today" is, where day boundaries fall, and what offset to stamp onto the `SchedulerSlot` it emits when a consumer clicks an empty cell. There is no universal right answer — desktop apps want browser-local, multi-tenant SaaS wants the user's profile zone, ops dashboards want the data-center zone.
 
-Rather than guess, every view requires an explicit `TimeZoneInfo TimeZone` parameter. Passing `null` is a hard fail (`ArgumentNullException`). There is intentionally no service-level `DefaultTimeZone` (PRD §4.3, ADR-0001) — silently inheriting a wrong default is worse than failing loudly at the call site.
+Rather than guess, every view requires an explicit `TimeZoneInfo TimeZone` parameter. Passing `null` is a hard fail (`ArgumentNullException`). There is intentionally no service-level `DefaultTimeZone` silently inheriting a wrong default is worse than failing loudly at the call site.
+
+There is a roadmap item to make this easier and or remove it entirely since it can be quite tedious to have to define this over and over again.
 
 ### 5.2 What the library does and doesn't do
 
@@ -350,13 +348,13 @@ The library **never converts** `ICalendarEvent.Start` / `ICalendarEvent.End`. Th
 
 The library uses `TimeZone` to:
 
-- Compute "today" (for FR-07's current-time indicator and the today-column highlight).
+- Compute "today".
 - Compute day boundaries (so a `Date` parameter resolves to a 24-hour span in the right zone).
-- Stamp the offset on `SchedulerSlot.Start` / `SchedulerSlot.End` when the consumer clicks an empty cell (FR-21).
+- Stamp the offset on `SchedulerSlot.Start` / `SchedulerSlot.End` when the consumer clicks an empty cell.
 
 That's it. No event mutation, no implicit `ConvertTime`, no time-of-day arithmetic on the event values themselves.
 
-### 5.3 The footgun: mixed offsets
+### 5.3 Problems that were faced: mixed offsets
 
 Because events render at their own offsets, a list that mixes offsets visually surprises:
 
@@ -367,7 +365,7 @@ new CalendarEvent("b", "PST event", new(2026, 5, 19, 9, 0, 0, TimeSpan.FromHours
 
 Both events claim 9 AM but on an `America/New_York` grid the PST event lands at noon. Sometimes that's exactly what you want (a fleet that spans time zones). More often it's a bug — the consumer wanted "the local 9 AM in each driver's zone" rendered side by side, not literal wall-clock times.
 
-**Recommendation: normalize events to the grid zone before passing them in.** A simple helper:
+**Recommendation: normalize events to the grid zone before passing them in.** Here is a simple helper example:
 
 ```csharp
 private IReadOnlyList<CalendarEvent> NormalizeToGrid(
@@ -538,7 +536,7 @@ The default theme is WCAG 2.1 AA contrast-verified — regression tests in `Cale
 
 ### 8.2 Attribute splatting
 
-Every public component captures unmatched attributes and splats them onto its outermost element (FR-53):
+Every public component captures unmatched attributes and splats them onto its outermost element:
 
 ```razor
 <CaleeScheduler TEvent="CalendarEvent"
@@ -619,7 +617,7 @@ A consumer that wants a darker theme, a custom test hook, a class on the toolbar
 
 ## 9. Accessibility
 
-The library ships WCAG 2.1 AA-oriented default markup and a contrast-verified default theme (NFR-06, ADR-0009).
+The library ships WCAG 2.1 AA-oriented default markup and a contrast-verified default theme.
 
 ### 9.1 What's verified automatically
 
@@ -662,59 +660,21 @@ The toolbar's view switcher is a `radiogroup`; arrow Left/Right moves the active
 
 Inside each grid (hour grid, month grid, timeline grid), exactly one cell carries `tabindex="0"` at a time; every other cell carries `tabindex="-1"`. Arrow keys move the "0" between cells, keeping the grid a single tab stop from the consumer's perspective while making every cell directly reachable from the keyboard. The contract is asserted by `RovingTabindexTests.cs` for every view.
 
----
+--
 
-## 10. Phasing and limitations
+### 10. What the library will never own
 
-| Phase                | Scope                                                                                                                  |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **Phase 1**          | Read-only Day, Week, Month, Resource/Timeline foundation. Full ARIA. WCAG 2.1 AA. CSS isolation. Generic-only API. Shipped. |
-| **Phase 2** (current code) | Atomic `IResource` → `ILane` / `ResourceView` → `TimelineView` rename ([ADR-0011](docs/adr/0011-lane-abstraction-supersedes-resource.md)); drag-to-move/resize/create (FR-24–FR-29), double-click-to-create (FR-32), delete (FR-33), multi-select + batch delete (FR-34), undo/redo triggers (FR-35), shortcut map/remapping (FR-36), command-palette triggers + commands API (FR-37), Year (FR-38), Agenda (FR-39), and Timeline views. All optimistic-with-cancel where a rendered position is pinned (ADR-0006). |
-| **Phase 3** (provisional) | Locale-aware date/time formatting. Virtualization for dense month views. Mini-calendar picker. Overflow popover for "+N more". Driven by Phase 1/2 consumer demand. |
-
-### What the library will never own
-
-**No built-in dialogs, drawers, or confirmation UI** (ADR-0010). The library is pure UI for visualization + interaction events. Phase 2 CRUD callbacks (`OnEventCreated`, `OnEventMoved`, `OnEventResized`, `OnEventDeleted`, `OnEventsDeleted`) hand the consumer a context with a mutable `Cancel` flag; the consumer renders its own confirmation, mutates its own data store, and sets `Cancel = true` if it wants the library to revert.
+**No built-in dialogs, drawers, or confirmation UI**. The library is pure UI for visualization + interaction events.CRUD callbacks (`OnEventCreated`, `OnEventMoved`, `OnEventResized`, `OnEventDeleted`, `OnEventsDeleted`) hand the consumer a context with a mutable `Cancel` flag; the consumer renders its own confirmation, mutates its own data store, and sets `Cancel = true` if it wants the library to revert.
 
 The demo app's `EventEditorDialog`, `EventActionPopover`, `CommandPaletteDialog`, `ShortcutHelpDialog`, and `SimpleUndoStack` are examples of consumer-owned wiring. They deliberately live under `Calee.Scheduler.Demo`, not in the RCL.
 
-**No recurrence expansion.** Consumers pass concrete event instances. RRULE expansion is the consumer's job.
+**No recurrence expansion.** Consumers pass concrete event instances.
 
-**No data fetching, persistence, auth, sync, or notifications.** None of them. See PRD §1.3.
-
----
-
-## 11. Architecture pointers
-
-The library is small, but every constraint has a recorded reason. Three documents carry the design:
-
-- **[`prd.md`](prd.md)** — Full requirements (FR / NFR IDs cross-referenced from XML doc comments and this README).
-- **[`CONTEXT.md`](CONTEXT.md)** — Domain glossary. Every term has one canonical definition.
-- **[`docs/adr/`](docs/adr/)** — Architectural decisions, one file each:
-
-| ADR  | Title                                                                                  |
-| ---- | -------------------------------------------------------------------------------------- |
-| 0001 | Grid uses consumer-supplied time zone (not browser, not server, not UTC).              |
-| 0002 | `EventTemplate` fills a library-positioned box (not the whole positioned element).     |
-| 0003 | Sweep-line overlap layout with lane reuse (A/B/C → 2 lanes, not 3).                    |
-| 0004 | Generic-only API; no non-generic sugar wrapper.                                        |
-| 0005 | Four consumer styling mechanisms (variables, splat, named hooks, `data-calee-region`). |
-| 0006 | Drag lifecycle is optimistic-with-cancel.                                              |
-| 0007 | Consumer-app integration is a quality signal, not a phase gate.                        |
-| 0008 | Resource view as a first-class view; `ICalendarEvent` is not widened. (Superseded by ADR-0011.) |
-| 0009 | WCAG 2.1 AA in Phase 1 (not deferred to Phase 2).                                      |
-| 0010 | No built-in dialogs, drawers, or confirmation UI.                                      |
-| 0011 | Lane abstraction supersedes Resource; engine overlap concept renamed to Stack.         |
-| 0012 | Undo/redo: library emits triggers, consumer owns the stack.                            |
-| 0013 | Opinionated keyboard shortcut map + remap surface.                                     |
-| 0014 | Command palette: library exposes triggers + Commands API; consumer renders.            |
-| 0015 | Drag pointer-events fires C# callbacks at drop only (no mid-drag SignalR traffic).     |
-
-If you find yourself fighting the library, one of those documents probably explains why.
+**No data fetching, persistence, auth, sync, or notifications.** None of them.
 
 ---
 
-## 12. Building from source
+## 11. Building from source
 
 ```bash
 git clone <repo-url>
@@ -744,7 +704,7 @@ Seven demo routes are wired:
 
 The demo is the canonical reference for the seed-data shape that exercises every visual rule.
 
-### 12.1 Continuous integration
+### 12 Continuous integration
 
 Three GitHub Actions workflows live under `.github/workflows/`:
 

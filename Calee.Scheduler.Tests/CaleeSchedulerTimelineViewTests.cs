@@ -2000,7 +2000,7 @@ public class CaleeSchedulerTimelineViewTests
     {
         DayOverflowContext<CalendarEvent>? captured = null;
         var day = Anchor;
-        ICalendarEvent Mk(string id) => new CalendarEvent(id, id, day.Date.AddHours(9), day.Date.AddHours(10));
+        ICalendarEvent Mk(string id) => new CalendarEvent(id, id, day.AddHours(9), day.AddHours(10));
         var evs = new[] { (CalendarEvent)Mk("a"), (CalendarEvent)Mk("b"), (CalendarEvent)Mk("c"), (CalendarEvent)Mk("d") };
         var lanes = new ILane[] { LaneOf("L1", "Lane 1") };
 

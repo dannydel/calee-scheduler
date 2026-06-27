@@ -1318,10 +1318,10 @@ public class CaleeSchedulerDayViewTests
         var day = Anchor;
         var evs = new[]
         {
-            new CalendarEvent("a", "A", day.Date.AddHours(9), day.Date.AddHours(10)),
-            new CalendarEvent("b", "B", day.Date.AddHours(9), day.Date.AddHours(10)),
-            new CalendarEvent("c", "C", day.Date.AddHours(9), day.Date.AddHours(10)),
-            new CalendarEvent("d", "D", day.Date.AddHours(9), day.Date.AddHours(10)),
+            new CalendarEvent("a", "A", day.AddHours(9), day.AddHours(10)),
+            new CalendarEvent("b", "B", day.AddHours(9), day.AddHours(10)),
+            new CalendarEvent("c", "C", day.AddHours(9), day.AddHours(10)),
+            new CalendarEvent("d", "D", day.AddHours(9), day.AddHours(10)),
         };
 
         using var ctx = NewContext();

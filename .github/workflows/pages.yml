@@ -1,0 +1,97 @@
+# Calee.Scheduler — live demo deploy to GitHub Pages.
+#
+# Publishes the Blazor WebAssembly demo as a static site to GitHub Pages on
+# every push to main (and on manual dispatch). The demo is a standalone WASM
+# app, so the published wwwroot is fully static — no .NET server is needed to
+# host it, which is exactly what Pages serves.
+#
+# One-time repo setup (Settings -> Pages -> Build and deployment):
+#   Source: "GitHub Actions". The "Setup Pages" step below also enables this
+#   automatically the first time it runs with the permissions granted here.
+#
+# Live demo URL once deployed:  https://<owner>.github.io/<repo>/
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GITHUB_TOKEN needs pages:write to deploy and id-token:write for the OIDC
+# verification deploy-pages performs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Serialize deployments; never cancel an in-flight deploy mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build WASM demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Publish demo (Release)
+        run: >
+          dotnet publish Calee.Scheduler.Demo/Calee.Scheduler.Demo.csproj
+          --configuration Release
+          --output publish
+
+      - name: Rewrite base href for the project-Pages sub-path
+        # Project Pages serve at https://<owner>.github.io/<repo>/, so the app's
+        # <base href> must point at "/<repo>/" rather than "/". Local dev keeps
+        # "/" in index.html; this rewrite only happens at deploy time.
+        run: |
+          sed -i 's|<base href="/" />|<base href="/${{ github.event.repository.name }}/" />|' publish/wwwroot/index.html
+          grep '<base href' publish/wwwroot/index.html
+
+      - name: SPA fallback (404 -> index)
+        # Pages serves 404.html for unknown paths. Pointing it at index.html lets
+        # the Blazor client-side router handle deep links and hard refreshes on
+        # routes like /week or /agenda.
+        run: cp publish/wwwroot/index.html publish/wwwroot/404.html
+
+      - name: Disable Jekyll
+        # Pages runs Jekyll by default, which drops files/dirs beginning with "_"
+        # (e.g. _framework). .nojekyll serves the published wwwroot verbatim.
+        run: touch publish/wwwroot/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish/wwwroot
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

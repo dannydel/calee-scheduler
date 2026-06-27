@@ -45,10 +45,12 @@ public partial class EventActionPopover : ComponentBase, IAsyncDisposable
     [Parameter] public EventCallback OnDismissed { get; set; }
 
     /// <summary>JS module path — kept here as a constant so the wwwroot/js layout
-    /// is documented in exactly one place. The path is relative to the demo's
-    /// served root (Calee.Scheduler.Demo/wwwroot/), not the library's
-    /// _content folder (this script lives in the demo, not the library).</summary>
-    private const string JsModulePath = "/js/event-popover.js";
+    /// is documented in exactly one place. The path is relative to the app's
+    /// <c>&lt;base href&gt;</c> (Calee.Scheduler.Demo/wwwroot/), not the library's
+    /// _content folder (this script lives in the demo, not the library). The
+    /// leading "./" keeps it working when the app is served from a sub-path
+    /// (e.g. GitHub Pages at /calee-scheduler/) rather than the domain root.</summary>
+    private const string JsModulePath = "./js/event-popover.js";
 
     /// <summary>Default to a position that reads "centered-ish" before the first
     /// anchor measurement comes back from JS — keeps the popover visible even

@@ -1,12 +1,15 @@
 using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Demo.Components;
 using Calee.Scheduler.Extensions;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
-// Add services to the container.
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+// Standalone Blazor WebAssembly host. The HTML shell lives in wwwroot/index.html;
+// App is the router root and HeadOutlet renders <PageTitle> into <head>.
+builder.RootComponents.Add<App>("#app");
+builder.RootComponents.Add<HeadOutlet>("head::after");
 
 // Register Calee.Scheduler with demo-friendly defaults. The Week view leads because
 // it is the most informative view to land on; 7 AM–9 PM accommodates the early-morning
@@ -21,22 +24,4 @@ builder.Services.AddCaleeScheduler(options =>
     options.DefaultMaxEventsPerDay = 3;
 });
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
-}
-
-app.UseHttpsRedirection();
-
-app.UseStaticFiles();
-app.UseAntiforgery();
-
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
-app.Run();
+await builder.Build().RunAsync();

@@ -94,6 +94,14 @@
     gap: 0.375rem;
 }
 
+/* Header row wrapper (role="row"). A flex column so its single child — the month
+   header button — stretches to full width exactly as it did before it gained a
+   wrapping row, keeping the hover/focus background full-bleed. */
+.calee-scheduler-year-month-header-row {
+    display: flex;
+    flex-direction: column;
+}
+
 .calee-scheduler-year-month-header {
     background: transparent;
     border: none;
@@ -171,7 +179,9 @@
 }
 
 .calee-scheduler-year-cell--muted {
-    color: #a1a1aa;
+    /* zinc-500 — 4.84:1 on the #ffffff cell background, clearing WCAG 2.1 AA 1.4.3
+       for the out-of-month day numbers. The previous #a1a1aa was only 2.56:1. */
+    color: #71717a;
     cursor: default;
 }
 

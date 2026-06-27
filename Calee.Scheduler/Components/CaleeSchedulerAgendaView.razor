@@ -34,11 +34,13 @@
      data-calee-region="agenda"
      @attributes="AdditionalAttributes">
 
-    @* The scrollable list container. role="list" makes the descendant rows a
-       list to assistive tech; the sticky-header CSS depends on this wrapper
-       being the scroll container (overflow: auto + max-height in CSS). *@
+    @* The scrollable container. It is a role="group" (not role="list") because it
+       holds date-group headers (role="heading") interleaved with the event lists —
+       a list may only own listitems, so the per-group rows get their own role="list"
+       below instead (NFR-06). The sticky-header CSS depends on this wrapper being the
+       scroll container (overflow: auto + max-height in CSS). *@
     <div class="calee-scheduler-agenda-list"
-         role="list"
+         role="group"
          data-calee-region="agenda-list"
          aria-label="Agenda">
 
@@ -90,7 +92,12 @@
                         @FormatGroupHeader(group)
                     </button>
 
-                    @* Rows under this group's header. *@
+                    @* Rows under this group's header, wrapped in their own role="list" so the
+                       role="listitem" rows have a list parent while the date-group header
+                       (role="heading") stays outside any list (axe aria-required-children,
+                       NFR-06). Empty days are hidden, so this group always has >= 1 row and
+                       the list is never empty. *@
+                    <div role="list" class="calee-scheduler-agenda-group-rows">
                     @for (var r = 0; r < group.Rows.Length; r++)
                     {
                         var row = group.Rows[r];
@@ -157,6 +164,7 @@
                             }
                         </button>
                     }
+                    </div>
                 </div>
             }
         }

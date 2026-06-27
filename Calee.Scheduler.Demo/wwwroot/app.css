@@ -31,6 +31,17 @@ main {
     animation: calee-demo-fade-in 250ms ease-out both;
 }
 
+/* Respect prefers-reduced-motion: skip the entrance fade entirely. This also
+   keeps the automated accessibility audit deterministic — the audit emulates
+   reduced motion, so text is never sampled mid-fade at reduced opacity (a
+   partially-transparent foreground blends toward the background and would fail
+   the WCAG 1.4.3 contrast checks even though the settled colors pass). */
+@media (prefers-reduced-motion: reduce) {
+    main {
+        animation: none;
+    }
+}
+
 /* Subtle dotted texture on the sidebar surface. Whisper-faint — easy to miss,
    but you'd notice if it were gone. */
 .calee-sidebar-texture {

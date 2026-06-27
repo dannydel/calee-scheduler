@@ -54,7 +54,11 @@ async function auditOnce() {
     await probeServer();
 
     const browser = await chromium.launch();
-    const context = await browser.newContext();
+    // Emulate prefers-reduced-motion so the demo's entrance fade is skipped. axe
+    // must sample text at its final opacity — a foreground caught mid-fade is
+    // partially transparent, blends toward the background, and fails contrast
+    // checks even when the settled colors pass (NFR-06).
+    const context = await browser.newContext({ reducedMotion: 'reduce' });
     const page = await context.newPage();
 
     const results = [];

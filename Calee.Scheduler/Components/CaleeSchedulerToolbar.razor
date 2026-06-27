@@ -1,0 +1,111 @@
+@*
+    CaleeSchedulerToolbar — implements FR-40, FR-41, FR-42 (enabling), FR-53, FR-54, FR-55.
+
+    Rendering layout: three regions (left/center/right).
+      Left   = Today + Prev + Next navigation buttons
+      Center = aria-live="polite" range label (FR-41)
+      Right  = view switcher (radiogroup of Day/Week/Month/Year/Agenda, with Timeline
+               appended when the parent root scheduler is wired with lane parameters per FR-09c)
+
+    ARIA pattern choice — view switcher uses role="radiogroup" with aria-checked on each
+    button. This is the recommended pattern for "pick exactly one of N" view-mode UI
+    (https://www.w3.org/WAI/ARIA/apg/patterns/radio/). A native <input type="radio">
+    set was rejected because it conflicts with click/keyboard styling expectations on
+    button-shaped controls, and tablist/tab semantics imply a tabpanel association that
+    the toolbar does not own (the active view is composed externally by the root
+    scheduler in Task 11). aria-checked rather than aria-pressed because exactly one
+    button must be "on" at all times.
+
+    The view-switcher button order is Day / Week / Month / Year / Agenda / Timeline
+    (when wired). The Timeline button label reads "Timeline" per ADR-0011.
+
+    Mode resolution — the toolbar runs in two modes:
+      cascaded   = [CascadingParameter] SchedulerStateContainer State is non-null. The
+                   root scheduler owns date/view state; the toolbar reads State.* and
+                   calls State.Request*Change(...). Direct parameters are ignored.
+      standalone = State is null. The toolbar honors its direct parameters and fires
+                   DateChanged/ViewChanged callbacks.
+*@
+
+@{
+    // Resolve the effective values from either the cascaded container or direct params.
+    var effectiveView = State?.CurrentView ?? View;
+    var effectiveDate = State?.CurrentDate ?? Date;
+    var effectiveTz = State?.TimeZone ?? TimeZone;
+    var effectiveFirstDay = State?.FirstDayOfWeek ?? FirstDayOfWeek;
+    var effectiveAvailableViews = State?.AvailableViews
+        ?? AvailableViews
+        ?? DefaultAvailableViews;
+    var effectiveScale = State?.TimelineScale ?? TimelineScale;
+    var effectiveAgendaDays = State?.AgendaDays ?? AgendaDays;
+
+    var rangeLabel = SchedulerViewPrimitives.FormatRangeLabel(
+        effectiveView, effectiveDate, effectiveTz, effectiveFirstDay, effectiveScale,
+        effectiveAgendaDays);
+
+    var toolbarClasses = "calee-scheduler-toolbar"
+        + (string.IsNullOrEmpty(ToolbarClass) ? string.Empty : " " + ToolbarClass);
+}
+
+<div role="toolbar"
+     data-calee-region="toolbar"
+     class="@toolbarClasses"
+     @attributes="AdditionalAttributes">
+
+    @* Left region: Today + Prev + Next *@
+    <div class="calee-scheduler-toolbar-left">
+        <button type="button"
+                class="calee-scheduler-toolbar-button"
+                data-calee-region="toolbar-today"
+                role="button"
+                aria-label="Today"
+                @onclick="HandleTodayClickAsync">
+            Today
+        </button>
+        <button type="button"
+                class="calee-scheduler-toolbar-button calee-scheduler-toolbar-button--chevron"
+                data-calee-region="toolbar-prev"
+                role="button"
+                aria-label="@PrevAriaLabel(effectiveView, effectiveScale)"
+                @onclick="HandlePrevClickAsync">
+            &lsaquo;
+        </button>
+        <button type="button"
+                class="calee-scheduler-toolbar-button calee-scheduler-toolbar-button--chevron"
+                data-calee-region="toolbar-next"
+                role="button"
+                aria-label="@NextAriaLabel(effectiveView, effectiveScale)"
+                @onclick="HandleNextClickAsync">
+            &rsaquo;
+        </button>
+    </div>
+
+    @* Center region: range label *@
+    <div class="calee-scheduler-toolbar-label">
+        <span aria-live="polite" data-calee-region="range-label">@rangeLabel</span>
+    </div>
+
+    @* Right region: view switcher (radiogroup) *@
+    <div class="calee-scheduler-toolbar-view-switcher"
+         data-calee-region="view-switcher"
+         role="radiogroup"
+         aria-label="View">
+        @foreach (var view in effectiveAvailableViews)
+        {
+            var capturedView = view;
+            var isActive = capturedView == effectiveView;
+            var buttonClasses = "calee-scheduler-toolbar-view-button"
+                + (isActive ? " calee-scheduler-toolbar-view-button--active" : string.Empty);
+
+            <button type="button"
+                    class="@buttonClasses"
+                    role="radio"
+                    aria-checked="@(isActive ? "true" : "false")"
+                    data-calee-region="toolbar-view-button"
+                    data-calee-view="@capturedView"
+                    @onclick="@(() => HandleViewChangeAsync(capturedView))">
+                @ViewLabel(capturedView)
+            </button>
+        }
+    </div>
+</div>

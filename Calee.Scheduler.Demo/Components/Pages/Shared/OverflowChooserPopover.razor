@@ -1,0 +1,62 @@
+@*
+    Demo-only chooser popover for the "+N" overlap block (ADR-0010 — the library ships no
+    popovers). Lists the hidden events; selecting one raises OnEventSelected so the host can
+    open the existing single-event EventActionPopover. Anchoring/dismiss/keyboard mechanics
+    are copied from EventActionPopover (see its .razor.cs).
+*@
+
+@using Calee.Scheduler.Contracts
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible && Events is not null && Events.Count > 0)
+{
+    <div class="fixed inset-0 z-40" role="presentation" @onclick="HandleBackdropClickAsync"></div>
+
+    <div @ref="_popoverRef"
+         class="calee-demo-event-popover fixed z-50 bg-surface rounded-lg shadow-2xl border border-line"
+         style="@PopoverInlineStyle"
+         role="dialog"
+         aria-modal="false"
+         aria-label="@($"{Events.Count} overlapping events")"
+         @onclick:stopPropagation="true"
+         @onkeydown="HandleKeyDownAsync">
+
+        <div class="calee-demo-event-popover-header flex items-start gap-3 px-4 pt-4 pb-2">
+            <div class="flex-1 min-w-0">
+                <div class="font-display text-lg text-ink leading-tight">@Events.Count overlapping events</div>
+            </div>
+            <button type="button"
+                    @ref="_closeButtonRef"
+                    class="calee-demo-event-popover-close ml-1 -mt-1 -mr-1 p-1 rounded text-ink-muted hover:text-ink hover:bg-line/40 transition-colors"
+                    aria-label="Close"
+                    @onclick="HandleDismissAsync">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <ul class="calee-demo-overflow-list px-2 pb-3 pt-1 max-h-72 overflow-y-auto" role="list">
+            @foreach (var ev in SortedEvents)
+            {
+                <li>
+                    <button type="button"
+                            class="calee-demo-overflow-row w-full flex items-center gap-2 px-2 py-2 rounded-md text-left hover:bg-line/40 transition-colors"
+                            @onclick="@(() => HandleSelectAsync(ev))">
+                        @if (!string.IsNullOrEmpty(ev.Color))
+                        {
+                            <span class="calee-demo-event-popover-swatch" style="@($"background-color: {ev.Color};")" aria-hidden="true"></span>
+                        }
+                        <span class="flex-1 min-w-0">
+                            <span class="block font-sans text-sm text-ink truncate">@(string.IsNullOrWhiteSpace(ev.Title) ? "Untitled event" : ev.Title)</span>
+                            <span class="block font-sans text-xs text-ink-muted">@FormatTimeRange(ev)</span>
+                        </span>
+                    </button>
+                </li>
+            }
+        </ul>
+    </div>
+}

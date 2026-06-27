@@ -1,0 +1,401 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@*
+    ARIA structure note (NFR-06):
+
+    The hour grid is a 7-column-by-N-row table — the column axis is days, the row axis
+    is time slots. To make Ctrl+Alt+Arrow navigation work in screen readers the way
+    consumers expect (Right/Left move across days at the same time, Up/Down move across
+    times in the same day), we model the table with:
+
+      [role="grid"]                  the outer scroll container
+        [role="row"]                 one per slot (spans all 7 day columns)
+          [role="gridcell"] x 7      one per (col, row) intersection
+
+    Day columns themselves are NOT row containers — they're just visual stacking. Per
+    column we still render a wrapper <div> with role="presentation" so layered content
+    (events, current-time indicator, slot cells) co-exist without confusing the
+    accessibility tree. The slot cells live in a parallel positioned layer; assistive
+    tech reads them in document order via the role="row" / role="gridcell" tree.
+*@
+
+@{
+    var allDayRowClasses = "calee-scheduler-all-day-row"
+        + (string.IsNullOrEmpty(AllDayRowClass) ? string.Empty : " " + AllDayRowClass);
+
+    var timeGutterClasses = "calee-scheduler-time-gutter"
+        + (string.IsNullOrEmpty(TimeGutterClass) ? string.Empty : " " + TimeGutterClass);
+}
+
+<div class="calee-scheduler-week" @attributes="AdditionalAttributes">
+
+    @* (1) Day header row — 7 columns, FR-04 + today highlight per FR-07 visual + NFR-06.
+       The header sits outside the role="grid" hour-grid below and is not part of any
+       grid widget structurally, so we do NOT emit role="columnheader" / role="row" here
+       (axe would chain-fail those roles up to a grid ancestor that doesn't exist).
+       Each header div carries an `aria-label` with the full date so screen readers
+       announce the day correctly when navigated to. `aria-current="date"` flags today. *@
+    <div class="calee-scheduler-week-header-row">
+        @* Spacer aligning header columns with the time gutter below. *@
+        <div class="calee-scheduler-week-header-gutter" aria-hidden="true"></div>
+        @for (var i = 0; i < ColumnCount; i++)
+        {
+            var col = i;
+            var isToday = IsTodayColumn(col);
+            var headerClasses = "calee-scheduler-day-header"
+                + (isToday ? " calee-scheduler-day-header--today" : string.Empty)
+                + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
+            <div class="@headerClasses"
+                 data-calee-region="day-header"
+                 aria-label="@WeekDays[col].Start.ToString("dddd, MMMM d, yyyy")"
+                 aria-current="@(isToday ? "date" : null)">
+                <div class="calee-scheduler-day-header-weekday">@WeekDays[col].Start.ToString("ddd")</div>
+                <div class="calee-scheduler-day-header-date">@WeekDays[col].Start.Day</div>
+            </div>
+        }
+    </div>
+
+    @* (2) All-day row — one continuous bar per all-day event spanning its covered columns *@
+    <div class="@allDayRowClasses" data-calee-region="all-day">
+        <div class="calee-scheduler-week-allday-gutter" aria-hidden="true"></div>
+        <div class="calee-scheduler-week-allday-grid">
+            @* Layered column background — visual anchor for the bars positioned absolutely on top. *@
+            @for (var i = 0; i < ColumnCount; i++)
+            {
+                <div class="calee-scheduler-week-allday-cell"
+                     style="@($"left: {(i * 100.0 / ColumnCount):F4}%; width: {(100.0 / ColumnCount):F4}%;")"></div>
+            }
+            @foreach (var bar in AllDayBars)
+            {
+                var consumerEventClass = TypedForId(bar.Event.Id);
+                var consumerClass = consumerEventClass is not null ? ClassFor(consumerEventClass) : null;
+                var widthCols = bar.LastColIndex - bar.FirstColIndex + 1;
+                var leftPct = (double)bar.FirstColIndex / ColumnCount * 100.0;
+                var widthPct = (double)widthCols / ColumnCount * 100.0;
+                var styleParts = new List<string>
+                {
+                    $"left: {leftPct:F4}%",
+                    $"width: {widthPct:F4}%"
+                };
+                if (bar.Event.Color is not null)
+                {
+                    styleParts.Add($"--calee-scheduler-event-color: {bar.Event.Color}");
+                }
+                var style = string.Join("; ", styleParts) + ";";
+                var barIsSelected = IsEventSelected(bar.Event.Id);
+                var classes = "calee-scheduler-all-day-event"
+                    + (bar.ClipLeft ? " calee-scheduler-all-day-event--clip-left" : string.Empty)
+                    + (bar.ClipRight ? " calee-scheduler-all-day-event--clip-right" : string.Empty)
+                    + (barIsSelected ? " calee-scheduler-all-day-event--selected" : string.Empty)
+                    + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
+
+                <button type="button"
+                        class="@classes"
+                        style="@style"
+                        data-calee-region="event"
+                        role="button"
+                        aria-label="@AllDayAccessibleName(bar)"
+                        aria-selected="@(barIsSelected ? "true" : null)"
+                        @key="bar.Event.Id"
+                        @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(bar.Event, e)))"
+                        @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, bar.Event))"
+                        @onkeydown:preventDefault="@IsShortcutMapActive"
+                        @onkeydown:stopPropagation="@IsShortcutMapActive">
+                    @if (bar.ClipLeft)
+                    {
+                        <span class="calee-scheduler-clip-indicator" aria-hidden="true">&larr;</span>
+                    }
+                    @if (EventTemplate is not null && consumerEventClass is not null)
+                    {
+                        @EventTemplate(consumerEventClass)
+                    }
+                    else
+                    {
+                        <span class="calee-scheduler-all-day-event-title">@bar.Event.Title</span>
+                    }
+                    @if (bar.ClipRight)
+                    {
+                        <span class="calee-scheduler-clip-indicator" aria-hidden="true">&rarr;</span>
+                    }
+                </button>
+            }
+        </div>
+    </div>
+
+    @* (3) Per-day "+N earlier" chip row *@
+    @if (AnyEarlierOverflow)
+    {
+        <div class="calee-scheduler-week-overflow-row">
+            <div class="calee-scheduler-week-overflow-gutter" aria-hidden="true"></div>
+            @for (var i = 0; i < ColumnCount; i++)
+            {
+                var col = i;
+                var count = EarlierOverflowCountFor(col);
+                <div class="calee-scheduler-week-overflow-cell">
+                    @if (count > 0)
+                    {
+                        <button type="button"
+                                class="calee-scheduler-overflow-chip"
+                                data-calee-region="overflow-chip"
+                                role="button"
+                                aria-label="@OverflowChipAccessibleName(col, count, OverflowKind.Earlier)"
+                                @onclick="@(() => HandleEarlierChipClickAsync(col))">
+                            +@count earlier
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* (4) Hour grid — shared scroll container, shared gutter, 7 columns + slot rows *@
+    <div class="calee-scheduler-hour-grid-wrapper"
+         @ref="_hourGridRef"
+         role="grid"
+         aria-label="Week view hour grid"
+         tabindex="-1"
+         @onkeydown="HandleGridKeyDownAsync">
+
+        <div class="@timeGutterClasses" data-calee-region="time-gutter">
+            @foreach (var hour in HourLabels())
+            {
+                <div class="calee-scheduler-time-gutter-label" style="@($"top: {HourToPercent(hour)}%;")">
+                    @FormatHour(hour)
+                </div>
+            }
+        </div>
+
+        <div class="calee-scheduler-week-grid" data-calee-region="hour-grid">
+
+
+            @* Per-column visual background + per-day positioned events + per-day current-time indicator. *@
+            @for (var i = 0; i < ColumnCount; i++)
+            {
+                var col = i;
+                var colLeft = col * 100.0 / ColumnCount;
+                var colWidth = 100.0 / ColumnCount;
+                var colClasses = "calee-scheduler-week-column"
+                    + (IsTodayColumn(col) ? " calee-scheduler-week-column--today" : string.Empty);
+
+                <div class="@colClasses"
+                     role="presentation"
+                     style="@($"left: {colLeft:F4}%; width: {colWidth:F4}%;")">
+
+                    @* Per-column timed events (positioned via the layout engine, lane-aware).
+                       ARIA: events for the column live inside a single role="row" with one
+                       role="gridcell" per event so the role="grid" ancestor sees only
+                       role="row"/role="gridcell" descendants (NFR-06). Wrappers carry no
+                       layout; the absolutely-positioned button resolves against the
+                       column's positioning context. *@
+                    @if (PositionedEventsFor(col).Count > 0)
+                    {
+                        <div role="row" class="calee-scheduler-events-row">
+                        @foreach (var pe in PositionedEventsFor(col))
+                        {
+                            var typed = TypedFor(pe);
+                            var consumerClass = typed is not null ? ClassFor(typed) : null;
+                            var stackWidth = 100.0 / Math.Max(1, pe.StackCount);
+                            var stackLeft = stackWidth * pe.StackIndex;
+                            // Display source: when an optimistic pin is set for this event, the
+                            // pinned (Start, End) on the chunk already drive the engine's layout —
+                            // use the chunk itself (pe.Event) for the displayed time-range label
+                            // so the announced/visible times match the pinned position. Otherwise
+                            // fall back to the unwrapped consumer event for the canonical
+                            // multi-day-aware time string (consistent with the Phase 1 read-only path).
+                            ICalendarEvent displayEv = (typed is not null && GetOptimisticPin(typed.Id) is not null)
+                                ? pe.Event
+                                : UnwrapForFormatting(pe);
+                            var styleParts = new List<string>
+                            {
+                                $"top: {pe.TimeStartPercent:F4}%",
+                                $"height: {pe.TimeSpanPercent:F4}%",
+                                $"left: {stackLeft:F4}%",
+                                $"width: {stackWidth:F4}%"
+                            };
+                            if (displayEv.Color is not null)
+                            {
+                                styleParts.Add($"--calee-scheduler-event-color: {displayEv.Color}");
+                            }
+                            var style = string.Join("; ", styleParts) + ";";
+                            var clipTop = ClippedTop(pe);
+                            var clipBot = ClippedBottom(pe);
+                            var isSelected = IsEventSelected(displayEv.Id);
+                            var classes = "calee-scheduler-event"
+                                + (clipTop ? " calee-scheduler-event--clip-top" : string.Empty)
+                                + (clipBot ? " calee-scheduler-event--clip-bottom" : string.Empty)
+                                + (isSelected ? " calee-scheduler-event--selected" : string.Empty)
+                                + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
+                            var durationMinutes = (displayEv.End - displayEv.Start).TotalMinutes;
+                            var showTime = durationMinutes >= 30;
+                            var clickTarget = pe.Event; // EventChunk<TEvent> or original — handler unwraps via Id.
+                            var dragEnabled = AllowDragToMove;
+                            var resizeEnabled = AllowDragToResize;
+                            var ariaRoleDesc = EventAriaRoleDescription();
+                            var eventId = displayEv.Id;
+
+                            <div role="gridcell" class="calee-scheduler-event-cell" @key="@($"{col}:{eventId}")">
+                                <button type="button"
+                                        class="@classes"
+                                        style="@style"
+                                        data-calee-region="event"
+                                        data-calee-drag-handle="@(dragEnabled ? "move" : null)"
+                                        aria-label="@EventAccessibleName(pe, col)"
+                                        aria-roledescription="@ariaRoleDesc"
+                                        aria-selected="@(isSelected ? "true" : null)"
+                                        tabindex="0"
+                                        @ref="EventRefsByEventId[eventId]"
+                                        @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
+                                        @onclick:stopPropagation="true"
+                                        @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
+                                        @onkeydown:preventDefault="@IsShortcutMapActive"
+                                        @onkeydown:stopPropagation="@IsShortcutMapActive"
+                                        @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventPointerDownAsync(e, clickTarget)) : default)">
+                                    @if (clipTop)
+                                    {
+                                        <span class="calee-scheduler-event-clip calee-scheduler-event-clip--top" aria-hidden="true">&uarr;</span>
+                                    }
+                                    @if (EventTemplate is not null && typed is not null)
+                                    {
+                                        @EventTemplate(typed)
+                                    }
+                                    else
+                                    {
+                                        <div class="calee-scheduler-event-default">
+                                            <div class="calee-scheduler-event-title">@displayEv.Title</div>
+                                            @if (showTime)
+                                            {
+                                                <div class="calee-scheduler-event-time">@FormatEventTimeRange(displayEv)</div>
+                                            }
+                                        </div>
+                                    }
+                                    @if (clipBot)
+                                    {
+                                        <span class="calee-scheduler-event-clip calee-scheduler-event-clip--bottom" aria-hidden="true">&darr;</span>
+                                    }
+                                    @* Resize hit-zone overlay — bottom 8 px, cursor: ns-resize.
+                                       Library-owned per plan §5.1 #3; rendered only when
+                                       AllowDragToResize=true (FR-26). *@
+                                    @if (resizeEnabled)
+                                    {
+                                        <span class="calee-scheduler-event-resize-handle"
+                                              data-calee-drag-handle="resize-end"
+                                              aria-hidden="true"
+                                              @onpointerdown="@(EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventResizePointerDownAsync(e, clickTarget)))"
+                                              @onpointerdown:stopPropagation="true"></span>
+                                    }
+                                </button>
+                            </div>
+                        }
+                        </div>
+                    }
+
+                    @* Overlap-overflow blocks — "+N" chips for events that exceed the column cap. *@
+                    @foreach (var block in OverlapBlocksFor(col))
+                    {
+                        var blockWidth = 100.0 / Math.Max(1, block.StackCount);
+                        var blockLeft = blockWidth * block.StackIndex;
+                        var blockStyle = $"top: {block.TimeStartPercent:F4}%; height: {block.TimeSpanPercent:F4}%; left: {blockLeft:F4}%; width: {blockWidth:F4}%;";
+                        <div role="gridcell" class="calee-scheduler-event-cell" @key="@($"overflow:{col}:{block.RegionStart.Ticks}")">
+                            <button type="button"
+                                    class="calee-scheduler-overlap-block"
+                                    style="@blockStyle"
+                                    data-calee-region="overflow-chip"
+                                    aria-label="@OverlapBlockAccessibleName(col, block)"
+                                    @onclick="@(() => HandleOverlapChipClickAsync(col, block))"
+                                    @onclick:stopPropagation="true">
+                                +@block.Events.Count
+                            </button>
+                        </div>
+                    }
+
+                    @* Current-time indicator — only on today's column, FR-07. *@
+                    @if (ShouldRenderCurrentTimeIndicator(col))
+                    {
+                        var pct = CurrentTimeIndicatorPercent;
+                        if (pct >= 0)
+                        {
+                            <div class="calee-scheduler-current-time-indicator"
+                                 style="@($"top: {pct:F4}%;")"
+                                 title="@CurrentTimeText()"
+                                 aria-hidden="true">
+                                <div class="calee-scheduler-current-time-indicator-dot"></div>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+
+            @* Hour separator lines — drawn once across all columns at the grid level. *@
+            @foreach (var hour in HourLabels())
+            {
+                <div class="calee-scheduler-hour-line" style="@($"top: {HourToPercent(hour)}%;")"></div>
+            }
+
+            @* Slot rows — one row spanning all 7 columns, with 7 gridcells. Sits on top of
+               the column visuals so empty-slot clicks land here. The :stopPropagation on
+               events ensures event clicks don't pass through.
+               When AllowDragToCreate=true (FR-24) each cell also wires @onpointerdown to
+               start a vertical drag region; the create stays within the anchor column
+               (lane axis is locked — DeltaXPx is ignored in the drop handler). *@
+            @{
+                var createEnabled = AllowDragToCreate;
+                var slotExtraClass = createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty;
+            }
+            @for (var slotIndex = 0; slotIndex < SlotCountForRender; slotIndex++)
+            {
+                var row = slotIndex;
+                var top = (double)row / SlotCountForRender * 100.0;
+                var height = 100.0 / SlotCountForRender;
+
+                <div role="row"
+                     class="calee-scheduler-slot-row"
+                     style="@($"top: {top:F4}%; height: {height:F4}%;")">
+                    @for (var c = 0; c < ColumnCount; c++)
+                    {
+                        var col = c;
+                        var isTabbable = IsSlotTabbable(col, row);
+                        var cellLeft = col * 100.0 / ColumnCount;
+                        var cellWidth = 100.0 / ColumnCount;
+                        <div role="gridcell"
+                             class="@("calee-scheduler-slot" + slotExtraClass)"
+                             style="@($"left: {cellLeft:F4}%; width: {cellWidth:F4}%;")"
+                             tabindex="@(isTabbable ? 0 : -1)"
+                             aria-label="@SlotAccessibleName(col, row)"
+                             @onclick="@(() => HandleSlotClickAsync(col, row))"
+                             @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(col, row)) : default)"
+                             @onpointerdown="@(createEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnGridPointerDownAsync(e, col, row)) : default)">
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @* (5) Per-day "+N later" chip row — mirror of #3 *@
+    @if (AnyLaterOverflow)
+    {
+        <div class="calee-scheduler-week-overflow-row">
+            <div class="calee-scheduler-week-overflow-gutter" aria-hidden="true"></div>
+            @for (var i = 0; i < ColumnCount; i++)
+            {
+                var col = i;
+                var count = LaterOverflowCountFor(col);
+                <div class="calee-scheduler-week-overflow-cell">
+                    @if (count > 0)
+                    {
+                        <button type="button"
+                                class="calee-scheduler-overflow-chip"
+                                data-calee-region="overflow-chip"
+                                role="button"
+                                aria-label="@OverflowChipAccessibleName(col, count, OverflowKind.Later)"
+                                @onclick="@(() => HandleLaterChipClickAsync(col))">
+                            +@count later
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+</div>

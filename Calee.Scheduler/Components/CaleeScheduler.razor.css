@@ -1,0 +1,167 @@
+/*
+ * Calee.Scheduler — CaleeScheduler root default styles and theme variables.
+ *
+ * This file is the single canonical place for every theme token consumed by
+ * the library. Each `--calee-scheduler-*` custom property declared here flows
+ * down to every view (Day/Week/Month/Year/Agenda/Timeline) and to the toolbar through the
+ * normal CSS cascade — Blazor's CSS isolation scopes the *selector* but never
+ * the inheritance of custom properties (FR-52, NFR-08).
+ *
+ * View-specific variables (e.g. `--calee-scheduler-month-cell-min-height`)
+ * intentionally remain in their respective view's `.razor.css` since no other
+ * view consumes them. Each view that depends on a shared token also writes a
+ * `var(..., <default>)` fallback inline so the view renders correctly when
+ * used standalone — i.e., without the root <CaleeScheduler> wrapper.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * Theme tokens (declared on `.calee-scheduler`, inherit to every region):
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * --calee-scheduler-bg                         #ffffff
+ *     Background of the root scheduler container. Children render on top.
+ *
+ * --calee-scheduler-event-default-color        #4a6ea8
+ *     Fallback per-event color used when `ICalendarEvent.Color` is null.
+ *     Contrast-safe against the body background (WCAG 2.1 AA, NFR-06).
+ *     Consumed by every view's event renderer.
+ *
+ * --calee-scheduler-event-color                <set inline by the renderer>
+ *     Per-event color. Set inline as a CSS custom property from
+ *     `ICalendarEvent.Color`. Falls back to `--calee-scheduler-event-default-color`
+ *     when not set. Consumed by every event/chip/bar element.
+ *
+ * --calee-scheduler-focus-color                #2563eb
+ *     Color of the 2px focus outline drawn on every interactive element
+ *     (events, slot cells, overflow chips, toolbar buttons, month cells).
+ *
+ * --calee-scheduler-today-background           #eef4ff
+ *     Background applied to the today column / today cell / today header.
+ *     Consumed by Day, Week, Month, Year, Agenda, and Timeline views.
+ *
+ * --calee-scheduler-grid-line-color            #d4d4d8
+ *     Color of the primary grid separator lines: hour rules, day-column
+ *     borders, month-cell borders, toolbar bottom border. Consumed by every
+ *     view and by the toolbar.
+ *
+ * --calee-scheduler-slot-line-color            #ececef
+ *     Color of the lighter slot-boundary lines drawn inside the hour grid.
+ *     Consumed by Day and Week views.
+ *
+ * --calee-scheduler-current-time-indicator-color  #dc2626
+ *     Color of the current-time line (and its leading dot). Consumed by
+ *     Day, Week, and Timeline (TimeScale=Day) views.
+ *
+ * --calee-scheduler-pixels-per-hour            56px
+ *     Vertical density of the hour grid in Day and Week views, and the
+ *     horizontal density per-hour in Timeline (TimeScale=Day). Used by CSS
+ *     for sizing and by the initial-scroll JS helper. Override to make rows
+ *     taller/shorter or the timeline lane wider/narrower.
+ *
+ * --calee-scheduler-selected-color             #f59e0b
+ *     Color of the inset border drawn on selected events (FR-34 visual).
+ *     Chosen to be tonally distinct from --calee-scheduler-focus-color so a
+ *     focused-but-not-selected event is visually unambiguous from a selected-
+ *     but-not-focused event. Consumed by every view's event renderer via the
+ *     per-view `.calee-scheduler-event--selected` / `.calee-scheduler-month-
+ *     chip--selected` / `.calee-scheduler-timeline-event--selected` rule.
+ *
+ * .calee-scheduler-drag-ghost                  (Phase 2 — ADR-0015)
+ *     Default class applied by the JS pointer-drag module to the ghost
+ *     element shown during a drag. Per-view drag implementations can supply
+ *     a different class via the `ghostClass` option to override the look
+ *     without restating the layout primitives (position, pointer-events,
+ *     z-index). The ghost is appended to <body> so it floats above the grid.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * View-specific tokens (declared in each view's `.razor.css`):
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Week view:
+ *   --calee-scheduler-day-column-min-width     80px
+ *       Minimum width of a single day column in the Week view header and
+ *       hour grid. Smaller values let more columns squeeze in.
+ *
+ * Month view:
+ *   --calee-scheduler-month-cell-min-height    5rem
+ *       Minimum height of a single day cell.
+ *   --calee-scheduler-month-cell-muted-opacity 0.65
+ *       Opacity applied to date numbers in cells outside the displayed month.
+ *       Tuned for WCAG 2.1 AA body-text contrast (NFR-06).
+ *   --calee-scheduler-month-bar-height         1.25rem
+ *       Visual height of a multi-day bar lane.
+ *   --calee-scheduler-month-bar-lane-index     <set inline by the renderer>
+ *       Internal — positions a bar at lane N within its week row.
+ *   --calee-scheduler-month-bar-lane-count     <set inline by the renderer>
+ *       Internal — reserves N lanes worth of space per cell so chips drop
+ *       beneath bars.
+ *
+ * Timeline view:
+ *   --calee-scheduler-resource-label-width     12rem
+ *       Fixed-width left strip per timeline row.
+ *   --calee-scheduler-resource-pixels-per-day  120px
+ *       Horizontal density when `TimeScale=Week` or `TimeScale=Month`.
+ *   --calee-scheduler-resource-row-min-height  5rem
+ *       Row min height; sized to fit roughly 3 lanes of events.
+ *
+ * Toolbar:
+ *   --calee-scheduler-toolbar-bg               #ffffff
+ *   --calee-scheduler-toolbar-padding          0.5rem 0.75rem
+ *   --calee-scheduler-toolbar-text-color       #18181b
+ *   --calee-scheduler-toolbar-button-bg        #f4f4f5
+ *   --calee-scheduler-toolbar-button-hover-bg  #e4e4e7
+ *   --calee-scheduler-toolbar-active-bg        #dbeafe
+ *       Toolbar surface, padding, default text color, button backgrounds,
+ *       and active-view-button highlight tint. See CaleeSchedulerToolbar.razor.css
+ *       for usage detail.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * Selectors stay single-class so consumers' ::deep overrides work cleanly.
+ * The default theme is mid-neutral so the scheduler reads correctly on light
+ * and dark surfaces without further tuning.
+ */
+
+.calee-scheduler {
+    /* Theme tokens — shared across every view and the toolbar. */
+    --calee-scheduler-bg: #ffffff;
+    --calee-scheduler-event-default-color: #4a6ea8;
+    --calee-scheduler-focus-color: #2563eb;
+    --calee-scheduler-today-background: #eef4ff;
+    --calee-scheduler-grid-line-color: #d4d4d8;
+    --calee-scheduler-slot-line-color: #ececef;
+    --calee-scheduler-current-time-indicator-color: #dc2626;
+    --calee-scheduler-pixels-per-hour: 56px;
+    --calee-scheduler-selected-color: #f59e0b;
+
+    display: flex;
+    flex-direction: column;
+    /* Ensure children that flex to fill (e.g., the hour-grid scrollable region in
+       Day/Week views) can compute heights when the consumer constrains the scheduler
+       in a flex parent — without this min-height: 0, nested overflow-auto regions
+       can collapse to their content height instead of the parent's height. */
+    min-height: 0;
+    background: var(--calee-scheduler-bg);
+    /* Default to filling the parent container so consumers don't have to wrap the
+       scheduler in another sized element. Overridable via the inline style or a
+       consumer class. */
+    height: 100%;
+    width: 100%;
+}
+
+/*
+ * Phase 2 drag ghost — ADR-0015. The JS pointer-drag module clones the source
+ * element, applies this class plus the essential layout properties inline
+ * (position: fixed, pointer-events: none, z-index, opacity, shadow), and
+ * appends the clone to <body>. The inline styles survive Blazor's CSS isolation
+ * (the ghost lives outside any view's scope-attribute domain) so the drag works
+ * unconditionally; this class rule exists as a stable hook for consumers who
+ * want to restyle the ghost from a global stylesheet, or for per-view drag
+ * implementations that pass a different `ghostClass` to the JS module.
+ *
+ * The `::deep` combinator is required because the cloned element carries
+ * whatever scope attribute its source had (e.g., a day-view event chip's
+ * scope), not the root scheduler's scope.
+ */
+::deep .calee-scheduler-drag-ghost {
+    pointer-events: none;
+}

@@ -1,0 +1,104 @@
+# Calee.Scheduler — release pipeline.
+#
+# Triggered by pushing a tag matching `v*` (e.g. `v1.0.0`). Mirrors the CI
+# workflow through `dotnet pack`, then pushes the produced .nupkg to the
+# public nuget.org feed and creates a GitHub Release with the package attached.
+#
+# Required repository secret (configure in Settings -> Secrets and variables
+# -> Actions before the first tag push):
+#
+#   NUGET_API_KEY    API key generated at https://www.nuget.org/account/apikeys.
+#                    Scope: Push (new versions of this package). Glob:
+#                    `Calee.Scheduler` (or wider if you'll publish more packages
+#                    from this repo). Expiry: 365 days recommended.
+#
+# Tag the commit and push to trigger:
+#
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# To switch destinations (e.g. publish to an internal feed later), change
+# `NUGET_SOURCE` below and add username/password auth steps if required.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # Public nuget.org v3 index. Tyler Tech's Artifactory and any other internal
+  # NuGet-protocol feed are intentionally NOT targeted here — change this URL
+  # (and add username/password auth steps to the "Push" step below) if that
+  # changes in the future.
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  release:
+    name: Build, test, pack, publish
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed by softprops/action-gh-release@v2 to create the GitHub Release.
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Calee.Scheduler.sln
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build Calee.Scheduler.sln --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: >
+          dotnet test Calee.Scheduler.sln
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults/
+
+      - name: Pack
+        run: >
+          dotnet pack Calee.Scheduler/Calee.Scheduler.csproj
+          --configuration Release
+          --no-build
+          --output ./artifacts
+
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push ./artifacts/*.nupkg
+          --source ${{ env.NUGET_SOURCE }}
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --skip-duplicate
+
+      - name: Upload NuGet package (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.nupkg
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: artifacts/*.nupkg
+          fail_on_unmatched_files: true
+          generate_release_notes: true

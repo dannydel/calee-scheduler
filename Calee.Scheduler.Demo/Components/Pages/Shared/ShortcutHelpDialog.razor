@@ -1,0 +1,81 @@
+@*
+    Demo-only shortcut help dialog. Reads from SchedulerShortcuts.DefaultMap so
+    the help table is always in sync with whatever the library actually wires
+    (no separate source of truth). Wired to OnHelpRequested on the demo pages —
+    pressing "?" while the scheduler has focus opens this dialog.
+
+    Per ADR-0010 the library ships no dialogs; this demonstrates the consumer-
+    rendered help-screen pattern the ADR-0013 §"DefaultShortcutMap" notes
+    callers can build by iterating the public default map.
+*@
+
+@using Calee.Scheduler.Contracts
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+         role="presentation"
+         @onclick="HandleBackdropClickAsync">
+        <div class="bg-surface rounded-lg shadow-2xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="shortcut-help-title"
+             @onclick:stopPropagation="true"
+             @onkeydown="HandleKeyDownAsync">
+
+            <h2 id="shortcut-help-title" class="font-display text-2xl text-ink mb-1">
+                Keyboard shortcuts
+            </h2>
+            <p class="font-sans text-xs text-ink-muted mb-5">
+                Iterated from <code class="font-mono">SchedulerShortcuts.DefaultMap</code> at
+                render time — same source the library dispatches against.
+            </p>
+
+            <table class="w-full font-sans text-sm">
+                <thead>
+                    <tr class="text-xs uppercase tracking-wider text-ink-muted border-b border-line">
+                        <th class="text-left py-2 pr-3 font-medium">Key</th>
+                        <th class="text-left py-2 font-medium">Command</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var binding in SchedulerShortcuts.DefaultMap)
+                    {
+                        <tr class="border-b border-line/40">
+                            <td class="py-1.5 pr-3 font-mono text-xs">@binding.Key</td>
+                            <td class="py-1.5 text-ink-muted">@binding.CommandId</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="flex justify-end pt-4">
+                <button type="button"
+                        class="px-4 py-2 text-sm font-sans bg-accent text-white rounded-md hover:bg-accent/90 transition-colors"
+                        @onclick="HandleCloseAsync">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the dialog is rendered. Caller toggles from its own state.</summary>
+    [Parameter] public bool IsVisible { get; set; }
+
+    /// <summary>Fires when the user clicks Close, the backdrop, or presses Escape.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task HandleCloseAsync() => OnClose.InvokeAsync();
+    private Task HandleBackdropClickAsync() => OnClose.InvokeAsync();
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+}

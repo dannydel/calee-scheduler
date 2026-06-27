@@ -1,0 +1,148 @@
+@*
+    Demo-only command palette. Reads the scheduler's Commands list (the
+    consumer-queryable surface Task 15 ships) and renders a searchable modal
+    with one row per command. Click a row to fire command.Invoke() and close.
+
+    Per ADR-0010 / ADR-0014 the library ships no palette UI; this component
+    demonstrates the canonical consumer-rendered shape — a search input
+    filters by Label or Id, rows render in their original (built-in then
+    custom) order, optional Group strings render as section headers.
+*@
+
+@using Calee.Scheduler.Contracts
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 pt-24 px-4"
+         role="presentation"
+         @onclick="HandleBackdropClickAsync">
+        <div class="bg-surface rounded-lg shadow-2xl max-w-xl w-full overflow-hidden"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="command-palette-title"
+             @onclick:stopPropagation="true"
+             @onkeydown="HandleKeyDownAsync">
+
+            <div class="p-4 border-b border-line">
+                <h2 id="command-palette-title" class="sr-only">Command palette</h2>
+                <input type="text"
+                       class="w-full text-sm font-sans bg-transparent border-none outline-none"
+                       placeholder="Type a command…"
+                       @bind="_query"
+                       @bind:event="oninput"
+                       @ref="_inputRef" />
+            </div>
+
+            @{
+                var filtered = FilterCommands();
+            }
+            <div class="max-h-96 overflow-y-auto">
+                @if (filtered.Count == 0)
+                {
+                    <div class="p-4 text-sm text-ink-muted font-sans">No matching commands.</div>
+                }
+                else
+                {
+                    string? lastGroup = null;
+                    @foreach (var cmd in filtered)
+                    {
+                        @if (cmd.Group is not null && cmd.Group != lastGroup)
+                        {
+                            <div class="px-4 pt-3 pb-1 text-xs uppercase tracking-wider text-ink-muted font-sans">@cmd.Group</div>
+                            lastGroup = cmd.Group;
+                        }
+                        else if (cmd.Group is null && lastGroup is not null)
+                        {
+                            lastGroup = null;
+                        }
+                        var localCmd = cmd;
+                        var hotkey = SchedulerShortcuts.DefaultMap.GetHotkeyFor(localCmd.Id);
+                        <button type="button"
+                                class="w-full text-left px-4 py-2 hover:bg-cream font-sans text-sm flex justify-between items-center gap-3"
+                                @onclick="@(() => HandleInvokeAsync(localCmd))">
+                            <span class="text-ink truncate">@localCmd.Label</span>
+                            <span class="text-xs text-ink-muted font-mono flex-shrink-0">
+                                @if (hotkey is not null)
+                                {
+                                    @hotkey
+                                }
+                                else
+                                {
+                                    @localCmd.Id
+                                }
+                            </span>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the dialog is rendered.</summary>
+    [Parameter] public bool IsVisible { get; set; }
+
+    /// <summary>The list of commands the scheduler exposes. The demo passes
+    /// the result of <c>view.Commands</c> (Task 15 public surface).</summary>
+    [Parameter] public IReadOnlyList<SchedulerCommand> Commands { get; set; } = Array.Empty<SchedulerCommand>();
+
+    /// <summary>Fires when the user clicks Close, the backdrop, presses Escape,
+    /// or invokes any command.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string _query = string.Empty;
+    private ElementReference _inputRef;
+    private bool _previouslyVisible;
+
+    protected override void OnParametersSet()
+    {
+        // Reset the search query on every fresh open so the user starts each
+        // palette session at the top of the (unfiltered) list.
+        if (IsVisible && !_previouslyVisible)
+        {
+            _query = string.Empty;
+        }
+        _previouslyVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible)
+        {
+            try { await _inputRef.FocusAsync(); }
+            catch { /* element not yet attached on the first render. */ }
+        }
+    }
+
+    private List<SchedulerCommand> FilterCommands()
+    {
+        if (string.IsNullOrWhiteSpace(_query)) return Commands.ToList();
+        var q = _query.Trim();
+        return Commands.Where(c =>
+                c.Label.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                c.Id.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task HandleInvokeAsync(SchedulerCommand cmd)
+    {
+        // Fire-and-forget — SchedulerCommand.Invoke is a synchronous Action
+        // by design (Task 15 chose that shape; async work is on the underlying
+        // EventCallback). Close the palette so the consumer's action fires
+        // against the dispatched state.
+        cmd.Invoke();
+        await OnClose.InvokeAsync();
+    }
+
+    private Task HandleBackdropClickAsync() => OnClose.InvokeAsync();
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+}

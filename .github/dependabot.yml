@@ -1,0 +1,26 @@
+# Calee.Scheduler — Dependabot configuration.
+#
+# Keeps NuGet packages and GitHub Actions versions current with weekly
+# pull requests against main.
+
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    target-branch: main
+    labels:
+      - dependencies
+      - nuget
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    target-branch: main
+    labels:
+      - dependencies
+      - github-actions

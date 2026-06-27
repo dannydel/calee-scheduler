@@ -1,0 +1,115 @@
+# Calee.Scheduler — accessibility audit.
+#
+# Runs the Playwright + axe-core audit at tools/a11y-audit/ against every demo
+# route. Fails the workflow if any WCAG 2.1 AA violation is found. The audit
+# is intentionally separate from the .NET CI workflow: the library and its
+# tests have no Node dependency, and adding the browser install to every CI
+# run would multiply runtimes for no benefit. (NFR-06.)
+
+name: a11y
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: a11y-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: axe-core / Playwright audit
+    runs-on: ubuntu-latest
+
+    env:
+      DEMO_URL: http://localhost:5092
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tools/a11y-audit/package-lock.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Build demo (Release)
+        run: dotnet build Calee.Scheduler.Demo/Calee.Scheduler.Demo.csproj --configuration Release
+
+      - name: Install audit dependencies
+        working-directory: tools/a11y-audit
+        run: npm install
+
+      - name: Install Playwright Chromium
+        working-directory: tools/a11y-audit
+        run: npx playwright install --with-deps chromium
+
+      - name: Start demo
+        run: >
+          nohup dotnet run
+          --project Calee.Scheduler.Demo
+          --configuration Release
+          --no-build
+          --urls ${{ env.DEMO_URL }}
+          > demo.log 2>&1 &
+          echo "DEMO_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for demo to be ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl --silent --fail --output /dev/null "${DEMO_URL}/"; then
+              echo "Demo ready after ${i} attempt(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Demo did not become ready within 120s." >&2
+          echo "----- demo.log -----" >&2
+          cat demo.log >&2 || true
+          exit 1
+
+      - name: Run accessibility audit
+        working-directory: tools/a11y-audit
+        env:
+          CALEE_DEMO_URL: ${{ env.DEMO_URL }}
+        run: node audit.mjs
+
+      - name: Stop demo
+        if: always()
+        run: |
+          if [ -n "${DEMO_PID:-}" ]; then
+            kill "${DEMO_PID}" 2>/dev/null || true
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report
+          path: tools/a11y-audit/report.json
+          if-no-files-found: warn
+
+      - name: Upload demo log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-log
+          path: demo.log
+          if-no-files-found: ignore

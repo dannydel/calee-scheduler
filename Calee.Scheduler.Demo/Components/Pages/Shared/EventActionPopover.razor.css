@@ -1,0 +1,48 @@
+/*
+   Scoped styles for the EventActionPopover. Tailwind utility classes carry
+   most of the visual weight (the demo's house style — see ShortcutHelpDialog
+   and EventEditorDialog for the precedent). This file adds the popover-only
+   bits Tailwind doesn't cover cleanly: a softened drop shadow that reads as
+   a floating callout rather than a card, the rounded width pin, and the
+   color-swatch dot. We deliberately keep the popover OFF the library's
+   --calee-scheduler-* tokens — the popover is a demo chrome element, not a
+   scheduler primitive.
+*/
+
+.calee-demo-event-popover {
+    /* Anchored width — narrow enough to read as a popover, wide enough to
+       fit the timed-event subtitle ("Mon, May 18 · 10:00 AM – 11:00 AM")
+       without wrapping in typical viewports. The NominalWidthPx constant
+       in EventActionPopover.razor.cs mirrors this. */
+    width: 18rem;
+    max-width: calc(100vw - 1rem);
+    /* Softer shadow than the modal dialogs — popovers shouldn't feel as
+       weighty as a centered modal. */
+    box-shadow:
+        0 10px 24px -8px rgba(28, 25, 23, 0.18),
+        0 4px 12px -4px rgba(28, 25, 23, 0.10);
+    /* Avoid the popover's text getting selected on a slow double-click. */
+    user-select: none;
+}
+
+.calee-demo-event-popover-swatch {
+    /* 8 px round dot lined up with the title's optical center. */
+    display: inline-block;
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 9999px;
+    margin-top: 0.4375rem;
+    flex: 0 0 auto;
+}
+
+.calee-demo-event-popover-close {
+    /* Slightly enlarged click target without making the icon button itself
+       look heavy. */
+    line-height: 0;
+}
+
+.calee-demo-event-popover-close:focus-visible,
+.calee-demo-event-popover-actions button:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-ring, #b1462d);
+    outline-offset: 2px;
+}

@@ -1,0 +1,156 @@
+@page "/year"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Year view — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <EditorialHeader Kicker="View 05"
+                     Title="Year"
+                     Intro="Twelve mini-months in a configurable grid, each cell showing a per-day event-density indicator. Click a day to drill in via OnSlotClicked; click a month header to drill via OnMonthClicked. Toolbar prev/next steps by one calendar year." />
+
+    @* Toolbar in standalone mode. The composed-root showcase lives on Home (/) —
+       see Phase 2 Task 18 — where the same Year view is reachable through the
+       toolbar's view-switcher alongside Day / Week / Month / Agenda / Timeline.
+       This page keeps the toolbar in standalone mode to demonstrate the view
+       in isolation; prev/next still exercises the SchedulerView.Year case in
+       SchedulerViewPrimitives.AdvanceAnchor / FormatRangeLabel. *@
+    <div class="calee-demo-toolbar-wrap mb-4">
+        <CaleeSchedulerToolbar TimeZone="@SchedulerSeed.DefaultTimeZone"
+                               FirstDayOfWeek="DayOfWeek.Sunday"
+                               View="SchedulerView.Year"
+                               @bind-Date="_anchor"
+                               AvailableViews="_availableViews" />
+    </div>
+
+    <div class="calee-demo-style-toggle mb-2 flex items-center gap-3 font-sans text-sm text-ink-muted">
+        <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio"
+                   name="year-style"
+                   value="MiniMonths"
+                   checked="@(_style == YearViewStyle.MiniMonths)"
+                   @onchange="@(() => _style = YearViewStyle.MiniMonths)" />
+            Mini-months (day numbers + density dots)
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio"
+                   name="year-style"
+                   value="Heatmap"
+                   checked="@(_style == YearViewStyle.Heatmap)"
+                   @onchange="@(() => _style = YearViewStyle.Heatmap)" />
+            Heatmap (colored squares only)
+        </label>
+    </div>
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeSchedulerYearView TEvent="CalendarEvent"
+                                @ref="_view"
+                                TimeZone="@SchedulerSeed.DefaultTimeZone"
+                                @bind-Date="_anchor"
+                                Events="@_events"
+                                Style="@_style"
+                                Layout="YearViewLayout.Grid4x3"
+                                AllowCommandPalette="true"
+                                OnSlotClicked="HandleSlotClicked"
+                                OnMonthClicked="HandleMonthClicked"
+                                OnHelpRequested="HandleHelpRequested"
+                                OnCommandPaletteRequested="HandleCommandPaletteRequested"
+                                OnViewSwitchRequested="HandleViewSwitchRequested" />
+    </div>
+
+    <PageFooterNote Caption="Click any day cell to log a drill-down (the demo writes the clicked date in the message below). Click a month header to log a month drill-down. Prev/next chevrons step the visible year by one. Toggle the style radios above to swap between the day-number grid (dots beneath each date) and the GitHub-contribution heatmap (colored squares only). The seed has a high-density mid-anchor day with five overlapping events (bucket 3), two-event days (bucket 2), a four-day all-day Industry conference in June, a three-day Engineering offsite in September, and a deliberately sparse late-November / December stretch so the empty (bucket 0) state reads on the page. Press Cmd/Ctrl+K to open the palette; “?” opens the shortcut help dialog." />
+
+    @if (_lastDrillMessage is not null)
+    {
+        <div class="mt-6 px-4 py-3 bg-line/30 rounded text-sm font-mono text-ink">
+            @_lastDrillMessage
+        </div>
+    }
+
+</div>
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_view?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>Year-view fixtures anchored on the visible year.</summary>
+    private List<CalendarEvent> _events = new();
+
+    /// <summary>
+    /// Bindable anchor; the toolbar's prev/next pushes new years here via @bind-Date.
+    /// </summary>
+    private DateTimeOffset _anchor = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, SchedulerSeed.DefaultTimeZone);
+
+    /// <summary>Selected style — toggled via the radio control above the grid.</summary>
+    private YearViewStyle _style = YearViewStyle.MiniMonths;
+
+    /// <summary>Last drill-down event description — surfaced in the inline log below the grid.</summary>
+    private string? _lastDrillMessage;
+
+    private CaleeSchedulerYearView<CalendarEvent>? _view;
+
+    /// <summary>
+    /// Year + Month + Day in the view switcher so the toolbar shows a visible "Year"
+    /// button that's the currently-active one. The auto-flip path is wired on the
+    /// root scheduler (Home / showcase page); this standalone page reports the
+    /// requested view via OnViewSwitchRequested so the user can see the keystroke
+    /// + palette → trigger chain working without compounding it with a live flip.
+    /// </summary>
+    private static readonly IReadOnlyList<SchedulerView> _availableViews = new[]
+    {
+        SchedulerView.Day,
+        SchedulerView.Week,
+        SchedulerView.Month,
+        SchedulerView.Year,
+    };
+
+    protected override void OnInitialized()
+    {
+        _events = SchedulerSeed.GetYearSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Re-seed when the anchor's year changes — the seed is year-relative so prev/next
+        // shows fresh fixtures for each year.
+        var seededYear = _events.Count > 0 ? _events[0].Start.Year : 0;
+        if (seededYear != _anchor.Year)
+        {
+            _events = SchedulerSeed.GetYearSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
+        }
+    }
+
+    private void HandleSlotClicked(SchedulerSlot slot)
+    {
+        _lastDrillMessage =
+            $"Day drill-down → OnSlotClicked fired with [{slot.Start:yyyy-MM-dd HH:mm zzz} → {slot.End:yyyy-MM-dd HH:mm zzz}).";
+    }
+
+    private void HandleMonthClicked(DateOnly firstOfMonth)
+    {
+        _lastDrillMessage =
+            $"Month drill-down → OnMonthClicked fired with {firstOfMonth:yyyy-MM-dd}.";
+    }
+
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    /// <summary>
+    /// Demo-side handling of the view-switch trigger fired from the keyboard or the
+    /// palette. This page hosts the Year view standalone (no root scheduler), so it
+    /// just logs the request. The composed-root showcase (Home / "/") demonstrates
+    /// the auto-flip end-to-end — the same trigger flips the active view through
+    /// the toolbar's view-switcher there.
+    /// </summary>
+    private void HandleViewSwitchRequested(SchedulerView requested)
+    {
+        _lastDrillMessage = $"View-switch trigger → requested {requested}. See Home (/) for the composed root with auto-flip wired through.";
+    }
+}

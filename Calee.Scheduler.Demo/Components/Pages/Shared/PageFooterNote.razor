@@ -1,0 +1,14 @@
+@*
+    Editorial footer beneath each page's scheduler. Single line: short caption
+    explaining what scenarios the seed data on this page demonstrates.
+*@
+
+@code {
+    /// <summary>Short caption — what the seed data is supposed to surface.</summary>
+    [Parameter, EditorRequired] public string Caption { get; set; } = default!;
+}
+
+<div class="mt-8 flex items-start gap-3 max-w-3xl">
+    <span class="mt-[0.5rem] inline-block h-1 w-1 rounded-full bg-accent shrink-0" aria-hidden="true"></span>
+    <p class="font-sans font-light text-sm leading-[1.55] text-ink-muted">@Caption</p>
+</div>

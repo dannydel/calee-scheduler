@@ -1,0 +1,139 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@*
+    ARIA structure note (NFR-06, ADR-0009):
+
+    The Year view models twelve mini-month matrices inside one overarching grid.
+    Per the locked design decisions (phase-2-plan §5.3 Q13–Q15) the per-day-count
+    drives the density indicator; per-event positioning is intentionally absent.
+
+      [role="grid"]                           outer year wrapper
+        [role="row"] x 12                     one per month
+          [role="rowheader"]                  the month-name strip — clickable per Q14
+          [role="row"]                        the weekday header strip (S M T W T F S)
+            [role="columnheader"] x 7
+          [role="row"] x 6                    one per week within the month
+            [role="gridcell"] x 7             one per day cell (density dot inside)
+
+    Day cells use roving-tabindex (NFR-06) — exactly one cell carries tabindex="0"
+    at any time, and Arrow/Home/End/PageUp/PageDown move the anchor between cells
+    (per Task 16 spec).
+
+    Heatmap mode (YearViewStyle.Heatmap) suppresses the day-number text — the
+    density-driven cell color is the only signal. Mini-months (the default) keep
+    the day number and add a colored dot beneath it.
+*@
+
+@{
+    var rootClasses = "calee-scheduler-year "
+        + LayoutClassName
+        + " " + StyleClassName;
+}
+
+<div class="@rootClasses"
+     data-calee-region="year"
+     @attributes="AdditionalAttributes">
+
+    <div class="calee-scheduler-year-grid"
+         role="grid"
+         aria-label="@($"Year {DisplayedYear}")"
+         data-calee-region="year-grid">
+
+        @for (var m = 0; m < Months.Count; m++)
+        {
+            var monthIndex = m;
+            var month = Months[m];
+
+            <div class="calee-scheduler-year-month"
+                 role="row"
+                 data-calee-region="year-month"
+                 data-calee-month-number="@month.MonthNumber">
+
+                @* Month header — clickable per FR-38 / Q14. Uses role="rowheader" so
+                   the surrounding role="row" gets a labeled head, and the click flips
+                   the drill-down callback per Q14. *@
+                <button type="button"
+                        class="calee-scheduler-year-month-header"
+                        role="rowheader"
+                        data-calee-region="year-month-header"
+                        aria-label="@MonthAccessibleName(month)"
+                        @onclick="@(() => HandleMonthClickAsync(month))">
+                    @MonthName(month)
+                </button>
+
+                @* Weekday label strip — single-letter labels keep the mini-month narrow. *@
+                <div class="calee-scheduler-year-weekday-row" role="row">
+                    @foreach (var label in WeekdayLabels())
+                    {
+                        <div class="calee-scheduler-year-weekday"
+                             role="columnheader"
+                             aria-hidden="true">
+                            @label
+                        </div>
+                    }
+                </div>
+
+                @* Six week rows, each with seven gridcells. *@
+                @for (var r = 0; r < 6; r++)
+                {
+                    var row = r;
+                    <div class="calee-scheduler-year-week-row" role="row">
+                        @for (var c = 0; c < 7; c++)
+                        {
+                            var col = c;
+                            var cellIndex = row * 7 + col;
+                            var cell = month.Cells[cellIndex];
+                            var isTabbable = IsCellTabbable(monthIndex, cellIndex);
+                            var bucket = DensityBucket(cell.Date);
+                            var isToday = IsTodayCell(cell.Date);
+
+                            var cellClasses = "calee-scheduler-year-cell"
+                                + (cell.InMonth
+                                    ? string.Empty
+                                    : " calee-scheduler-year-cell--muted")
+                                + (isToday
+                                    ? " calee-scheduler-year-cell--today"
+                                    : string.Empty)
+                                + " calee-scheduler-year-cell--density-" + bucket;
+
+                            <button type="button"
+                                    class="@cellClasses"
+                                    role="gridcell"
+                                    data-calee-region="year-day-cell"
+                                    data-calee-date="@cell.Date.ToString("yyyy-MM-dd")"
+                                    data-calee-density="@bucket"
+                                    tabindex="@(isTabbable ? 0 : -1)"
+                                    aria-current="@(isToday ? "date" : null)"
+                                    aria-selected="@(isTabbable ? "true" : null)"
+                                    aria-label="@CellAccessibleName(cell)"
+                                    @onclick="@(() => HandleDayClickAsync(cell))"
+                                    @onkeydown="@((KeyboardEventArgs e) => HandleCellKeyDownAsync(e, monthIndex, cellIndex))"
+                                    @onkeydown:preventDefault="@IsShortcutMapActive"
+                                    @onkeydown:stopPropagation="@IsShortcutMapActive">
+                                @if (Style == YearViewStyle.MiniMonths)
+                                {
+                                    <span class="calee-scheduler-year-cell-date">@cell.Date.Day</span>
+                                    @if (bucket > 0)
+                                    {
+                                        <span class="calee-scheduler-year-cell-dot"
+                                              aria-hidden="true"></span>
+                                    }
+                                }
+                                else
+                                {
+                                    @* Heatmap mode — no visible date number; the screen-
+                                       reader name still announces it via aria-label, and
+                                       the data-calee-date attribute is the programmatic
+                                       hook. *@
+                                    <span class="calee-scheduler-year-cell-heatmap-fill"
+                                          aria-hidden="true"></span>
+                                }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>

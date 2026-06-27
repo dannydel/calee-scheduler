@@ -1,0 +1,334 @@
+/*
+ * Calee.Scheduler — CaleeSchedulerMonthView default styles.
+ *
+ * Shared `--calee-scheduler-*` theme tokens are declared once on the root
+ * `.calee-scheduler` container (see CaleeScheduler.razor.css) and inherited
+ * through the cascadYese — see that file for the full theming surface.
+ *
+ * This view consumes the following shared tokens:
+ *   --calee-scheduler-event-default-color
+ *   --calee-scheduler-event-color           (set inline per chip/bar)
+ *   --calee-scheduler-focus-color
+ *   --calee-scheduler-today-background
+ *   --calee-scheduler-grid-line-color
+ *
+ * Month-specific tokens (declared locally below):
+ *   --calee-scheduler-month-cell-min-height     5rem
+ *       Minimum height of a single day cell.
+ *   --calee-scheduler-month-cell-muted-opacity  0.65
+ *       Opacity applied to date numbers in cells outside the displayed
+ *       month. Defaulted to 0.65 so the composite color meets WCAG 2.1 AA
+ *       body-text contrast (NFR-06); lowering it below ~0.6 will fail the
+ *       DefaultThemeContrastTests.cs regression check.
+ *   --calee-scheduler-month-bar-height          1.25rem
+ *       Visual height of a multi-day bar lane.
+ *   --calee-scheduler-month-bar-lane-index      0
+ *       Internal — set inline by the renderer to position a bar at lane N.
+ *   --calee-scheduler-month-bar-lane-count      0
+ *       Internal — set inline by the renderer to reserve N lanes worth of
+ *       space per cell so chips drop beneath bars.
+ *
+ * `var(..., <fallback>)` is used at each consumption site for shared tokens
+ * so the Month view still renders correctly when used standalone (without
+ * the root wrapper). Selectors are single-class so consumer ::deep overrides
+ * work cleanly. Contrast meets WCAG 2.1 AA (NFR-06).
+ */
+
+.calee-scheduler-month {
+    /* 6.5rem (was 5rem). Floor needs to accommodate: date number (~20 px) +
+       at most one bar-lane spacer (~22 px) + MaxEventsPerDay default 3 chips
+       (~22 px each + 2 px gap) + the "+N more" overflow pill (~20 px). The
+       prior 5 rem floor only had room for the chips on bar-free rows and
+       clipped the overflow pill on rows containing a multi-day bar. */
+    --calee-scheduler-month-cell-min-height: 6.5rem;
+    /* 0.65 brings the muted-day text from 2.5:1 to ~4.5:1 against the cell's #fafafa
+       muted-cell background, satisfying WCAG 2.1 AA body-text contrast (NFR-06).
+       DefaultThemeContrastTests.cs regression-checks this token. */
+    --calee-scheduler-month-cell-muted-opacity: 0.65;
+    --calee-scheduler-month-bar-height: 1.25rem;
+    --calee-scheduler-month-bar-lane-index: 0;
+    --calee-scheduler-month-bar-lane-count: 0;
+
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 400px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #18181b;
+    background: #ffffff;
+}
+
+.calee-scheduler-month-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    border-top: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    border-left: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-month-header-row {
+    display: grid;
+    /* minmax(0, 1fr) — bare 1fr resolves to minmax(auto, 1fr), so a header
+       label longer than 1/7 of the row widens the track. Use 0 as the floor
+       to keep all 7 columns exactly equal-width regardless of content. */
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    background: #fafafa;
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-month-day-header {
+    padding: 0.5rem;
+    text-align: center;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #52525b;
+    border-right: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-month-week-row {
+    position: relative;
+    display: grid;
+    /* minmax(0, 1fr) — bare 1fr resolves to minmax(auto, 1fr), and a cell
+       whose chip content is wider than 1/7 (e.g., a long event title)
+       widens the track via min-content sizing. That made the row overflow
+       its own right edge and the overflow chip ("+N more") clip at the
+       next cell boundary. The 0 floor forces all 7 columns to stay equal-
+       width regardless of content, and the cell's overflow: hidden plus
+       the chip's min-width: 0 + text-overflow: ellipsis handle truncation. */
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    flex: 1 1 0;
+    min-height: var(--calee-scheduler-month-cell-min-height);
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-month-cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem;
+    border-right: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    cursor: pointer;
+    background: #ffffff;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.calee-scheduler-month-cell--muted {
+    background: #fafafa;
+}
+
+.calee-scheduler-month-cell--muted .calee-scheduler-month-cell-date {
+    opacity: var(--calee-scheduler-month-cell-muted-opacity);
+}
+
+.calee-scheduler-month-cell--today {
+    background: var(--calee-scheduler-today-background, #eef4ff);
+}
+
+.calee-scheduler-month-cell:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+    z-index: 2;
+}
+
+.calee-scheduler-month-cell-date {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #18181b;
+    padding: 0.125rem 0.25rem;
+    align-self: flex-end;
+}
+
+/* Today's date number gets a filled circle to match the prevailing calendar UI
+   convention (Outlook, Google Calendar, etc.). Sized to fit the existing 0.8125 rem
+   font with 0.25 rem horizontal padding, kept flush to the cell's right edge via
+   align-self inherited from .calee-scheduler-month-cell-date. */
+.calee-scheduler-month-cell--today .calee-scheduler-month-cell-date {
+    background: var(--calee-scheduler-focus-color, #2563eb);
+    color: #ffffff;
+    border-radius: 999px;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 0.375rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.calee-scheduler-month-cell-bar-spacer {
+    /* Reserve vertical space so per-cell chips appear *below* the row's bar lanes. */
+    height: calc(var(--calee-scheduler-month-bar-lane-count) * (var(--calee-scheduler-month-bar-height) + 2px));
+    flex-shrink: 0;
+}
+
+.calee-scheduler-month-cell-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.calee-scheduler-month-chip {
+    --calee-scheduler-event-color: var(--calee-scheduler-event-default-color, #4a6ea8);
+    /* Block-level flex so the chip stretches to the cell's chip-column width.
+       inline-flex (the prior value) made the chip's intrinsic width = its content
+       width, so a long title pushed the chip wider than the cell and the cell's
+       overflow: hidden clipped it mid-word — the inner title's text-overflow:
+       ellipsis never got to apply because the chip itself never shrank. */
+    display: flex;
+    /* Override the flex-item default of min-width: auto (which equals content
+       min-content size). Without this the chip refuses to shrink below the
+       sum of its children's intrinsic widths, defeating the title's ellipsis. */
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.25rem;
+    border: none;
+    background: transparent;
+    color: #18181b;
+    font-size: 0.75rem;
+    /* Tightened from the browser default ~1.5 so three chips + a bar lane +
+       an overflow pill all fit inside a 6.5 rem cell without the cell's
+       overflow: hidden clipping the bottom row. */
+    line-height: 1.35;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 3px;
+    overflow: hidden;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.calee-scheduler-month-chip:hover {
+    background: #f4f4f5;
+}
+
+.calee-scheduler-month-chip:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}
+
+/* Selected state (FR-34). Chips are inline-flex, so a 2-px inset box-shadow
+   draws inside the chip's content box without disrupting layout. Distinct from
+   the focus ring's blue so a focused-but-not-selected chip is unambiguous. */
+.calee-scheduler-month-chip--selected {
+    box-shadow: inset 0 0 0 2px var(--calee-scheduler-selected-color, #f59e0b);
+}
+
+.calee-scheduler-month-chip-dot {
+    flex-shrink: 0;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--calee-scheduler-event-color);
+}
+
+.calee-scheduler-month-chip-time {
+    color: #52525b;
+    font-weight: 500;
+}
+
+.calee-scheduler-month-chip-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.calee-scheduler-month-overflow-chip {
+    align-self: flex-start;
+    background: #f4f4f5;
+    border: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    color: #18181b;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 999px;
+    cursor: pointer;
+    margin-top: 2px;
+}
+
+.calee-scheduler-month-overflow-chip:hover {
+    background: #e4e4e7;
+}
+
+.calee-scheduler-month-overflow-chip:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}
+
+/* Bar overlay — absolutely positioned across the week row's full width, sits ON TOP of the
+   cell layer so a single multi-day event appears as one continuous strip across the row. */
+.calee-scheduler-month-bar-overlay {
+    position: absolute;
+    top: 1.5rem; /* Below the date numbers */
+    left: 0;
+    right: 0;
+    pointer-events: none;
+}
+
+.calee-scheduler-month-bar {
+    --calee-scheduler-event-color: var(--calee-scheduler-event-default-color, #4a6ea8);
+    position: absolute;
+    top: calc(var(--calee-scheduler-month-bar-lane-index) * (var(--calee-scheduler-month-bar-height) + 2px));
+    height: var(--calee-scheduler-month-bar-height);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.5rem;
+    box-sizing: border-box;
+    border: none;
+    background: color-mix(in srgb, var(--calee-scheduler-event-color) 25%, white);
+    color: #18181b;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-left: 3px solid var(--calee-scheduler-event-color);
+    border-radius: 3px;
+    margin: 0 2px;
+    cursor: pointer;
+    overflow: hidden;
+    pointer-events: auto;
+    text-align: left;
+}
+
+.calee-scheduler-month-bar:hover {
+    background: color-mix(in srgb, var(--calee-scheduler-event-color) 35%, white);
+}
+
+.calee-scheduler-month-bar:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}
+
+/* Selected state for multi-day bars (FR-34). Inset shadow matches the chip
+   treatment so a row with mixed bars + chips all selected reads as one unified
+   selection set. */
+.calee-scheduler-month-bar--selected {
+    box-shadow: inset 0 0 0 2px var(--calee-scheduler-selected-color, #f59e0b);
+}
+
+.calee-scheduler-month-bar--clip-left {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left-style: dashed;
+}
+
+.calee-scheduler-month-bar--clip-right {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: 3px dashed var(--calee-scheduler-event-color);
+}
+
+.calee-scheduler-month-bar-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calee-scheduler-month-bar-clip {
+    font-size: 0.75rem;
+    color: var(--calee-scheduler-event-color);
+    font-weight: 700;
+}

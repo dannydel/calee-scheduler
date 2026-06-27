@@ -1,0 +1,122 @@
+@*
+    Sidebar nav for the demo. Vertical stack:
+
+      [logo + wordmark]
+      [nav links — Home, Day, Week, Month, Year, Agenda, Fleet]
+      [version + source link, pinned to bottom]
+
+    Active link receives a 3px terracotta left-bar via the .calee-nav-active class
+    (set by the NavLink ActiveClass parameter). No bouncy easing; the hover state
+    is a subtle horizontal background fill, 200ms.
+*@
+
+<style>
+    /* NavMenu styles live inline so the active-bar pseudo-element doesn't fight
+       with Tailwind's class precedence and so the whole component reads in one place. */
+
+    .calee-nav-link {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        padding: 0.625rem 1.5rem 0.625rem 1.75rem;
+        font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        font-size: 0.9375rem;
+        font-weight: 400;
+        color: #57534e;
+        text-decoration: none;
+        border-radius: 0;
+        transition: background-color 200ms ease, color 200ms ease;
+    }
+
+        .calee-nav-link:hover {
+            background-color: #f5f4f1;
+            color: #1c1917;
+        }
+
+        .calee-nav-link:focus-visible {
+            outline: 2px solid #b1462d;
+            outline-offset: -2px;
+        }
+
+    .calee-nav-active {
+        color: #1c1917;
+        font-weight: 500;
+        background-color: #f5e6e0;
+    }
+
+        .calee-nav-active::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background-color: #b1462d;
+        }
+
+    .calee-nav-label {
+        font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #a8a29e;
+        padding: 0 1.75rem;
+        margin-top: 1.75rem;
+        margin-bottom: 0.5rem;
+    }
+</style>
+
+<div class="flex h-screen flex-col">
+    @* Brand mark — terracotta circle with a serif "C". Editorial, characterful. *@
+    <div class="px-7 pt-8 pb-7">
+        <a href="" class="flex items-center gap-3 group" aria-label="Calee.Scheduler home">
+            <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent text-surface font-display italic text-lg font-bold leading-none">C</span>
+            <span class="flex flex-col leading-tight">
+                <span class="font-display italic font-semibold text-ink text-[1.15rem]">Calee</span>
+                <span class="font-sans font-light text-xs text-ink-muted tracking-wide">.Scheduler</span>
+            </span>
+        </a>
+    </div>
+
+    @* Primary navigation *@
+    <nav class="flex-1" aria-label="Primary">
+        <div class="calee-nav-label">Overview</div>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="" Match="NavLinkMatch.All">
+            Home
+        </NavLink>
+
+        <div class="calee-nav-label">Views</div>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="day">
+            Day
+        </NavLink>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="week">
+            Week
+        </NavLink>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="month">
+            Month
+        </NavLink>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="year">
+            Year
+        </NavLink>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="agenda">
+            Agenda
+        </NavLink>
+        <NavLink class="calee-nav-link" ActiveClass="calee-nav-active" href="fleet">
+            Fleet
+        </NavLink>
+    </nav>
+
+    @* Footer block — version + source link *@
+    <div class="px-7 pb-7 pt-4 border-t border-line">
+        <div class="font-mono text-[0.6875rem] text-ink-muted tracking-tight">v1.0.0-preview</div>
+        <a href="https://github.com/"
+           target="_blank"
+           rel="noopener"
+           class="mt-2 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-accent transition-colors">
+            View source
+            <span aria-hidden="true">→</span>
+        </a>
+    </div>
+</div>

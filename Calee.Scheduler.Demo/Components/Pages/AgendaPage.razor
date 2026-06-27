@@ -1,0 +1,243 @@
+@page "/agenda"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Agenda view — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <EditorialHeader Kicker="View 06"
+                     Title="Agenda"
+                     Intro="A flat date-grouped list spanning a rolling N-day window from the anchor. Empty days are hidden entirely; multi-day events appear once on their start date with a range label. Uses the ARIA-list pattern rather than ARIA-grid — Agenda is a flow of items, not a 2D matrix. Toolbar prev/next steps by AgendaDays." />
+
+    @* Toolbar in standalone mode. The composed-root showcase lives on Home (/) —
+       see Phase 2 Task 18 — where the same Agenda view is reachable through the
+       toolbar's view-switcher and the user can swap windows via the same
+       inline control strip. This page keeps the toolbar in standalone mode so
+       the view reads in isolation; AgendaDays threads through to the toolbar
+       via its AgendaDays parameter so prev/next steps match the window length. *@
+    <div class="calee-demo-toolbar-wrap mb-4">
+        <CaleeSchedulerToolbar TimeZone="@SchedulerSeed.DefaultTimeZone"
+                               FirstDayOfWeek="DayOfWeek.Sunday"
+                               View="SchedulerView.Agenda"
+                               AgendaDays="@_agendaDays"
+                               @bind-Date="_anchor"
+                               AvailableViews="_availableViews" />
+    </div>
+
+    @* Window-length control above the grid — lets the user smoke-test
+       different AgendaDays values (3 / 7 / 14 / 30) without reloading. *@
+    <div class="calee-demo-style-toggle mb-2 flex items-center gap-3 font-sans text-sm text-ink-muted">
+        <span class="mr-2">Window:</span>
+        @foreach (var option in _agendaDaysOptions)
+        {
+            var captured = option;
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio"
+                       name="agenda-days"
+                       value="@captured"
+                       checked="@(_agendaDays == captured)"
+                       @onchange="@(() => _agendaDays = captured)" />
+                @captured days
+            </label>
+        }
+    </div>
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeSchedulerAgendaView TEvent="CalendarEvent"
+                                  @ref="_view"
+                                  TimeZone="@SchedulerSeed.DefaultTimeZone"
+                                  @bind-Date="_anchor"
+                                  AgendaDays="@_agendaDays"
+                                  Events="@_events"
+                                  AllowCommandPalette="true"
+                                  OnEventClicked="HandleEventClicked"
+                                  OnDateClicked="HandleDateClicked"
+                                  OnHelpRequested="HandleHelpRequested"
+                                  OnCommandPaletteRequested="HandleCommandPaletteRequested"
+                                  OnViewSwitchRequested="HandleViewSwitchRequested" />
+    </div>
+
+    <PageFooterNote Caption="Click an event row to log an OnEventClicked drill-down and open Edit/Delete actions; click a date header to log an OnDateClicked. The seed includes: two events on “today,” one all-day customer demo on day +2, a design review on day +3, a four-day Industry conference starting on day +5 that crosses the trailing edge of the 7-day window (renders once with a date-range label), and a rolling release window that started three days BEFORE the anchor and ends on day +1 (pins to the first day of the visible window with the original range label and a ← clip indicator). Day +1 has no events and the seed deliberately leaves day +4 empty so the hidden-empty-days rule reads on the page (you should not see headers for those dates). Toggle the Window radios above to step through 3 / 7 / 14 / 30 day windows; prev/next moves by the active window length. Press Cmd/Ctrl+K to open the palette; “?” opens the shortcut help dialog." />
+
+    @if (_lastDrillMessage is not null)
+    {
+        <div class="mt-6 px-4 py-3 bg-line/30 rounded text-sm font-mono text-ink">
+            @_lastDrillMessage
+        </div>
+    }
+
+</div>
+
+<EventActionPopover IsVisible="_popoverVisible"
+                    Event="@_popoverEvent"
+                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                    OnEditRequested="HandlePopoverEditRequested"
+                    OnDeleteRequested="HandlePopoverDeleteRequested"
+                    OnDismissed="@(() => _popoverVisible = false)" />
+
+<EventEditorDialog IsVisible="_dialogVisible"
+                   IsNew="false"
+                   InitialTitle="@_dialogTitle"
+                   InitialStart="@_dialogStart"
+                   InitialEnd="@_dialogEnd"
+                   IsAllDay="@_dialogIsAllDay"
+                   OnSave="HandleDialogSave"
+                   OnCancel="HandleDialogCancel" />
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_view?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>Agenda fixtures anchored relative to the visible window.</summary>
+    private List<CalendarEvent> _events = new();
+
+    /// <summary>
+    /// Bindable anchor — the toolbar's prev/next pushes new anchors here via
+    /// @bind-Date. AgendaDays controls how far prev/next moves the anchor.
+    /// </summary>
+    private DateTimeOffset _anchor = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, SchedulerSeed.DefaultTimeZone);
+
+    /// <summary>Selected window length — toggled via the radios above the list.</summary>
+    private int _agendaDays = 7;
+
+    /// <summary>Last drill-down event description — surfaced in the inline log below the list.</summary>
+    private string? _lastDrillMessage;
+
+    private CaleeSchedulerAgendaView<CalendarEvent>? _view;
+
+    /// <summary>
+    /// Window-length radio options. 30 days exercises the upper end of common
+    /// product values (the library caps at 90); 3 days verifies the short-
+    /// window path; 7 is the default; 14 covers a typical two-week sprint.
+    /// </summary>
+    private static readonly int[] _agendaDaysOptions = new[] { 3, 7, 14, 30 };
+
+    /// <summary>
+    /// Available views in the toolbar's view switcher. Agenda is pinned as one of
+    /// the visible buttons so the demo surfaces it as the active view. The
+    /// auto-flip is wired on the composed-root scheduler (Home / "/"); this
+    /// standalone page reports the requested view via OnViewSwitchRequested so
+    /// the keystroke + palette → trigger chain reads cleanly without compounding
+    /// it with a live flip.
+    /// </summary>
+    private static readonly IReadOnlyList<SchedulerView> _availableViews = new[]
+    {
+        SchedulerView.Day,
+        SchedulerView.Week,
+        SchedulerView.Month,
+        SchedulerView.Year,
+        SchedulerView.Agenda,
+    };
+
+    /// <summary>
+    /// We track the anchor's date so we know when to re-seed. The seed is
+    /// anchor-relative — moving by 7 days reveals a fresh-feeling window each
+    /// time rather than a frozen layout.
+    /// </summary>
+    private DateTime _lastSeededAnchorDate = DateTime.MinValue;
+
+    protected override void OnInitialized()
+    {
+        _events = SchedulerSeed.GetAgendaSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
+        _lastSeededAnchorDate = TimeZoneInfo.ConvertTime(_anchor, SchedulerSeed.DefaultTimeZone).Date;
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Re-seed when the anchor's date changes — the seed is window-relative,
+        // so prev/next reveals fresh fixtures.
+        var anchorDate = TimeZoneInfo.ConvertTime(_anchor, SchedulerSeed.DefaultTimeZone).Date;
+        if (anchorDate != _lastSeededAnchorDate)
+        {
+            _events = SchedulerSeed.GetAgendaSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
+            _lastSeededAnchorDate = anchorDate;
+        }
+    }
+
+    // ── Click-popover + edit-dialog state ───────────────────────────────────
+    // Clicking an agenda row opens an action popover while keeping the callback
+    // log visible, so the page demonstrates both the library event callback and
+    // the consumer-rendered follow-up UI.
+    private bool _popoverVisible;
+    private CalendarEvent? _popoverEvent;
+
+    private bool _dialogVisible;
+    private string? _editingEventId;
+    private string _dialogTitle = string.Empty;
+    private DateTimeOffset _dialogStart;
+    private DateTimeOffset _dialogEnd;
+    private bool _dialogIsAllDay;
+
+    private void HandleEventClicked(CalendarEvent ev)
+    {
+        _lastDrillMessage =
+            $"Row click → OnEventClicked fired with {ev.Id} ({ev.Title}, {ev.Start:yyyy-MM-dd HH:mm} → {ev.End:yyyy-MM-dd HH:mm}).";
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandlePopoverEditRequested(ICalendarEvent ev)
+    {
+        _editingEventId = ev.Id;
+        _dialogTitle = ev.Title;
+        _dialogStart = ev.Start;
+        _dialogEnd = ev.End;
+        _dialogIsAllDay = ev.IsAllDay;
+        _dialogVisible = true;
+    }
+
+    private void HandlePopoverDeleteRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx >= 0) _events.RemoveAt(idx);
+    }
+
+    private void HandleDialogSave(EventEditorDialog.EventEditorResult result)
+    {
+        if (_editingEventId is null)
+        {
+            _dialogVisible = false;
+            return;
+        }
+        var idx = _events.FindIndex(e => e.Id == _editingEventId);
+        if (idx >= 0)
+        {
+            _events[idx] = _events[idx] with
+            {
+                Title = result.Title,
+                Start = result.Start,
+                End = result.End,
+            };
+        }
+        _dialogVisible = false;
+    }
+
+    private void HandleDialogCancel() => _dialogVisible = false;
+
+    private void HandleDateClicked(DateOnly date)
+    {
+        _lastDrillMessage =
+            $"Date drill-down → OnDateClicked fired with {date:yyyy-MM-dd}.";
+    }
+
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    /// <summary>
+    /// Demo-side handling of the view-switch trigger fired from the keyboard or the
+    /// palette. This page hosts the Agenda view standalone (no root scheduler), so
+    /// it just logs the request. The composed-root showcase (Home / "/")
+    /// demonstrates the auto-flip end-to-end.
+    /// </summary>
+    private void HandleViewSwitchRequested(SchedulerView requested)
+    {
+        _lastDrillMessage = $"View-switch trigger → requested {requested}. See Home (/) for the composed root with auto-flip wired through.";
+    }
+}

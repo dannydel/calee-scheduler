@@ -1,0 +1,39 @@
+@*
+    Shared editorial header used by every demo page: serif title, light intro
+    paragraph, thin horizontal divider with a tiny accent dot at the left edge.
+
+    Title is rendered as Fraunces italic at a ~3rem display size (the home page
+    overrides this with its bespoke wordmark). The intro renders in IBM Plex Sans
+    light at body size. The whole block sits inside the page's outer padding,
+    so consumers don't need to nest in another container.
+*@
+
+@code {
+    /// <summary>Editorial title (Fraunces italic, ~3rem). Required.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = default!;
+
+    /// <summary>Optional kicker rendered above the title in small terracotta uppercase.</summary>
+    [Parameter] public string? Kicker { get; set; }
+
+    /// <summary>Intro body copy (IBM Plex Sans light, ~1.0625rem). Required.</summary>
+    [Parameter, EditorRequired] public string Intro { get; set; } = default!;
+}
+
+<header class="mb-8">
+    @if (!string.IsNullOrEmpty(Kicker))
+    {
+        <div class="text-[0.6875rem] font-medium tracking-[0.18em] text-accent uppercase mb-3">
+            @Kicker
+        </div>
+    }
+
+    <h1 class="font-display italic font-semibold text-ink leading-[0.95] text-[3rem] md:text-[3.5rem] tracking-tight">
+        @Title
+    </h1>
+
+    <p class="mt-5 max-w-2xl font-sans font-light text-[1.0625rem] leading-[1.55] text-ink-muted">
+        @Intro
+    </p>
+
+    <div class="calee-rule mt-8" aria-hidden="true"></div>
+</header>

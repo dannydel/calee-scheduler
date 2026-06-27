@@ -1,0 +1,298 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@*
+    CaleeScheduler — root scheduler composing the toolbar and the currently-active view.
+    Implements FR-08, FR-22, FR-23 (the root-level fire), FR-31 (bindable View), and
+    FR-42 (ShowToolbar). The Timeline entry in the view switcher appears only when
+    both Lanes and LaneKey are wired (FR-09c).
+
+    Range-event reconciliation: the root's OnParametersSet computes the canonical range
+    and fires OnRangeChanged. Child OnRangeChanged events are absorbed (routed to a
+    no-op) so the consumer sees exactly one range event per render — single source of
+    truth lives here, not on whichever child is active.
+
+    The root deliberately does NOT render its own ARIA grid roles — those belong to the
+    active view (which owns the grid semantics for the visible region). This wrapper is
+    just a region container plus the cascading state.
+*@
+
+<div class="calee-scheduler"
+     data-calee-region="scheduler"
+     @attributes="AdditionalAttributes">
+
+    <CascadingValue Value="_state" IsFixed="false">
+
+        @if (ShowToolbar)
+        {
+            @* In cascaded mode (the path used by the root) the toolbar reads TimeZone /
+               View / Date / AvailableViews from the cascaded state container; its own
+               [EditorRequired] TimeZone parameter is intentionally ignored. The
+               RZ2012 analyzer warning for the omitted attribute is suppressed at the
+               project level (see Calee.Scheduler.csproj NoWarn) so that a clean library
+               build does not carry an unactionable warning. *@
+            <CaleeSchedulerToolbar ToolbarClass="@ToolbarClass" />
+        }
+
+        @switch (EffectiveView)
+        {
+            case SchedulerView.Day:
+                <CaleeSchedulerDayView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    StartHour="@StartHour"
+                    EndHour="@EndHour"
+                    SlotDurationMinutes="@SlotDurationMinutes"
+                    ShowCurrentTimeIndicator="@ShowCurrentTimeIndicator"
+                    EventTemplate="@EventTemplate"
+                    DayHeaderClass="@DayHeaderClass"
+                    TimeGutterClass="@TimeGutterClass"
+                    AllDayRowClass="@AllDayRowClass"
+                    OnEventClicked="@OnEventClicked"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    OnDayOverflowClicked="@OnDayOverflowClicked"
+                    AllowDragToMove="@AllowDragToMove"
+                    OnEventMoved="@OnEventMoved"
+                    AllowDragToResize="@AllowDragToResize"
+                    OnEventResized="@OnEventResized"
+                    AllowDragToCreate="@AllowDragToCreate"
+                    AllowDoubleClickToCreate="@AllowDoubleClickToCreate"
+                    OnEventCreated="@OnEventCreated"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
+            case SchedulerView.Week:
+                <CaleeSchedulerWeekView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    StartHour="@StartHour"
+                    EndHour="@EndHour"
+                    SlotDurationMinutes="@SlotDurationMinutes"
+                    FirstDayOfWeek="@FirstDayOfWeek"
+                    ShowCurrentTimeIndicator="@ShowCurrentTimeIndicator"
+                    EventTemplate="@EventTemplate"
+                    DayHeaderClass="@DayHeaderClass"
+                    TimeGutterClass="@TimeGutterClass"
+                    AllDayRowClass="@AllDayRowClass"
+                    OnEventClicked="@OnEventClicked"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    OnDayOverflowClicked="@OnDayOverflowClicked"
+                    AllowDragToMove="@AllowDragToMove"
+                    OnEventMoved="@OnEventMoved"
+                    AllowDragToResize="@AllowDragToResize"
+                    OnEventResized="@OnEventResized"
+                    AllowDragToCreate="@AllowDragToCreate"
+                    AllowDoubleClickToCreate="@AllowDoubleClickToCreate"
+                    OnEventCreated="@OnEventCreated"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
+            case SchedulerView.Month:
+                <CaleeSchedulerMonthView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    FirstDayOfWeek="@FirstDayOfWeek"
+                    MaxEventsPerDay="@MaxEventsPerDay"
+                    EventChipTemplate="@EventChipTemplate"
+                    DayHeaderClass="@DayHeaderClass"
+                    OnEventClicked="@OnEventClicked"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    OnDayOverflowClicked="@OnDayOverflowClicked"
+                    AllowDoubleClickToCreate="@AllowDoubleClickToCreate"
+                    OnEventCreated="@OnEventCreated"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
+            case SchedulerView.Year:
+                @* Phase 2 Task 18 — Year view wires through the same cascade pattern as
+                   Day/Week/Month. YearStyle + YearLayout flow as direct parameters
+                   (no cascade plumbing needed; the root is the single source of truth). *@
+                <CaleeSchedulerYearView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    FirstDayOfWeek="@FirstDayOfWeek"
+                    Style="@YearStyle"
+                    Layout="@YearLayout"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
+            case SchedulerView.Agenda:
+                @* Phase 2 Task 18 — Agenda view wires through the same cascade pattern
+                   as the other views. AgendaDays flows as a direct parameter — the root
+                   has already clamped it in OnParametersSet so the toolbar's prev/next
+                   step (which reads the cascaded SchedulerStateContainer.AgendaDays)
+                   matches the rendered window. *@
+                <CaleeSchedulerAgendaView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    AgendaDays="@_resolvedAgendaDays"
+                    EventRowTemplate="@EventRowTemplate"
+                    OnEventClicked="@OnEventClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
+            case SchedulerView.Timeline:
+                @* FR-09c guard already enforced in OnParametersSet — Lanes / LaneKey
+                   are non-null here. The null-forgiving operator is safe. *@
+                <CaleeSchedulerTimelineView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    Lanes="@(Lanes!)"
+                    LaneKey="@(LaneKey!)"
+                    TimeScale="@EffectiveTimelineScale"
+                    StartHour="@StartHour"
+                    EndHour="@EndHour"
+                    SlotDurationMinutes="@SlotDurationMinutes"
+                    FirstDayOfWeek="@FirstDayOfWeek"
+                    ShowUnassignedRow="@ShowUnassignedRow"
+                    ShowCurrentTimeIndicator="@ShowCurrentTimeIndicator"
+                    EventTemplate="@EventTemplate"
+                    LaneLabelClass="@LaneLabelClass"
+                    TimeGutterClass="@TimeGutterClass"
+                    AllDayRowClass="@AllDayRowClass"
+                    OnEventClicked="@OnEventClicked"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    OnDayOverflowClicked="@OnDayOverflowClicked"
+                    AllowDragToMove="@AllowDragToMove"
+                    OnEventMoved="@OnEventMoved"
+                    AllowDragToResize="@AllowDragToResize"
+                    OnEventResized="@OnEventResized"
+                    AllowDragToCreate="@AllowDragToCreate"
+                    AllowDoubleClickToCreate="@AllowDoubleClickToCreate"
+                    OnEventCreated="@OnEventCreated"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+        }
+
+    </CascadingValue>
+
+</div>

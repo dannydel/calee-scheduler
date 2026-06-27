@@ -1,0 +1,84 @@
+# Calee.Scheduler — continuous integration.
+#
+# Runs on every push to main and every pull request targeting main.
+# Restores, builds (Release, warnings-as-errors), tests, and packs the
+# library. Test results and the produced .nupkg are uploaded as artifacts.
+#
+# Publication to nuget.org is intentionally NOT part of this workflow —
+# that lives in release.yml and is gated on a `v*` tag push.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-pack:
+    name: Build, test, pack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # global.json pins 8.0.408; setup-dotnet honors it. The channel here
+          # is a floor for the major/minor — the SDK chosen will be whatever
+          # global.json resolves to.
+          dotnet-version: 8.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          # No packages.lock.json files in the repo (Phase 1 has a single direct
+          # PackageReference), so key on the union of every .csproj. Restore
+          # falls back to any cache from the same OS if the exact key misses.
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Calee.Scheduler.sln
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build Calee.Scheduler.sln --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: >
+          dotnet test Calee.Scheduler.sln
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults/
+
+      - name: Pack
+        run: >
+          dotnet pack Calee.Scheduler/Calee.Scheduler.csproj
+          --configuration Release
+          --no-build
+          --output ./artifacts
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: error
+
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.nupkg
+          if-no-files-found: error

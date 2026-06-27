@@ -1,0 +1,164 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@*
+    ARIA structure note (NFR-06, ADR-0009):
+
+    Agenda view uses the ARIA list pattern, NOT the grid pattern used by
+    Day/Week/Month/Year. The DOM shape is:
+
+      [role="list"]                            outer flow wrapper
+        [role="heading" aria-level="2"]        date-group header (sticky)
+        [role="listitem"]                      event row(s) for that date
+        [role="heading" aria-level="2"]        next date group's header
+        [role="listitem"]                      next event row(s)
+        ...
+
+    Headers are non-interactive landmarks — they are NOT focus stops in the
+    roving-tabindex flow. Exactly one event row carries tabindex="0" at any
+    time; the others carry tabindex="-1". Arrow Up/Down move between rows;
+    Home/End jump to first/last row; PageUp/PageDown jump by date group.
+
+    Per phase-2-plan §5.3 Q16:
+    - Empty days hidden (the razor only iterates groups that have rows).
+    - Multi-day events appear once on their start date with a range label.
+    - Sticky headers — the CSS handles the position: sticky behavior; markup
+      just provides the structure.
+
+    `data-calee-region` attributes ("agenda", "agenda-group", "agenda-header",
+    "agenda-row") follow FR-55's enumeration shape so tests + consumer CSS
+    have stable hooks.
+*@
+
+<div class="calee-scheduler-agenda"
+     data-calee-region="agenda"
+     @attributes="AdditionalAttributes">
+
+    @* The scrollable list container. role="list" makes the descendant rows a
+       list to assistive tech; the sticky-header CSS depends on this wrapper
+       being the scroll container (overflow: auto + max-height in CSS). *@
+    <div class="calee-scheduler-agenda-list"
+         role="list"
+         data-calee-region="agenda-list"
+         aria-label="Agenda">
+
+        @if (Groups.Count == 0)
+        {
+            @* Empty-state — no events in the window. Render a lightweight
+               affordance rather than nothing so the user sees something. This
+               is NOT a "(no events)" placeholder per date — it's a single
+               whole-view empty state, which is fine to surface (the §5.3 Q16
+               rule about hidden empty days is about per-day groups). *@
+            <div class="calee-scheduler-agenda-empty"
+                 data-calee-region="agenda-empty"
+                 role="status"
+                 aria-live="polite">
+                No events in this window.
+            </div>
+        }
+        else
+        {
+            var flatIndex = 0;
+            @for (var g = 0; g < Groups.Count; g++)
+            {
+                var group = Groups[g];
+                var isTodayGroup = group.Date == TodayInZone;
+                var headerClasses = "calee-scheduler-agenda-header"
+                    + (isTodayGroup ? " calee-scheduler-agenda-header--today" : string.Empty);
+                var groupClasses = "calee-scheduler-agenda-group"
+                    + (isTodayGroup ? " calee-scheduler-agenda-group--today" : string.Empty);
+
+                <div class="@groupClasses"
+                     data-calee-region="agenda-group"
+                     data-calee-date="@group.Date.ToString("yyyy-MM-dd")">
+
+                    @* Date-group header. role="heading" + aria-level="2" makes
+                       it a screen-reader landmark; the button shape provides
+                       the drill-down affordance (FR-39 → OnDateClicked). It is
+                       NOT a focus stop in the roving-tabindex flow — only the
+                       event rows participate. The header is reachable via Tab
+                       (browser default for buttons), but Arrow navigation
+                       between rows skips it. *@
+                    <button type="button"
+                            class="@headerClasses"
+                            role="heading"
+                            aria-level="2"
+                            data-calee-region="agenda-header"
+                            aria-label="@GroupHeaderAccessibleName(group)"
+                            aria-current="@(isTodayGroup ? "date" : null)"
+                            @onclick="@(() => HandleDateClickAsync(group))">
+                        @FormatGroupHeader(group)
+                    </button>
+
+                    @* Rows under this group's header. *@
+                    @for (var r = 0; r < group.Rows.Length; r++)
+                    {
+                        var row = group.Rows[r];
+                        var currentFlatIndex = flatIndex;
+                        flatIndex++;
+                        var hasTyped = row.EventRef is TEvent;
+                        var typed = hasTyped ? (TEvent)row.EventRef : default;
+                        var isSelected = IsEventSelected(row.Id);
+                        var consumerClass = hasTyped ? ClassFor(typed!) : null;
+
+                        var rowClasses = "calee-scheduler-agenda-row"
+                            + (isSelected ? " calee-scheduler-agenda-row--selected" : string.Empty)
+                            + (row.IsAllDay ? " calee-scheduler-agenda-row--all-day" : string.Empty)
+                            + (row.IsPinnedFromBefore
+                                ? " calee-scheduler-agenda-row--pinned-earlier"
+                                : string.Empty)
+                            + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
+
+                        var styleParts = new List<string>();
+                        if (row.EventRef.Color is not null)
+                        {
+                            styleParts.Add($"--calee-scheduler-event-color: {row.EventRef.Color}");
+                        }
+                        var style = styleParts.Count == 0 ? null : string.Join("; ", styleParts) + ";";
+
+                        var clickTarget = row;
+
+                        <button type="button"
+                                class="@rowClasses"
+                                style="@style"
+                                role="listitem"
+                                data-calee-region="agenda-row"
+                                data-calee-region-event="event"
+                                data-calee-event-id="@row.Id"
+                                tabindex="@(IsRowTabbable(currentFlatIndex) ? 0 : -1)"
+                                aria-selected="@(isSelected ? "true" : null)"
+                                aria-roledescription="@GetEventChipAriaRoleDescription()"
+                                aria-label="@RowAccessibleName(row)"
+                                @key="@($"agenda-row:{row.Id}:{group.Date:yyyy-MM-dd}")"
+                                @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleRowClickAsync(clickTarget, e)))"
+                                @onkeydown="@((KeyboardEventArgs e) => HandleRowKeyDownAsync(e, clickTarget, currentFlatIndex))"
+                                @onkeydown:preventDefault="@IsShortcutMapActive"
+                                @onkeydown:stopPropagation="@IsShortcutMapActive">
+
+                            @if (EventRowTemplate is not null && hasTyped)
+                            {
+                                @EventRowTemplate(typed!)
+                            }
+                            else
+                            {
+                                @if (row.IsPinnedFromBefore)
+                                {
+                                    @* Visual cue that this event's actual start is
+                                       earlier than the window — the user sees the row
+                                       pinned to the window's first day but knows the
+                                       event itself began earlier. *@
+                                    <span class="calee-scheduler-agenda-row-clip"
+                                          aria-hidden="true">&larr;</span>
+                                }
+                                <span class="calee-scheduler-agenda-row-dot"
+                                      aria-hidden="true"></span>
+                                <span class="calee-scheduler-agenda-row-time">@FormatRowTime(row)</span>
+                                <span class="calee-scheduler-agenda-row-title">@row.EventRef.Title</span>
+                            }
+                        </button>
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>

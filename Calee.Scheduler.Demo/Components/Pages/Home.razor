@@ -1,0 +1,309 @@
+@page "/"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Calee.Scheduler — Overview</PageTitle>
+
+@*
+    Home page. Bespoke hero (the wordmark is the headline) instead of the shared
+    EditorialHeader, then the composed CaleeScheduler with all six views
+    (Day, Week, Month, Year, Agenda, Timeline) accessible from the toolbar's
+    view-switcher per Phase 2 Task 18. The scheduler defaults to the Week view
+    via the registered CaleeSchedulerOptions.DefaultView; the user can step
+    through every view via the toolbar's switcher, the "1"–"6" keystrokes, or
+    the Cmd/Ctrl+K palette.
+
+    Per-view config (YearStyle, YearLayout, AgendaDays) is exposed via a small
+    inline control strip so the demo proves the root forwards those parameters
+    correctly. The seed is the union of GetWeekSeed + GetMonthSeed +
+    GetYearSeed + GetAgendaSeed + GetFleetEvents — a single Events list that
+    renders meaningfully in every view, so flipping views from the toolbar
+    surfaces content rather than empty grids.
+*@
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <header class="mb-12">
+        <div class="text-[0.6875rem] font-medium tracking-[0.18em] text-accent uppercase mb-5">
+            A Blazor scheduling suite
+        </div>
+
+        <div class="flex flex-col md:flex-row md:items-baseline gap-x-4 gap-y-2 leading-[0.9]">
+            <span class="font-display italic font-extrabold text-ink text-[5rem] md:text-[6rem] tracking-tighter">
+                Calee
+            </span>
+            <span class="font-sans font-light text-ink-muted text-[2rem] md:text-[2.25rem] tracking-tight">
+                .Scheduler
+            </span>
+        </div>
+
+        <p class="mt-8 max-w-2xl font-sans font-light text-[1.0625rem] leading-[1.55] text-ink-muted">
+            A Blazor scheduling component suite for internal .NET applications.
+            Day, Week, Month, Year, Agenda, and Timeline views — composed in
+            one root component, reachable through the toolbar's view-switcher,
+            the “1”–“6” keystrokes, or the Cmd/Ctrl+K command palette.
+        </p>
+
+        <div class="calee-rule mt-10" aria-hidden="true"></div>
+    </header>
+
+    @* View-specific config strip — exposed inline so the user can confirm the
+       root forwards YearStyle / YearLayout / AgendaDays through the cascade. *@
+    <div class="calee-demo-style-toggle mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 font-sans text-sm text-ink-muted">
+        <span class="font-medium text-ink">Year style:</span>
+        <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio"
+                   name="home-year-style"
+                   value="MiniMonths"
+                   checked="@(_yearStyle == YearViewStyle.MiniMonths)"
+                   @onchange="@(() => _yearStyle = YearViewStyle.MiniMonths)" />
+            Mini-months
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio"
+                   name="home-year-style"
+                   value="Heatmap"
+                   checked="@(_yearStyle == YearViewStyle.Heatmap)"
+                   @onchange="@(() => _yearStyle = YearViewStyle.Heatmap)" />
+            Heatmap
+        </label>
+
+        <span class="font-medium text-ink ml-4">Agenda window:</span>
+        @foreach (var option in _agendaDaysOptions)
+        {
+            var captured = option;
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio"
+                       name="home-agenda-days"
+                       value="@captured"
+                       checked="@(_agendaDays == captured)"
+                       @onchange="@(() => _agendaDays = captured)" />
+                @captured days
+            </label>
+        }
+    </div>
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeScheduler TEvent="ICalendarEvent"
+                        @ref="_root"
+                        TimeZone="@SchedulerSeed.DefaultTimeZone"
+                        Events="@_events"
+                        Lanes="@_drivers"
+                        LaneKey="_laneKey"
+                        YearStyle="@_yearStyle"
+                        AgendaDays="@_agendaDays"
+                        AllowCommandPalette="true"
+                        AllowDelete="true"
+                        OnEventClicked="HandleEventClicked"
+                        OnEventDeleted="HandleEventDeleted"
+                        OnDayOverflowClicked="HandleOverflow"
+                        OnHelpRequested="HandleHelpRequested"
+                        OnCommandPaletteRequested="HandleCommandPaletteRequested"
+                        ShowToolbar="true" />
+    </div>
+
+    <PageFooterNote Caption="One composed scheduler with all six views accessible from the toolbar's view-switcher, the “1”–“6” keystrokes, or Cmd/Ctrl+K. The seed unions every per-page fixture set — week-aligned time-grid events, a six-day Launch-week banner that crosses a week boundary, year-scale density clusters on the 15th + 16th, a rolling agenda window, and three fleet drivers with cross-lane overlap — so each view renders meaningful content without re-seeding. Press “?” at any time for the shortcut map." />
+
+</div>
+
+<EventActionPopover IsVisible="_popoverVisible"
+                    Event="@_popoverEvent"
+                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                    OnEditRequested="HandlePopoverEditRequested"
+                    OnDeleteRequested="HandlePopoverDeleteRequested"
+                    OnDismissed="@(() => _popoverVisible = false)" />
+
+<OverflowChooserPopover IsVisible="_chooserVisible"
+                        Events="_chooserEvents"
+                        TimeZone="@SchedulerSeed.DefaultTimeZone"
+                        OnEventSelected="HandleChooserSelected"
+                        OnDismissed="@(() => _chooserVisible = false)" />
+
+<EventEditorDialog IsVisible="_dialogVisible"
+                   IsNew="false"
+                   InitialTitle="@_dialogTitle"
+                   InitialStart="@_dialogStart"
+                   InitialEnd="@_dialogEnd"
+                   IsAllDay="@_dialogIsAllDay"
+                   OnSave="HandleDialogSave"
+                   OnCancel="HandleDialogCancel" />
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_root?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>
+    /// The merged events list — week + month + year + agenda + fleet fixtures
+    /// combined into one stream the root scheduler forwards to whichever view
+    /// is active. Mutable List so the popover's Edit + Delete flows can
+    /// commit changes back through to the rendered set.
+    /// </summary>
+    private List<ICalendarEvent> _events = new();
+
+    private readonly IReadOnlyList<ILane> _drivers = SchedulerSeed.GetDrivers();
+
+    /// <summary>Root scheduler ref — used to read the Commands list for the palette.</summary>
+    private CaleeScheduler<ICalendarEvent>? _root;
+
+    // ── Year + Agenda config (drives the inline control strip) ──────────────
+    private YearViewStyle _yearStyle = YearViewStyle.MiniMonths;
+    private int _agendaDays = 7;
+    private static readonly int[] _agendaDaysOptions = new[] { 3, 7, 14, 30 };
+
+    // ── Help + palette dialog state ─────────────────────────────────────────
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    // ── Click-popover + edit-dialog state ───────────────────────────────────
+    // Clicking an event in any view opens an action popover. Edit uses the
+    // shared EventEditorDialog; Delete removes from the merged demo list. Home
+    // keeps this intentionally lighter than the per-view pages, which exercise
+    // undo/redo around the same mutations.
+    private bool _popoverVisible;
+    private ICalendarEvent? _popoverEvent;
+
+    // ── Overflow-chooser state ──────────────────────────────────────────────
+    private bool _chooserVisible;
+    private IReadOnlyList<ICalendarEvent>? _chooserEvents;
+
+    private bool _dialogVisible;
+    private string? _editingEventId;
+    private string _dialogTitle = string.Empty;
+    private DateTimeOffset _dialogStart;
+    private DateTimeOffset _dialogEnd;
+    private bool _dialogIsAllDay;
+
+    private void HandleEventClicked(ICalendarEvent ev)
+    {
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandleOverflow(DayOverflowContext<ICalendarEvent> ctx)
+    {
+        if (ctx.Kind == OverflowKind.Overlap)
+        {
+            _chooserEvents = ctx.Events;   // IReadOnlyList<ICalendarEvent> — no cast needed
+            _chooserVisible = true;
+        }
+    }
+
+    private void HandleChooserSelected(ICalendarEvent ev)
+    {
+        _chooserVisible = false;
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandlePopoverEditRequested(ICalendarEvent ev)
+    {
+        _editingEventId = ev.Id;
+        _dialogTitle = ev.Title;
+        _dialogStart = ev.Start;
+        _dialogEnd = ev.End;
+        _dialogIsAllDay = ev.IsAllDay;
+        _dialogVisible = true;
+    }
+
+    private void HandlePopoverDeleteRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx >= 0) _events.RemoveAt(idx);
+    }
+
+    /// <summary>Routed from the library's Delete-key handler; kept in sync with
+    /// popover-driven delete so either path removes from the same merged list.</summary>
+    private void HandleEventDeleted(EventDeleteContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx >= 0) _events.RemoveAt(idx);
+    }
+
+    private void HandleDialogSave(EventEditorDialog.EventEditorResult result)
+    {
+        if (_editingEventId is null)
+        {
+            _dialogVisible = false;
+            return;
+        }
+        var idx = _events.FindIndex(e => e.Id == _editingEventId);
+        if (idx < 0)
+        {
+            _dialogVisible = false;
+            return;
+        }
+        // The merged seed is heterogeneous: FleetEvent (record) + CalendarEvent
+        // (record). Pattern-match on the concrete type so the `with` update
+        // preserves the originating subtype rather than dropping it to the
+        // ICalendarEvent abstraction.
+        var existing = _events[idx];
+        ICalendarEvent updated = existing switch
+        {
+            SchedulerSeed.FleetEvent fleet => fleet with
+            {
+                Title = result.Title,
+                Start = result.Start,
+                End = result.End,
+            },
+            CalendarEvent cal => cal with
+            {
+                Title = result.Title,
+                Start = result.Start,
+                End = result.End,
+            },
+            _ => existing,
+        };
+        _events[idx] = updated;
+        _dialogVisible = false;
+    }
+
+    private void HandleDialogCancel() => _dialogVisible = false;
+
+    // Pattern-match on the concrete type — FleetEvent carries DriverId natively;
+    // other ICalendarEvent shapes return null and land in the unassigned row when
+    // the Timeline view is active. Field-scoped so the delegate isn't re-allocated
+    // every render.
+    private static readonly Func<ICalendarEvent, string?> _laneKey =
+        ev => ev is SchedulerSeed.FleetEvent fleet ? fleet.DriverId : null;
+
+    protected override void OnInitialized()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var tz = SchedulerSeed.DefaultTimeZone;
+        var week = SchedulerSeed.GetWeekSeed(now, tz);
+        var month = SchedulerSeed.GetMonthSeed(now, tz);
+        var year = SchedulerSeed.GetYearSeed(now, tz);
+        var agenda = SchedulerSeed.GetAgendaSeed(now, tz);
+        var fleet = SchedulerSeed.GetFleetEvents(now, tz);
+
+        // Combine every per-view seed into one Events list. Duplicates (events
+        // present in more than one seed) get to ride twice — the demo prefers
+        // density over de-duplication, and CalendarEvent uses its Id as the
+        // identity, so we'd need to de-dupe by id if that mattered. For the
+        // showcase here it doesn't.
+        var combined = new List<ICalendarEvent>(
+            week.Count + month.Count + year.Count + agenda.Count + fleet.Count);
+        combined.AddRange(week);
+        combined.AddRange(month);
+        combined.AddRange(year);
+        combined.AddRange(agenda);
+        combined.AddRange(fleet);
+
+        // De-duplicate by id so multi-seed presence doesn't compound the per-day
+        // density count in Year view (an event present in both week + month
+        // would count twice otherwise).
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var deduped = new List<ICalendarEvent>(combined.Count);
+        foreach (var ev in combined)
+        {
+            if (seen.Add(ev.Id)) deduped.Add(ev);
+        }
+        _events = deduped;
+    }
+}

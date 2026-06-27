@@ -1,0 +1,151 @@
+/*
+ * Calee.Scheduler.Demo — global demo styling.
+ *
+ * The library has its own CSS (isolated, themed via custom properties); this file
+ * is the *demo*'s editorial chrome: typography defaults, the page fade-in motion,
+ * subtle sidebar texture, the scheduler container framing, and a couple of theme-
+ * variable overrides that bend the scheduler's default blue accent toward the
+ * demo's terracotta palette so the views feel of-a-piece with the page chrome.
+ */
+
+:root {
+    color-scheme: light;
+}
+
+html,
+body {
+    background-color: #fbfaf7;
+    color: #1c1917;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Restrained page-level entrance — 250ms fade, no movement. */
+@keyframes calee-demo-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+main {
+    animation: calee-demo-fade-in 250ms ease-out both;
+}
+
+/* Subtle dotted texture on the sidebar surface. Whisper-faint — easy to miss,
+   but you'd notice if it were gone. */
+.calee-sidebar-texture {
+    background-image: radial-gradient(circle at 1px 1px, rgba(28, 25, 23, 0.04) 1px, transparent 0);
+    background-size: 16px 16px;
+}
+
+/* Editorial divider — thin rule with a tiny accent dot at the left edge. */
+.calee-rule {
+    position: relative;
+    height: 1px;
+    background-color: #e7e5e4;
+}
+
+.calee-rule::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: -2px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background-color: #b1462d;
+}
+
+/*
+ * Scheduler theme overrides — applied to any .calee-scheduler instance in the
+ * demo. Aligns the in-grid accents with the editorial palette so the toolbar's
+ * "active view" highlight and today-cell tint don't clash with the page chrome.
+ *
+ * The library's defaults remain untouched; consumers in production can pick
+ * any palette. The demo is just showing one possibility.
+ */
+.calee-scheduler {
+    --calee-scheduler-bg: #ffffff;
+    --calee-scheduler-event-default-color: #4a6ea8;
+    --calee-scheduler-focus-color: #b1462d;
+    --calee-scheduler-today-background: #f5e6e0;
+    --calee-scheduler-grid-line-color: #e7e5e4;
+    --calee-scheduler-slot-line-color: #f1efec;
+    --calee-scheduler-current-time-indicator-color: #b1462d;
+    --calee-scheduler-toolbar-bg: #ffffff;
+    --calee-scheduler-toolbar-text-color: #1c1917;
+    --calee-scheduler-toolbar-button-bg: #fbfaf7;
+    --calee-scheduler-toolbar-button-hover-bg: #f1efec;
+    --calee-scheduler-toolbar-active-bg: #f5e6e0;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+/*
+ * Demo scheduler container — a soft 8px border + 1px hairline, no shadow.
+ * The brief is explicit: border, not drop shadow.
+ */
+.calee-demo-scheduler-frame {
+    border: 1px solid #e7e5e4;
+    border-radius: 8px;
+    background-color: #ffffff;
+    overflow: hidden;
+}
+
+/*
+ * Provide a usable working area for the scheduler instances on the pages. The
+ * library's root sizes to fill 100% height/width of its parent; the demo gives
+ * a deterministic height so the time-grid views show several hours without
+ * inheriting an indefinite height (which would cause the internal overflow-auto
+ * region to collapse).
+ */
+.calee-demo-scheduler-frame > .calee-scheduler,
+.calee-demo-scheduler-frame > .calee-scheduler-week-view,
+.calee-demo-scheduler-frame > .calee-scheduler-day-view,
+.calee-demo-scheduler-frame > .calee-scheduler-month-view,
+.calee-demo-scheduler-frame > .calee-scheduler-resource-view {
+    height: 680px;
+}
+
+.calee-demo-scheduler-frame > .calee-scheduler-month-view {
+    height: 720px;
+}
+
+.calee-demo-scheduler-frame > .calee-scheduler-resource-view {
+    height: 560px;
+}
+
+/* The Blazor error banner — keep visible but soften it for the editorial look. */
+#blazor-error-ui {
+    background: #1c1917;
+    color: #fbfaf7;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    display: none;
+    left: 0;
+    padding: 0.75rem 1.5rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-size: 0.875rem;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+
+.blazor-error-boundary {
+    background-color: #f5e6e0;
+    border: 1px solid #b1462d;
+    color: #1c1917;
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+    .blazor-error-boundary::after {
+        content: "An error has occurred."
+    }

@@ -1,0 +1,222 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@*
+    ARIA structure note (NFR-06):
+
+    The 6×7 calendar grid models a date matrix — column = weekday, row = week. We model
+    the matrix as role="grid":
+
+      [role="grid"]                          outer wrapper
+        [role="row"] (weekday header)        7 columnheaders
+        [role="row"] x 6                     one per week
+          [role="gridcell"] x 7              one per day
+
+    Day cells use roving-tabindex (NFR-06) — exactly one cell is tabbable at a time.
+    Inside each cell, chips and bars are independent role="button" descendants.
+
+    Bars are rendered once per week row as an overlay positioned absolutely on top of the
+    cells, so they appear continuous across day-cell boundaries. Per-cell chips fill the
+    lanes beneath the row's bar overlay.
+*@
+
+@{
+    var dayHeaderClasses = "calee-scheduler-month-day-header"
+        + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
+}
+
+<div class="calee-scheduler-month" @attributes="AdditionalAttributes">
+
+    <div class="calee-scheduler-month-grid"
+         role="grid"
+         aria-label="Month view"
+         tabindex="-1"
+         @onkeydown="HandleGridKeyDownAsync">
+
+        @* (1) Weekday header row — 7 columnheaders starting at the configured first-day-of-week. *@
+        <div class="calee-scheduler-month-header-row" role="row">
+            @foreach (var label in WeekdayLabels())
+            {
+                <div class="@dayHeaderClasses"
+                     data-calee-region="day-header"
+                     role="columnheader">
+                    @label
+                </div>
+            }
+        </div>
+
+        @* (2) Six week rows. Each row layers a "bar overlay" on top of seven day cells. *@
+        @for (var r = 0; r < WeekRowCount; r++)
+        {
+            var row = r;
+
+            <div class="calee-scheduler-month-week-row" role="row">
+
+                @* Day cells (the bottom layer). Each cell's chip area is pushed down by
+                   the bars that actually cover *that* cell's column — cells in the same
+                   row that sit past a bar's right edge reserve no spacer space and use
+                   the full cell height for chips. *@
+                @for (var c = 0; c < ColumnCount; c++)
+                {
+                    var col = c;
+                    var cellIndex = row * 7 + col;
+                    var layout = LayoutForCell(cellIndex);
+                    var inMonth = IsInDisplayedMonth(cellIndex);
+                    var isToday = IsTodayCell(cellIndex);
+                    var isTabbable = IsCellTabbable(cellIndex);
+                    var cellBarLaneCount = BarLaneCountForCell(row, col);
+
+                    var cellClasses = "calee-scheduler-month-cell"
+                        + (inMonth ? string.Empty : " calee-scheduler-month-cell--muted")
+                        + (isToday ? " calee-scheduler-month-cell--today" : string.Empty);
+
+                    <div class="@cellClasses"
+                         data-calee-region="month-cell"
+                         role="gridcell"
+                         tabindex="@(isTabbable ? 0 : -1)"
+                         aria-current="@(isToday ? "date" : null)"
+                         aria-label="@CellAccessibleName(cellIndex)"
+                         @onclick="@(() => HandleCellSlotClickAsync(cellIndex))"
+                         @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(cellIndex)) : default)">
+
+                        <div class="calee-scheduler-month-cell-date">@CellDayNumber(cellIndex)</div>
+
+                        @* Reserve vertical space only for the bars whose span actually
+                           covers this cell. Cells past a bar's right edge reserve 0 lanes
+                           and get the full chip area; cells under N bars reserve N lanes. *@
+                        @if (cellBarLaneCount > 0)
+                        {
+                            <div class="calee-scheduler-month-cell-bar-spacer"
+                                 style="@($"--calee-scheduler-month-bar-lane-count: {cellBarLaneCount};")"
+                                 aria-hidden="true"></div>
+                        }
+
+                        <div class="calee-scheduler-month-cell-chips">
+                            @foreach (var chip in layout.VisibleChips)
+                            {
+                                var typed = TypedForId(chip.Id);
+                                var consumerClass = typed is not null ? ClassFor(typed) : null;
+                                var styleParts = new List<string>();
+                                if (chip.Color is not null)
+                                {
+                                    styleParts.Add($"--calee-scheduler-event-color: {chip.Color}");
+                                }
+                                var style = styleParts.Count == 0 ? null : string.Join("; ", styleParts) + ";";
+                                var chipIsSelected = IsEventSelected(chip.Id);
+                                var chipClasses = "calee-scheduler-month-chip"
+                                    + (chipIsSelected ? " calee-scheduler-month-chip--selected" : string.Empty)
+                                    + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
+                                var clickTarget = chip;
+
+                                <button type="button"
+                                        class="@chipClasses"
+                                        style="@style"
+                                        data-calee-region="event"
+                                        role="button"
+                                        aria-label="@ChipAccessibleName(chip)"
+                                        aria-selected="@(chipIsSelected ? "true" : null)"
+                                        @key="@($"chip:{cellIndex}:{chip.Id}")"
+                                        @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
+                                        @onclick:stopPropagation="true"
+                                        @ondblclick:stopPropagation="true"
+                                        @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
+                                        @onkeydown:preventDefault="@IsShortcutMapActive"
+                                        @onkeydown:stopPropagation="@IsShortcutMapActive">
+                                    @if (EventChipTemplate is not null && typed is not null)
+                                    {
+                                        @EventChipTemplate(typed)
+                                    }
+                                    else
+                                    {
+                                        <span class="calee-scheduler-month-chip-dot" aria-hidden="true"></span>
+                                        @if (!chip.IsAllDay)
+                                        {
+                                            <span class="calee-scheduler-month-chip-time">@FormatStartTime(chip)</span>
+                                        }
+                                        <span class="calee-scheduler-month-chip-title">@chip.Title</span>
+                                    }
+                                </button>
+                            }
+
+                            @if (layout.OverflowCount > 0)
+                            {
+                                <button type="button"
+                                        class="calee-scheduler-month-overflow-chip"
+                                        data-calee-region="overflow-chip"
+                                        role="button"
+                                        aria-label="@OverflowChipAccessibleName(cellIndex, layout.OverflowCount)"
+                                        @onclick="@(() => HandleOverflowChipClickAsync(cellIndex))"
+                                        @onclick:stopPropagation="true"
+                                        @ondblclick:stopPropagation="true">
+                                    +@(layout.OverflowCount) more
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @* Bar overlay (the top layer). Bars are absolutely positioned within the row's
+                   width using LeftColIndex / RightColIndex → percentage.
+                   ARIA: each bar is wrapped in a role="gridcell" so the role="row" ancestor
+                   (the week row) sees only role="gridcell" descendants (NFR-06). The wrapper
+                   has no layout — the bar resolves against the overlay's positioning context. *@
+                @if (BarsForWeekRow(row).Count > 0)
+                {
+                    <div class="calee-scheduler-month-bar-overlay">
+                        @foreach (var bar in BarsForWeekRow(row))
+                        {
+                            var typed = TypedForId(bar.Event.Id);
+                            var consumerClass = typed is not null ? ClassFor(typed) : null;
+                            var widthCols = bar.RightColIndex - bar.LeftColIndex + 1;
+                            var leftPct = (double)bar.LeftColIndex / ColumnCount * 100.0;
+                            var widthPct = (double)widthCols / ColumnCount * 100.0;
+                            var styleParts = new List<string>
+                            {
+                                $"left: {leftPct:F4}%",
+                                $"width: {widthPct:F4}%",
+                                $"--calee-scheduler-month-bar-lane-index: {bar.LaneIndex}"
+                            };
+                            if (bar.Event.Color is not null)
+                            {
+                                styleParts.Add($"--calee-scheduler-event-color: {bar.Event.Color}");
+                            }
+                            var style = string.Join("; ", styleParts) + ";";
+                            var barIsSelected = IsEventSelected(bar.Event.Id);
+                            var barClasses = "calee-scheduler-month-bar"
+                                + (bar.ClipLeft ? " calee-scheduler-month-bar--clip-left" : string.Empty)
+                                + (bar.ClipRight ? " calee-scheduler-month-bar--clip-right" : string.Empty)
+                                + (barIsSelected ? " calee-scheduler-month-bar--selected" : string.Empty)
+                                + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
+                            var clickTarget = bar.Event;
+
+                            <div role="gridcell" class="calee-scheduler-month-bar-cell" @key="@($"bar:{row}:{bar.Event.Id}:{bar.LeftColIndex}")">
+                                <button type="button"
+                                        class="@barClasses"
+                                        style="@style"
+                                        data-calee-region="event"
+                                        aria-label="@BarAccessibleName(bar)"
+                                        aria-selected="@(barIsSelected ? "true" : null)"
+                                        tabindex="0"
+                                        @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
+                                        @onclick:stopPropagation="true"
+                                        @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
+                                        @onkeydown:preventDefault="@IsShortcutMapActive"
+                                        @onkeydown:stopPropagation="@IsShortcutMapActive">
+                                    @if (bar.ClipLeft)
+                                    {
+                                        <span class="calee-scheduler-month-bar-clip" aria-hidden="true">&larr;</span>
+                                    }
+                                    <span class="calee-scheduler-month-bar-title">@bar.Event.Title</span>
+                                    @if (bar.ClipRight)
+                                    {
+                                        <span class="calee-scheduler-month-bar-clip" aria-hidden="true">&rarr;</span>
+                                    }
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>

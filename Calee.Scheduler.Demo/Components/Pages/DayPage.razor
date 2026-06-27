@@ -1,0 +1,374 @@
+@page "/day"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Day view — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <EditorialHeader Kicker="View 01"
+                     Title="Day"
+                     Intro="A single-column hour grid for one date. Useful when the focus is depth — the day's overlapping appointments, the early morning that's outside the band, the dinner that runs past it." />
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeSchedulerDayView TEvent="CalendarEvent"
+                               @ref="_view"
+                               TimeZone="@SchedulerSeed.DefaultTimeZone"
+                               Events="@_events"
+                               StartHour="@_startHour"
+                               EndHour="@_endHour"
+                               SlotDurationMinutes="30"
+                               AllowDragToMove="true"
+                               AllowDragToResize="true"
+                               AllowDragToCreate="true"
+                               AllowDoubleClickToCreate="true"
+                               AllowMultiSelect="true"
+                               AllowDelete="true"
+                               AllowUndoRedo="true"
+                               AllowCommandPalette="true"
+                               OnEventMoved="HandleMoved"
+                               OnEventResized="HandleResized"
+                               OnEventCreated="HandleCreated"
+                               OnEventClicked="HandleEventClicked"
+                               OnEventDeleted="HandleDeleted"
+                               OnEventsDeleted="HandleEventsDeleted"
+                               OnDayOverflowClicked="HandleOverflow"
+                               OnUndoRequested="HandleUndoRequested"
+                               OnRedoRequested="HandleRedoRequested"
+                               OnHelpRequested="HandleHelpRequested"
+                               OnCreateAtFocusRequested="HandleCreateAtFocus"
+                               OnCommandPaletteRequested="HandleCommandPaletteRequested" />
+    </div>
+
+    <PageFooterNote Caption="Drag any event to move it; drag its bottom edge to resize. Drag on empty grid space to draw a new event, or double-click an empty slot to open the editor dialog. Click an existing event to open Edit/Delete actions. Press Delete (or Backspace) on a focused event to remove it; multi-select via Ctrl/Cmd-click for batch delete. Press Cmd+Z / Ctrl+Z to undo, Cmd+Shift+Z or Ctrl+Y to redo. Press “?” for the full shortcut map, “n” to create at the next hour, Cmd/Ctrl+K to open the command palette. Clicking a “+N earlier/later” chip widens the visible hour band. Today's fixtures include a 6:30 AM airport pickup outside the StartHour=8 band, the A/B/C three-way overlap at 9–11, a customer dinner clipped at the 20:00 ceiling, and an all-day “Inventory week” banner." />
+
+</div>
+
+<EventActionPopover IsVisible="_popoverVisible"
+                    Event="@_popoverEvent"
+                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                    OnEditRequested="HandlePopoverEditRequested"
+                    OnDeleteRequested="HandlePopoverDeleteRequested"
+                    OnDismissed="@(() => _popoverVisible = false)" />
+
+<OverflowChooserPopover IsVisible="_chooserVisible"
+                        Events="_chooserEvents"
+                        TimeZone="@SchedulerSeed.DefaultTimeZone"
+                        OnEventSelected="HandleChooserSelected"
+                        OnDismissed="@(() => _chooserVisible = false)" />
+
+<EventEditorDialog IsVisible="_dialogVisible"
+                   IsNew="_dialogIsNew"
+                   InitialTitle="@_dialogTitle"
+                   InitialStart="@_dialogStart"
+                   InitialEnd="@_dialogEnd"
+                   IsAllDay="false"
+                   OnSave="HandleDialogSaveAsync"
+                   OnCancel="HandleDialogCancelAsync" />
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_view?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>Day-view fixtures anchored on today in the demo's display zone.</summary>
+    private List<CalendarEvent> _events = new();
+
+    /// <summary>View ref so the page can read Commands (Task 15 public surface)
+    /// when the user opens the palette.</summary>
+    private CaleeSchedulerDayView<CalendarEvent>? _view;
+
+    // Per-page undo/redo history. ADR-0012 places the stack on the consumer side;
+    // each CRUD handler captures a (forward, inverse) action pair before pushing.
+    private readonly SimpleUndoStack _history = new();
+
+    private int _startHour = 8;
+    private int _endHour = 20;
+
+    protected override void OnInitialized()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _events = SchedulerSeed.GetDaySeed(now, SchedulerSeed.DefaultTimeZone).ToList();
+    }
+
+    private void HandleMoved(EventMoveContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var newStart = ctx.NewStart;
+        var newEnd = ctx.NewEnd;
+
+        _events[idx] = before with { Start = newStart, End = newEnd };
+
+        var id = before.Id;
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { Start = newStart, End = newEnd };
+            },
+            inverse: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { Start = before.Start, End = before.End };
+            });
+        StateHasChanged();
+    }
+
+    private void HandleResized(EventResizeContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var newEnd = ctx.NewEnd;
+
+        _events[idx] = before with { End = newEnd };
+
+        var id = before.Id;
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { End = newEnd };
+            },
+            inverse: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { End = before.End };
+            });
+        StateHasChanged();
+    }
+
+    // Event-editor dialog state. HandleCreated / HandleEventClicked populate
+    // these and toggle _dialogVisible; the dialog calls back on Save
+    // (HandleDialogSaveAsync) or Cancel (HandleDialogCancelAsync). When
+    // _editingEventId is null, Save inserts a new event; otherwise it replaces
+    // the existing event in place.
+    private bool _dialogVisible;
+    private bool _dialogIsNew = true;
+    private string? _editingEventId;
+    private string _dialogTitle = string.Empty;
+    private DateTimeOffset _dialogStart;
+    private DateTimeOffset _dialogEnd;
+
+    private void HandleCreated(EventCreateContext ctx)
+    {
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = ctx.Slot.Start;
+        _dialogEnd = ctx.Slot.End;
+        _dialogVisible = true;
+    }
+
+    // ── Click-popover state ─────────────────────────────────────────────────
+    // Clicking an event opens a small action popover instead of jumping
+    // straight into the editor. Edit reuses the existing dialog flow; Delete
+    // routes through the same handler as the keyboard delete path.
+    private bool _popoverVisible;
+    private CalendarEvent? _popoverEvent;
+
+    // ── Overflow-chooser state ──────────────────────────────────────────────
+    private bool _chooserVisible;
+    private IReadOnlyList<ICalendarEvent>? _chooserEvents;
+
+    private void HandleEventClicked(CalendarEvent ev)
+    {
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandlePopoverEditRequested(ICalendarEvent ev)
+    {
+        _editingEventId = ev.Id;
+        _dialogIsNew = false;
+        _dialogTitle = ev.Title;
+        _dialogStart = ev.Start;
+        _dialogEnd = ev.End;
+        _dialogVisible = true;
+    }
+
+    private void HandlePopoverDeleteRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx < 0) return;
+        HandleDeleted(new EventDeleteContext { Event = _events[idx] });
+    }
+
+    private void HandleOverflow(DayOverflowContext<CalendarEvent> ctx)
+    {
+        // "+N earlier" widens the StartHour floor down to midnight; "+N later"
+        // pushes the EndHour ceiling out to the end of the day. Either action
+        // is one-way for the demo — the user refreshes the page to reset.
+        if (ctx.Kind == OverflowKind.Overlap)
+        {
+            _chooserEvents = ctx.Events;   // IReadOnlyList<CalendarEvent> -> IReadOnlyList<ICalendarEvent> (covariant)
+            _chooserVisible = true;
+        }
+        else if (ctx.Kind == OverflowKind.Earlier)
+        {
+            _startHour = 0;
+        }
+        else if (ctx.Kind == OverflowKind.Later)
+        {
+            _endHour = 24;
+        }
+    }
+
+    private void HandleChooserSelected(ICalendarEvent ev)
+    {
+        _chooserVisible = false;
+        _popoverEvent = (CalendarEvent)ev;
+        _popoverVisible = true;
+    }
+
+    private void HandleDialogSaveAsync(EventEditorDialog.EventEditorResult result)
+    {
+        if (_editingEventId is null)
+        {
+            var created = new CalendarEvent(
+                Id: Guid.NewGuid().ToString("N"),
+                Title: result.Title,
+                Start: result.Start,
+                End: result.End);
+            _events.Add(created);
+
+            _history.Push(
+                forward: () => _events.Add(created),
+                inverse: () =>
+                {
+                    var i = _events.FindIndex(e => e.Id == created.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                });
+        }
+        else
+        {
+            var idx = _events.FindIndex(e => e.Id == _editingEventId);
+            if (idx >= 0)
+            {
+                var before = _events[idx];
+                var after = before with
+                {
+                    Title = result.Title,
+                    Start = result.Start,
+                    End = result.End,
+                };
+                _events[idx] = after;
+
+                _history.Push(
+                    forward: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == after.Id);
+                        if (i >= 0) _events[i] = after;
+                    },
+                    inverse: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == before.Id);
+                        if (i >= 0) _events[i] = before;
+                    });
+            }
+        }
+        _dialogVisible = false;
+    }
+
+    private void HandleDialogCancelAsync()
+    {
+        _dialogVisible = false;
+    }
+
+    private void HandleDeleted(EventDeleteContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var capturedIdx = idx;
+        _events.RemoveAt(idx);
+
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == before.Id);
+                if (i >= 0) _events.RemoveAt(i);
+            },
+            inverse: () =>
+            {
+                var insertAt = Math.Min(capturedIdx, _events.Count);
+                _events.Insert(insertAt, before);
+            });
+    }
+
+    private void HandleEventsDeleted(EventsDeletedContext<CalendarEvent> ctx)
+    {
+        // Capture each (index, event) BEFORE removing — both for the inverse
+        // (restore at original position) and for the forward redo (remove by id).
+        var captured = new List<(int Index, CalendarEvent Event)>();
+        foreach (var ev in ctx.Events)
+        {
+            var i = _events.FindIndex(e => e.Id == ev.Id);
+            if (i >= 0) captured.Add((i, _events[i]));
+        }
+        if (captured.Count == 0) return;
+
+        // Remove in descending-index order so each RemoveAt doesn't shift earlier captures.
+        captured.Sort((a, b) => b.Index.CompareTo(a.Index));
+        foreach (var (i, _) in captured) _events.RemoveAt(i);
+
+        _history.Push(
+            forward: () =>
+            {
+                // Redo removes by id (the indices may no longer be valid after intervening edits).
+                foreach (var (_, ev) in captured)
+                {
+                    var i = _events.FindIndex(e => e.Id == ev.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                }
+            },
+            inverse: () =>
+            {
+                // Re-insert in ascending-index order, clamping to current list size.
+                var ascending = captured.OrderBy(c => c.Index).ToList();
+                foreach (var (i, ev) in ascending)
+                {
+                    var insertAt = Math.Min(i, _events.Count);
+                    _events.Insert(insertAt, ev);
+                }
+            });
+    }
+
+    private void HandleUndoRequested()
+    {
+        if (_history.Undo()) StateHasChanged();
+    }
+
+    private void HandleRedoRequested()
+    {
+        if (_history.Redo()) StateHasChanged();
+    }
+
+    // Task 14 — shortcut-map-driven callbacks (fire from the formal binding
+    // dispatch; '?' opens help, 'n' opens the create dialog at "now").
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    private void HandleCreateAtFocus()
+    {
+        // "Now, rounded down to the hour" — a reasonable default since the
+        // library doesn't currently expose the focused slot's coordinates to
+        // the consumer (the binding fires with no payload per the Task 14
+        // contract; the demo picks its own seed time).
+        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, SchedulerSeed.DefaultTimeZone);
+        var slotStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset);
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = slotStart;
+        _dialogEnd = slotStart.AddMinutes(30);
+        _dialogVisible = true;
+    }
+}

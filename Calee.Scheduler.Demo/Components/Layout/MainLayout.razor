@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+
+@*
+    Editorial two-column shell:
+      - left  = fixed 280px sidebar (NavMenu) with a faint dotted texture
+      - right = main content area; pages own their own padding so the title
+                can hug a chosen rhythm.
+
+    No top "About" link, no Bootstrap container. Layout is plain Tailwind utilities.
+*@
+
+<div class="flex min-h-screen bg-cream text-ink">
+    <aside class="w-[280px] shrink-0 border-r border-line bg-surface calee-sidebar-texture">
+        <NavMenu />
+    </aside>
+
+    <main class="flex-1 min-w-0">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload" style="color: #d4a89c; text-decoration: underline;">Reload</a>
+    <a class="dismiss">×</a>
+</div>

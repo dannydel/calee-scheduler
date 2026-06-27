@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+
+    @* ──────────────────────────────────────────────────────────────────────────
+       Demo-only typography. The library itself is font-agnostic; the demo loads
+       Fraunces (display serif), IBM Plex Sans (body), and JetBrains Mono (code)
+       from Google Fonts to ground the editorial look. Variable axes are pulled
+       for Fraunces so we can italicize at heavy weights without a separate file.
+       ────────────────────────────────────────────────────────────────────────── *@
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+
+    @* Tailwind via CDN — demo only. The library has zero runtime CSS dependencies. *@
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Inline Tailwind config so utilities like `bg-cream`, `text-accent`, and
+        // `font-display` map to the editorial palette. No build step.
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cream: '#fbfaf7',
+                        surface: '#ffffff',
+                        ink: {
+                            DEFAULT: '#1c1917',
+                            muted: '#57534e',
+                        },
+                        line: '#e7e5e4',
+                        accent: {
+                            DEFAULT: '#b1462d',
+                            muted: '#d4a89c',
+                            soft: '#f5e6e0',
+                        },
+                    },
+                    fontFamily: {
+                        display: ['"Fraunces"', 'Georgia', 'serif'],
+                        sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+                    },
+                },
+            },
+        };
+    </script>
+
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="Calee.Scheduler.Demo.styles.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body class="bg-cream text-ink font-sans antialiased">
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "calee-scheduler-a11y-audit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Out-of-band axe-core/Playwright WCAG 2.1 AA audit for the Calee.Scheduler demo. Intentionally lives outside the .NET solution so the library and tests have no Node dependency.",
+  "type": "module",
+  "scripts": {
+    "audit": "node audit.mjs"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "playwright": "^1.48.0"
+  }
+}

@@ -1,0 +1,261 @@
+@*
+    Demo-only event-details dialog. The library ships no dialogs (ADR-0010);
+    consumers wire their own modal infrastructure to OnEventCreated /
+    OnEventClicked. This component is one such wiring — opened by each page's
+    HandleCreated to let the user pick a title (and tweak the times the slot or
+    drag set) before the new event is committed to the events list.
+
+    Save fires OnSave with the entered values. Cancel fires OnCancel; the
+    caller drops the create. Backdrop click + Escape both cancel. Focus auto-
+    moves to the title input on open.
+*@
+
+@using Calee.Scheduler.Contracts
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible)
+{
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+         role="presentation"
+         @onclick="HandleBackdropClickAsync">
+        <div class="bg-surface rounded-lg shadow-2xl max-w-md w-full p-6"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="event-editor-dialog-title"
+             @onclick:stopPropagation="true"
+             @onkeydown="HandleKeyDownAsync">
+
+            <h2 id="event-editor-dialog-title" class="font-display text-2xl text-ink mb-1">
+                @(IsNew ? "Create event" : "Edit event")
+            </h2>
+            <p class="font-sans text-xs text-ink-muted mb-5">
+                @(IsNew
+                    ? "Enter a title and adjust the times if needed before saving."
+                    : "Update the event's details and save to apply.")
+            </p>
+
+            <form @onsubmit="HandleSaveAsync" @onsubmit:preventDefault="true" class="space-y-4">
+                <div>
+                    <label for="event-editor-title-input"
+                           class="block text-xs uppercase tracking-wider text-ink-muted mb-1">
+                        Title
+                    </label>
+                    <input id="event-editor-title-input"
+                           type="text"
+                           class="w-full px-3 py-2 border border-line rounded-md bg-surface text-ink focus:border-accent focus:outline-none"
+                           placeholder="Untitled event"
+                           @bind="_title"
+                           @bind:event="oninput"
+                           @ref="_titleInputRef" />
+                </div>
+
+                @if (IsAllDay)
+                {
+                    <div>
+                        <label for="event-editor-date-input"
+                               class="block text-xs uppercase tracking-wider text-ink-muted mb-1">
+                            Date
+                        </label>
+                        <input id="event-editor-date-input"
+                               type="date"
+                               class="w-full px-3 py-2 border border-line rounded-md bg-surface text-ink focus:border-accent focus:outline-none"
+                               @bind="_startDate" />
+                    </div>
+                }
+                else
+                {
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label for="event-editor-start-input"
+                                   class="block text-xs uppercase tracking-wider text-ink-muted mb-1">
+                                Start
+                            </label>
+                            <input id="event-editor-start-input"
+                                   type="datetime-local"
+                                   class="w-full px-3 py-2 border border-line rounded-md bg-surface text-ink focus:border-accent focus:outline-none"
+                                   @bind="_startLocal" />
+                        </div>
+                        <div>
+                            <label for="event-editor-end-input"
+                                   class="block text-xs uppercase tracking-wider text-ink-muted mb-1">
+                                End
+                            </label>
+                            <input id="event-editor-end-input"
+                                   type="datetime-local"
+                                   class="w-full px-3 py-2 border border-line rounded-md bg-surface text-ink focus:border-accent focus:outline-none"
+                                   @bind="_endLocal" />
+                        </div>
+                    </div>
+                }
+
+                @if (Lanes is not null && Lanes.Count > 0)
+                {
+                    <div>
+                        <label for="event-editor-lane-input"
+                               class="block text-xs uppercase tracking-wider text-ink-muted mb-1">
+                            @(LaneFieldLabel ?? "Assigned to")
+                        </label>
+                        <select id="event-editor-lane-input"
+                                class="w-full px-3 py-2 border border-line rounded-md bg-surface text-ink focus:border-accent focus:outline-none"
+                                @bind="_laneId">
+                            <option value="">Unassigned</option>
+                            @foreach (var lane in Lanes)
+                            {
+                                <option value="@lane.Id">@lane.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                <div class="flex justify-end gap-3 pt-2">
+                    <button type="button"
+                            class="px-4 py-2 text-sm font-sans text-ink-muted hover:text-ink transition-colors"
+                            @onclick="HandleCancelAsync">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 text-sm font-sans bg-accent text-white rounded-md hover:bg-accent/90 transition-colors">
+                        Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the dialog is rendered. Caller toggles this from its own state.</summary>
+    [Parameter] public bool IsVisible { get; set; }
+
+    /// <summary>True for the "create event" shape, false for "edit event". Affects the
+    /// heading and intro copy only — the form is otherwise the same.</summary>
+    [Parameter] public bool IsNew { get; set; }
+
+    /// <summary>Initial title shown in the input when the dialog opens. Empty for a
+    /// fresh create; the existing title for an edit.</summary>
+    [Parameter] public string InitialTitle { get; set; } = string.Empty;
+
+    /// <summary>Initial start time (drives both the datetime-local input for timed
+    /// events and the date input for all-day events).</summary>
+    [Parameter] public DateTimeOffset InitialStart { get; set; }
+
+    /// <summary>Initial end time. Ignored when <see cref="IsAllDay"/> is true (all-day
+    /// events span one day from <see cref="InitialStart"/>).</summary>
+    [Parameter] public DateTimeOffset InitialEnd { get; set; }
+
+    /// <summary>True to render the all-day shape (single date input, no time);
+    /// false for the timed shape (datetime-local start + end).</summary>
+    [Parameter] public bool IsAllDay { get; set; }
+
+    /// <summary>Optional lane list — when non-null and non-empty, the dialog renders
+    /// a select drop-down for the consumer to assign the event to a lane. Used by
+    /// FleetPage to pick a driver; null/empty on Day/Week/Month.</summary>
+    [Parameter] public IReadOnlyList<ILane>? Lanes { get; set; }
+
+    /// <summary>Initial lane id selection when <see cref="Lanes"/> is provided. Null
+    /// or empty selects the "Unassigned" option.</summary>
+    [Parameter] public string? InitialLaneId { get; set; }
+
+    /// <summary>Label for the lane field — e.g. "Assigned driver" on Fleet. Defaults
+    /// to "Assigned to" if not provided.</summary>
+    [Parameter] public string? LaneFieldLabel { get; set; }
+
+    /// <summary>Fires when the user clicks Save. The argument carries the entered
+    /// values; the caller commits them to its own events list.</summary>
+    [Parameter] public EventCallback<EventEditorResult> OnSave { get; set; }
+
+    /// <summary>Fires when the user cancels (Cancel button, backdrop click, or
+    /// Escape key). The caller drops the pending create / edit.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _title = string.Empty;
+    private DateTime _startLocal;
+    private DateTime _endLocal;
+    private DateTime _startDate;
+    private string _laneId = string.Empty;
+    private bool _previouslyVisible;
+    private ElementReference _titleInputRef;
+
+    protected override void OnParametersSet()
+    {
+        // Reset the form when the dialog transitions hidden → visible. Subsequent
+        // re-renders while visible (e.g., the user types in the title field)
+        // mustn't clobber the in-progress edits.
+        if (IsVisible && !_previouslyVisible)
+        {
+            _title = InitialTitle;
+            _startLocal = InitialStart.LocalDateTime;
+            _endLocal = InitialEnd.LocalDateTime;
+            _startDate = InitialStart.LocalDateTime.Date;
+            _laneId = InitialLaneId ?? string.Empty;
+        }
+        _previouslyVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Move focus into the title input on every open so the user can start typing
+        // immediately. FocusAsync is silently a no-op if the input isn't in the DOM
+        // (e.g., the dialog is hidden), but we gate on IsVisible anyway to keep the
+        // semantics obvious.
+        if (IsVisible)
+        {
+            try { await _titleInputRef.FocusAsync(); }
+            catch { /* element not yet attached on the first render; no-op. */ }
+        }
+    }
+
+    private async Task HandleSaveAsync()
+    {
+        DateTimeOffset start;
+        DateTimeOffset end;
+        if (IsAllDay)
+        {
+            // All-day events span the calendar day in the originating event's offset.
+            // The library only consults the date portion (per CONTEXT.md), so the
+            // exact time-of-day on Start/End is for bookkeeping consistency.
+            start = new DateTimeOffset(_startDate, InitialStart.Offset);
+            end = start.AddDays(1).AddTicks(-1);
+        }
+        else
+        {
+            // Preserve the originating event's offset so the demo's TimeZone parameter
+            // continues to interpret the values correctly. The datetime-local input
+            // returns a naive DateTime, which we re-anchor to InitialStart.Offset.
+            start = new DateTimeOffset(_startLocal, InitialStart.Offset);
+            end = new DateTimeOffset(_endLocal, InitialStart.Offset);
+            if (end <= start)
+            {
+                // Guard against a user inverting the times. Snap end one slot past
+                // start (30 minutes — matching the demo's SlotDurationMinutes default).
+                end = start.AddMinutes(30);
+            }
+        }
+
+        var resolvedTitle = string.IsNullOrWhiteSpace(_title) ? "Untitled event" : _title.Trim();
+        var resolvedLaneId = string.IsNullOrEmpty(_laneId) ? null : _laneId;
+
+        await OnSave.InvokeAsync(new EventEditorResult(resolvedTitle, start, end, IsAllDay, resolvedLaneId));
+    }
+
+    private Task HandleCancelAsync() => OnCancel.InvokeAsync();
+
+    private Task HandleBackdropClickAsync() => OnCancel.InvokeAsync();
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    /// <summary>Result the dialog hands back on Save. Caller maps the fields onto its
+    /// own event type and decides whether to insert or replace.</summary>
+    public sealed record EventEditorResult(
+        string Title,
+        DateTimeOffset Start,
+        DateTimeOffset End,
+        bool IsAllDay,
+        string? LaneId);
+}

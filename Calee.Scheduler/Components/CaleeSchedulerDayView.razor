@@ -1,0 +1,308 @@
+@typeparam TEvent where TEvent : ICalendarEvent
+@inherits SchedulerStatefulComponentBase<TEvent>
+
+@{
+    // Local helpers for inline rendering. The CSS expects single-class selectors per
+    // the risk-row guidance on CSS isolation (PRD §7).
+    var dayHeaderClasses = "calee-scheduler-day-header"
+        + (Today.Date == CurrentDate.Date ? " calee-scheduler-day-header--today" : string.Empty)
+        + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
+
+    var allDayRowClasses = "calee-scheduler-all-day-row"
+        + (string.IsNullOrEmpty(AllDayRowClass) ? string.Empty : " " + AllDayRowClass);
+
+    var timeGutterClasses = "calee-scheduler-time-gutter"
+        + (string.IsNullOrEmpty(TimeGutterClass) ? string.Empty : " " + TimeGutterClass);
+}
+
+<div class="calee-scheduler-day" @attributes="AdditionalAttributes">
+
+    @* (1) Day header row — FR-04 implicit, §5.1 *@
+    <div class="@dayHeaderClasses" data-calee-region="day-header">
+        <div class="calee-scheduler-day-header-weekday">@CurrentDate.ToString("ddd")</div>
+        <div class="calee-scheduler-day-header-date">@CurrentDate.Day</div>
+    </div>
+
+    @* (2) All-day row — FR-14, FR-15 (all-day path) *@
+    <div class="@allDayRowClasses" data-calee-region="all-day">
+        @foreach (var ev in AllDayEvents)
+        {
+            var clipLeft = AllDayClippedLeft(ev);
+            var clipRight = AllDayClippedRight(ev);
+            var consumerEventClass = GetEventClass(ev);
+            var style = ev.Color is not null
+                ? $"--calee-scheduler-event-color: {ev.Color};"
+                : null;
+            var allDayIsSelected = IsEventSelected(ev.Id);
+            var eventClasses = "calee-scheduler-all-day-event"
+                + (clipLeft ? " calee-scheduler-all-day-event--clip-left" : string.Empty)
+                + (clipRight ? " calee-scheduler-all-day-event--clip-right" : string.Empty)
+                + (allDayIsSelected ? " calee-scheduler-all-day-event--selected" : string.Empty)
+                + (string.IsNullOrEmpty(consumerEventClass) ? string.Empty : " " + consumerEventClass);
+
+            <button type="button"
+                    class="@eventClasses"
+                    style="@style"
+                    data-calee-region="event"
+                    role="button"
+                    aria-label="@AllDayAccessibleName(ev)"
+                    aria-selected="@(allDayIsSelected ? "true" : null)"
+                    @key="ev.Id"
+                    @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(ev, e)))"
+                    @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, ev))"
+                    @onkeydown:preventDefault="@IsShortcutMapActive"
+                    @onkeydown:stopPropagation="@IsShortcutMapActive">
+                @if (clipLeft)
+                {
+                    <span class="calee-scheduler-clip-indicator" aria-hidden="true">&larr;</span>
+                }
+                @if (EventTemplate is not null)
+                {
+                    @EventTemplate(ev)
+                }
+                else
+                {
+                    <span class="calee-scheduler-all-day-event-title">@ev.Title</span>
+                }
+                @if (clipRight)
+                {
+                    <span class="calee-scheduler-clip-indicator" aria-hidden="true">&rarr;</span>
+                }
+            </button>
+        }
+    </div>
+
+    @* (3) "+N earlier" chip row — FR-19a *@
+    @if (EarlierOverflowCount > 0)
+    {
+        <div class="calee-scheduler-overflow-row">
+            <button type="button"
+                    class="calee-scheduler-overflow-chip"
+                    data-calee-region="overflow-chip"
+                    role="button"
+                    aria-label="@($"{EarlierOverflowCount} events earlier")"
+                    @onclick="HandleEarlierChipClickAsync">
+                +@EarlierOverflowCount earlier
+            </button>
+        </div>
+    }
+
+    @* (4) Hour grid — FR-01, FR-05, FR-06, FR-12 *@
+    <div class="calee-scheduler-hour-grid-wrapper"
+         @ref="_hourGridRef"
+         role="grid"
+         aria-label="Day view hour grid"
+         tabindex="-1"
+         @onkeydown="HandleGridKeyDownAsync">
+
+        <div class="@timeGutterClasses" data-calee-region="time-gutter">
+            @foreach (var hour in HourLabels())
+            {
+                <div class="calee-scheduler-time-gutter-label" style="@($"top: {HourToPercent(hour)}%;")">
+                    @FormatHour(hour)
+                </div>
+            }
+        </div>
+
+        <div class="calee-scheduler-hour-grid" data-calee-region="hour-grid">
+
+            @* Grid lines — one per hour *@
+            @foreach (var hour in HourLabels())
+            {
+                <div class="calee-scheduler-hour-line" style="@($"top: {HourToPercent(hour)}%;")"></div>
+            }
+
+            @* Slot cells — for click + keyboard nav. Each cell is a gridcell with a row wrapper.
+               When AllowDragToCreate=true (FR-24) the cell also wires @onpointerdown so the user
+               can press-and-drag to draw out a new event region. Below-threshold movement falls
+               through to the existing @onclick → OnSlotClicked path; above-threshold fires
+               OnEventCreated (the JS module is the threshold gatekeeper — see ADR-0015). *@
+            @{
+                var createEnabled = AllowDragToCreate;
+                var slotExtraClass = createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty;
+            }
+            @for (var slotIndex = 0; slotIndex < SlotCountForRender; slotIndex++)
+            {
+                var idx = slotIndex;
+                var top = (double)slotIndex / SlotCountForRender * 100.0;
+                var height = 100.0 / SlotCountForRender;
+                var isTabbable = IsSlotTabbable(idx);
+
+                <div role="row" class="calee-scheduler-slot-row" style="@($"top: {top:F4}%; height: {height:F4}%;")">
+                    <div role="gridcell"
+                         class="@("calee-scheduler-slot" + slotExtraClass)"
+                         tabindex="@(isTabbable ? 0 : -1)"
+                         aria-label="@SlotAccessibleName(idx)"
+                         @onclick="@(() => HandleSlotClickAsync(idx))"
+                         @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(idx)) : default)"
+                         @onpointerdown="@(createEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnGridPointerDownAsync(e, idx)) : default)">
+                    </div>
+                </div>
+            }
+
+            @* Timed events — positioned via the layout engine.
+               ARIA: events are wrapped in a single role="row" with one role="gridcell" per
+               event so the role="grid" ancestor sees only role="row" / role="gridcell"
+               descendants (NFR-06). The wrappers carry no layout; the absolutely-positioned
+               button resolves against `.calee-scheduler-hour-grid`'s positioning context. *@
+            @if (PositionedEvents.Count > 0)
+            {
+                <div role="row" class="calee-scheduler-events-row">
+                @for (var peIndex = 0; peIndex < PositionedEvents.Count; peIndex++)
+                {
+                    var pe = PositionedEvents[peIndex];
+                    var clickTarget = pe.Event; // EventChunk<TEvent> or original — handler unwraps via Id.
+                    var typed = TypedFor(pe.Event);
+                    // Display source: when an optimistic pin is set for this event, the
+                    // pinned (Start, End) on the chunk already drive the engine's layout —
+                    // use the chunk itself (`pe.Event`) for the displayed time-range label
+                    // so the announced/visible times match the pinned position. Otherwise
+                    // fall back to the unwrapped consumer event for the canonical multi-
+                    // day-aware time string (consistent with the Phase 1 read-only path).
+                    var displayEv = (typed is not null && GetOptimisticPin(typed.Id) is not null)
+                        ? pe.Event
+                        : UnwrapForFormatting(pe.Event);
+                    var stackWidth = 100.0 / Math.Max(1, pe.StackCount);
+                    var stackLeft = stackWidth * pe.StackIndex;
+                    var consumerEventClass = typed is not null ? GetEventClass(typed) : null;
+                    var styleParts = new List<string>
+                    {
+                        $"top: {pe.TimeStartPercent:F4}%",
+                        $"height: {pe.TimeSpanPercent:F4}%",
+                        $"left: {stackLeft:F4}%",
+                        $"width: {stackWidth:F4}%"
+                    };
+                    if (displayEv.Color is not null)
+                    {
+                        styleParts.Add($"--calee-scheduler-event-color: {displayEv.Color}");
+                    }
+                    var style = string.Join("; ", styleParts) + ";";
+                    var clipTop = ClippedTop(pe);
+                    var clipBot = ClippedBottom(pe);
+                    var isSelected = IsEventSelected(displayEv.Id);
+                    var classes = "calee-scheduler-event"
+                        + (clipTop ? " calee-scheduler-event--clip-top" : string.Empty)
+                        + (clipBot ? " calee-scheduler-event--clip-bottom" : string.Empty)
+                        + (isSelected ? " calee-scheduler-event--selected" : string.Empty)
+                        + (string.IsNullOrEmpty(consumerEventClass) ? string.Empty : " " + consumerEventClass);
+                    var durationMinutes = (displayEv.End - displayEv.Start).TotalMinutes;
+                    var showTime = durationMinutes >= 30;
+                    var eventId = displayEv.Id;
+                    var dragEnabled = AllowDragToMove;
+                    var resizeEnabled = AllowDragToResize;
+                    // The outer chip carries the move data attribute; the resize hit-zone is
+                    // a separate child overlay below so the bottom 8 px can take pointerdown
+                    // independently and stop propagation from reaching the move handler.
+                    var ariaRoleDesc = EventAriaRoleDescription();
+
+                    <div role="gridcell" class="calee-scheduler-event-cell" @key="eventId">
+                        <button type="button"
+                                class="@classes"
+                                style="@style"
+                                data-calee-region="event"
+                                data-calee-drag-handle="@(dragEnabled ? "move" : null)"
+                                aria-label="@($"{displayEv.Title}, {FormatEventTimeRange(displayEv)}")"
+                                aria-roledescription="@ariaRoleDesc"
+                                aria-selected="@(isSelected ? "true" : null)"
+                                tabindex="0"
+                                @ref="EventRefsByEventId[eventId]"
+                                @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
+                                @onclick:stopPropagation="true"
+                                @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
+                                @onkeydown:preventDefault="@IsShortcutMapActive"
+                                @onkeydown:stopPropagation="@IsShortcutMapActive"
+                                @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventPointerDownAsync(e, clickTarget)) : default)">
+                            @if (clipTop)
+                            {
+                                <span class="calee-scheduler-event-clip calee-scheduler-event-clip--top" aria-hidden="true">&uarr;</span>
+                            }
+                            @if (EventTemplate is not null && typed is not null)
+                            {
+                                @EventTemplate(typed)
+                            }
+                            else
+                            {
+                                <div class="calee-scheduler-event-default">
+                                    <div class="calee-scheduler-event-title">@displayEv.Title</div>
+                                    @if (showTime)
+                                    {
+                                        <div class="calee-scheduler-event-time">@FormatEventTimeRange(displayEv)</div>
+                                    }
+                                </div>
+                            }
+                            @if (clipBot)
+                            {
+                                <span class="calee-scheduler-event-clip calee-scheduler-event-clip--bottom" aria-hidden="true">&darr;</span>
+                            }
+                            @* Resize hit-zone overlay — covers the bottom 8 px of the chip
+                               with cursor: ns-resize. Pointerdown here starts a resize drag
+                               via the same JS module; @onpointerdown:stopPropagation prevents
+                               the move handler on the parent button from also firing. The
+                               overlay is library-owned (not part of EventTemplate) per plan
+                               §5.1 #3 — consumers don't have to know about resize affordances. *@
+                            @if (resizeEnabled)
+                            {
+                                <span class="calee-scheduler-event-resize-handle"
+                                      data-calee-drag-handle="resize-end"
+                                      aria-hidden="true"
+                                      @onpointerdown="@(EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventResizePointerDownAsync(e, clickTarget)))"
+                                      @onpointerdown:stopPropagation="true"></span>
+                            }
+                        </button>
+                    </div>
+                }
+                </div>
+            }
+
+            @* Overlap-overflow blocks — "+N" chips for events that exceed the column cap. *@
+            @foreach (var block in OverlapBlocks)
+            {
+                var blockWidth = 100.0 / Math.Max(1, block.StackCount);
+                var blockLeft = blockWidth * block.StackIndex;
+                var blockStyle = $"top: {block.TimeStartPercent:F4}%; height: {block.TimeSpanPercent:F4}%; left: {blockLeft:F4}%; width: {blockWidth:F4}%;";
+                <div role="gridcell" class="calee-scheduler-event-cell" @key="@($"overflow:{block.RegionStart.Ticks}")">
+                    <button type="button"
+                            class="calee-scheduler-overlap-block"
+                            style="@blockStyle"
+                            data-calee-region="overflow-chip"
+                            aria-label="@OverlapBlockAccessibleName(block)"
+                            @onclick="@(() => HandleOverlapChipClickAsync(block))"
+                            @onclick:stopPropagation="true">
+                        +@block.Events.Count
+                    </button>
+                </div>
+            }
+
+            @* Current-time indicator — FR-07 *@
+            @if (IsTodayInView)
+            {
+                var pct = CurrentTimeIndicatorPercent;
+                if (pct >= 0)
+                {
+                    <div class="calee-scheduler-current-time-indicator"
+                         style="@($"top: {pct:F4}%;")"
+                         title="@CurrentTimeText()"
+                         aria-hidden="true">
+                        <div class="calee-scheduler-current-time-indicator-dot"></div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+
+    @* (5) "+N later" chip row — mirror of #3 *@
+    @if (LaterOverflowCount > 0)
+    {
+        <div class="calee-scheduler-overflow-row">
+            <button type="button"
+                    class="calee-scheduler-overflow-chip"
+                    data-calee-region="overflow-chip"
+                    role="button"
+                    aria-label="@($"{LaterOverflowCount} events later")"
+                    @onclick="HandleLaterChipClickAsync">
+                +@LaterOverflowCount later
+            </button>
+        </div>
+    }
+
+</div>

@@ -1,0 +1,36 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-3xl">
+    <div class="text-[0.6875rem] font-medium tracking-[0.18em] text-accent uppercase mb-3">
+        Something went wrong
+    </div>
+    <h1 class="font-display italic font-semibold text-ink leading-[0.95] text-[3rem] tracking-tight">
+        An error occurred
+    </h1>
+    <p class="mt-5 font-sans font-light text-[1.0625rem] leading-[1.55] text-ink-muted">
+        The request couldn't be processed. If this keeps happening, restart the demo
+        with <code class="font-mono text-sm bg-line/40 px-1.5 py-0.5 rounded">ASPNETCORE_ENVIRONMENT=Development</code>
+        to surface the underlying exception.
+    </p>
+
+    @if (ShowRequestId)
+    {
+        <div class="mt-8 font-mono text-sm text-ink-muted">
+            Request ID: <code>@RequestId</code>
+        </div>
+    }
+</div>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

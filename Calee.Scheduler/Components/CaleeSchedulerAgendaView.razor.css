@@ -1,0 +1,214 @@
+/*
+ * Calee.Scheduler — CaleeSchedulerAgendaView default styles.
+ *
+ * Shared `--calee-scheduler-*` theme tokens come from the root
+ * `.calee-scheduler` container (see CaleeScheduler.razor.css). Agenda view
+ * consumes:
+ *   --calee-scheduler-focus-color
+ *   --calee-scheduler-today-background
+ *   --calee-scheduler-grid-line-color
+ *   --calee-scheduler-event-color
+ *
+ * Agenda-specific tokens (declared locally below):
+ *   --calee-scheduler-agenda-max-height        70vh
+ *       Maximum height of the scrollable list container. Sticky date headers
+ *       require a scrollable ancestor; this token gives consumers one knob to
+ *       re-theme the viewport when embedding the view in a non-flexbox layout.
+ *   --calee-scheduler-agenda-header-bg         #ffffff
+ *       Background of the sticky date headers. Solid by default so the rows
+ *       scrolling underneath don't bleed through.
+ *   --calee-scheduler-agenda-row-padding       0.75rem 1rem
+ *       Per-row padding. Pulled into a token so consumers tightening the row
+ *       density don't have to ::deep override the per-element rule.
+ *
+ * Per ADR-0009 / NFR-06: contrast against the default theme meets WCAG 2.1 AA
+ * for both the row text and the sticky header text on the default surface.
+ * Selectors are single-class so consumer ::deep overrides remain clean.
+ */
+
+.calee-scheduler-agenda {
+    --calee-scheduler-agenda-max-height: 70vh;
+    --calee-scheduler-agenda-header-bg: #ffffff;
+    --calee-scheduler-agenda-row-padding: 0.75rem 1rem;
+
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 320px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #18181b;
+    background: #ffffff;
+    box-sizing: border-box;
+}
+
+/* The scrollable list container. position: sticky on the headers requires a
+   scroll-able ancestor with a bounded height; the max-height + overflow-y
+   here is what activates the stickiness without depending on the host layout.
+   role="list" is on this element in the markup. */
+.calee-scheduler-agenda-list {
+    flex: 1 1 auto;
+    max-height: var(--calee-scheduler-agenda-max-height);
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
+    border-radius: 4px;
+    /* Avoid blocking horizontal-overflow scrolling on long titles — clip at
+       the row level instead so the list itself never bounces horizontally. */
+    min-width: 0;
+}
+
+/* Empty state — shown when no events fall within the window. role="status"
+   carries aria-live="polite" so screen readers announce the empty state on
+   data arrival changes. */
+.calee-scheduler-agenda-empty {
+    padding: 1.5rem 1rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #71717a;
+}
+
+/* Per-group wrapper. Holds one sticky header + N rows. */
+.calee-scheduler-agenda-group {
+    display: block;
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
+}
+
+.calee-scheduler-agenda-group:last-child {
+    border-bottom: none;
+}
+
+/* Sticky date-group header. position: sticky relative to the scrollable
+   parent (.calee-scheduler-agenda-list). The button shape is intentional —
+   the header is a click target (drill-down to that date) and keyboard-
+   reachable via the default Tab order; it's NOT a focus stop in the
+   roving-tabindex flow between rows (Arrow Up/Down skip it). */
+.calee-scheduler-agenda-header {
+    position: sticky;
+    top: 0;
+    z-index: 2; /* Above rows but below any overlays the consumer might add. */
+    width: 100%;
+    display: block;
+    text-align: left;
+    background: var(--calee-scheduler-agenda-header-bg, #ffffff);
+    border: none;
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
+    padding: 0.625rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #18181b;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.calee-scheduler-agenda-header:hover {
+    background: #f4f4f5;
+}
+
+.calee-scheduler-agenda-header:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+}
+
+.calee-scheduler-agenda-header--today {
+    background: var(--calee-scheduler-today-background, #eef4ff);
+    color: #1d4ed8;
+}
+
+.calee-scheduler-agenda-header--today:hover {
+    /* Slightly darker on hover so the today emphasis remains. */
+    background: #e0ecff;
+}
+
+/* Per-row container. role="listitem". The button shape carries the click
+   handler + roving-tabindex + aria-selected + the per-event color via the
+   --calee-scheduler-event-color custom property (consumer event Color flows
+   into the dot/border). */
+.calee-scheduler-agenda-row {
+    --calee-scheduler-event-color: #4a6ea8;
+
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: var(--calee-scheduler-agenda-row-padding, 0.75rem 1rem);
+    background: transparent;
+    border: none;
+    border-left: 3px solid var(--calee-scheduler-event-color);
+    text-align: left;
+    font-size: 0.875rem;
+    color: #18181b;
+    cursor: pointer;
+    box-sizing: border-box;
+    /* Tail-of-row clipping for long titles — keeps the row in one line. */
+    min-width: 0;
+}
+
+.calee-scheduler-agenda-row + .calee-scheduler-agenda-row {
+    border-top: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
+}
+
+.calee-scheduler-agenda-row:hover {
+    background: #fafaf9;
+}
+
+.calee-scheduler-agenda-row:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+    z-index: 1;
+    position: relative;
+}
+
+.calee-scheduler-agenda-row--selected {
+    background: #fdf4ed;
+}
+
+.calee-scheduler-agenda-row--selected:hover {
+    background: #faece1;
+}
+
+/* Per-row dot — small filled square matching the event color. Visual cue that
+   pairs with the left-border accent. */
+.calee-scheduler-agenda-row-dot {
+    flex: 0 0 auto;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--calee-scheduler-event-color);
+}
+
+/* Time text — fixed width-ish so titles align across rows. The min-width
+   keeps single-day "All day" or "9:00 AM – 10:00 AM" visually consistent
+   with multi-day "Mar 12 → Mar 16" rows. */
+.calee-scheduler-agenda-row-time {
+    flex: 0 0 auto;
+    min-width: 9rem;
+    font-variant-numeric: tabular-nums;
+    color: #57534e;
+    font-size: 0.8125rem;
+}
+
+.calee-scheduler-agenda-row-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+/* Visual cue for the leading-edge pin — an arrow before the dot indicating
+   the event started earlier than the window. */
+.calee-scheduler-agenda-row-clip {
+    flex: 0 0 auto;
+    color: #a8a29e;
+    font-size: 0.75rem;
+}
+
+.calee-scheduler-agenda-row--all-day {
+    /* All-day rows lean lightly on the today background tint so the user
+       distinguishes them from timed rows without going to a separate stripe. */
+}
+
+.calee-scheduler-agenda-row--all-day .calee-scheduler-agenda-row-time {
+    font-style: italic;
+}

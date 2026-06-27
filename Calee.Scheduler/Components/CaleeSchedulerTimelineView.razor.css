@@ -1,0 +1,385 @@
+/*
+ * Calee.Scheduler — CaleeSchedulerTimelineView default styles.
+ *
+ * Shared `--calee-scheduler-*` theme tokens are declared once on the root
+ * `.calee-scheduler` container (see CaleeScheduler.razor.css) and inherited
+ * through the cascade — see that file for the full theming surface.
+ *
+ * This view consumes the following shared tokens:
+ *   --calee-scheduler-event-default-color
+ *   --calee-scheduler-event-color           (set inline per event)
+ *   --calee-scheduler-focus-color
+ *   --calee-scheduler-today-background
+ *   --calee-scheduler-grid-line-color
+ *   --calee-scheduler-current-time-indicator-color
+ *   --calee-scheduler-pixels-per-hour       (horizontal density in TimeScale=Day)
+ *
+ * Timeline-specific tokens (declared locally below):
+ *   --calee-scheduler-timeline-label-width      12rem
+ *       Fixed-width left strip per lane row.
+ *   --calee-scheduler-timeline-pixels-per-day   120px
+ *       Horizontal density when TimeScale=Week or TimeScale=Month.
+ *   --calee-scheduler-timeline-row-min-height   5rem
+ *       Row minimum height; sized to fit roughly 3 stacked events.
+ *
+ * `var(..., <fallback>)` is used at each consumption site for shared tokens
+ * so the Timeline view still renders correctly when used standalone (without
+ * the root wrapper). Selectors are single-class so consumer ::deep overrides
+ * work cleanly. Contrast meets WCAG 2.1 AA (NFR-06).
+ */
+
+.calee-scheduler-timeline {
+    --calee-scheduler-timeline-label-width: 12rem;
+    --calee-scheduler-timeline-pixels-per-day: 120px;
+    --calee-scheduler-timeline-row-min-height: 5rem;
+
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 400px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #18181b;
+    background: #ffffff;
+}
+
+.calee-scheduler-timeline-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.calee-scheduler-timeline-tick-row {
+    display: flex;
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    background: #fafafa;
+    flex-shrink: 0;
+}
+
+.calee-scheduler-timeline-label-gutter {
+    width: var(--calee-scheduler-timeline-label-width);
+    flex-shrink: 0;
+    border-right: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-timeline-time-gutter {
+    position: relative;
+    flex: 1 1 auto;
+    height: 1.75rem;
+}
+
+.calee-scheduler-timeline-tick-label {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    color: #52525b;
+    font-weight: 500;
+    border-right: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+}
+
+.calee-scheduler-timeline-rows {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    overflow: auto;
+    min-height: 0;
+}
+
+.calee-scheduler-timeline-row {
+    display: flex;
+    border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    min-height: var(--calee-scheduler-timeline-row-min-height);
+    align-items: stretch;
+}
+
+.calee-scheduler-timeline-label {
+    width: var(--calee-scheduler-timeline-label-width);
+    flex-shrink: 0;
+    padding: 0.5rem;
+    border-right: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    box-sizing: border-box;
+}
+
+.calee-scheduler-timeline-label--unassigned {
+    background: #f4f4f5;
+    color: #52525b;
+    font-style: italic;
+}
+
+.calee-scheduler-timeline-label-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #18181b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calee-scheduler-timeline-label--unassigned .calee-scheduler-timeline-label-name {
+    color: #52525b;
+}
+
+.calee-scheduler-timeline-all-day {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.125rem;
+    min-height: 1rem;
+}
+
+.calee-scheduler-timeline-all-day-chip {
+    --calee-scheduler-event-color: var(--calee-scheduler-event-default-color, #4a6ea8);
+    display: inline-flex;
+    align-items: center;
+    border: none;
+    border-left: 3px solid var(--calee-scheduler-event-color);
+    background: color-mix(in srgb, var(--calee-scheduler-event-color) 12%, transparent);
+    color: #18181b;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    padding: 0.0625rem 0.25rem;
+    border-radius: 2px;
+    cursor: pointer;
+    max-width: 100%;
+}
+
+.calee-scheduler-timeline-all-day-chip:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}
+
+/* Selected state for the per-lane all-day banner chip (FR-34). */
+.calee-scheduler-timeline-all-day-chip--selected {
+    box-shadow: inset 0 0 0 2px var(--calee-scheduler-selected-color, #f59e0b);
+}
+
+.calee-scheduler-timeline-all-day-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calee-scheduler-timeline-time-area {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: var(--calee-scheduler-timeline-row-min-height);
+}
+
+.calee-scheduler-timeline-hour-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--calee-scheduler-grid-line-color, #d4d4d8);
+    pointer-events: none;
+}
+
+.calee-scheduler-timeline-day-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--calee-scheduler-grid-line-color, #d4d4d8);
+    pointer-events: none;
+}
+
+.calee-scheduler-timeline-slot {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    cursor: pointer;
+    background: transparent;
+    border-left: 1px solid transparent;
+    box-sizing: border-box;
+}
+
+.calee-scheduler-timeline-slot:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+    z-index: 2;
+}
+
+/* Drag-to-create affordance (FR-24). TimelineView's time axis is horizontal,
+   so the cursor still reads as `cell` — the gesture's direction (left vs right)
+   is implicit from the layout. */
+.calee-scheduler-timeline-slot--create-affordance {
+    cursor: cell;
+}
+
+.calee-scheduler-timeline-event {
+    --calee-scheduler-event-color: var(--calee-scheduler-event-default-color, #4a6ea8);
+    position: absolute;
+    border: none;
+    padding: 0.25rem 0.375rem;
+    border-left: 3px solid var(--calee-scheduler-event-color);
+    background: color-mix(in srgb, var(--calee-scheduler-event-color) 12%, white);
+    color: #18181b;
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    border-radius: 3px;
+    box-sizing: border-box;
+    z-index: 1;
+}
+
+.calee-scheduler-timeline-event:hover {
+    background: color-mix(in srgb, var(--calee-scheduler-event-color) 20%, white);
+}
+
+.calee-scheduler-timeline-event:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+    z-index: 3;
+}
+
+/* Selected state (FR-34). Inset box-shadow keeps the amber indicator inside the
+   chip; distinct from the focus ring so a focused-but-not-selected chip stays
+   visually unambiguous. */
+.calee-scheduler-timeline-event--selected {
+    box-shadow: inset 0 0 0 2px var(--calee-scheduler-selected-color, #f59e0b);
+    z-index: 2;
+}
+
+.calee-scheduler-timeline-event--clip-left {
+    border-left: 2px dashed var(--calee-scheduler-event-color);
+}
+
+.calee-scheduler-timeline-event--clip-right {
+    border-right: 2px dashed var(--calee-scheduler-event-color);
+}
+
+.calee-scheduler-timeline-event-clip {
+    display: inline-block;
+    font-size: 0.75rem;
+    color: var(--calee-scheduler-event-color);
+    font-weight: 700;
+}
+
+.calee-scheduler-timeline-event-clip--left {
+    margin-right: 0.125rem;
+}
+
+.calee-scheduler-timeline-event-clip--right {
+    margin-left: 0.125rem;
+}
+
+.calee-scheduler-timeline-event-default {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.calee-scheduler-timeline-event-title {
+    font-weight: 600;
+    color: #18181b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calee-scheduler-timeline-event-time {
+    font-size: 0.6875rem;
+    color: #52525b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Resize hit-zone — right 8 px overlay surfaced when AllowDragToResize=true
+   (FR-26). Cursor-only affordance per Phase 2 plan §5.1 #2. The horizontal-time
+   geometry inverts Day/Week's vertical layout: cursor is ew-resize and the
+   right edge of the chip is the hit target. */
+.calee-scheduler-timeline-event-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 8px;
+    cursor: ew-resize;
+    z-index: 3;
+    background: transparent;
+    border-top-right-radius: inherit;
+    border-bottom-right-radius: inherit;
+}
+
+.calee-scheduler-timeline-current-time-indicator {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--calee-scheduler-current-time-indicator-color, #dc2626);
+    pointer-events: none;
+    z-index: 4;
+}
+
+.calee-scheduler-overflow-chip {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #f4f4f5;
+    border: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    color: #18181b;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    padding: 0.125rem 0.375rem;
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 5;
+}
+
+.calee-scheduler-overflow-chip--earlier {
+    left: 0.25rem;
+}
+
+.calee-scheduler-overflow-chip--later {
+    right: 0.25rem;
+}
+
+.calee-scheduler-overflow-chip:hover {
+    background: #e4e4e7;
+}
+
+.calee-scheduler-overflow-chip:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}
+
+.calee-scheduler-overlap-block {
+    position: absolute;
+    /* Match the event chip's layering: z-index lifts the block above the slot grid,
+       and pointer-events re-enables hit-testing — the .calee-scheduler-event-cell
+       wrapper sets pointer-events:none so clicks fall through to the slot grid, and
+       each interactive child must opt back in (the event button does the same). */
+    z-index: 1;
+    pointer-events: auto;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #e4e4e7;
+    border: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
+    color: #18181b;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 4px;
+    padding: 0 2px;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.calee-scheduler-overlap-block:hover {
+    background: #d4d4d8;
+}
+
+.calee-scheduler-overlap-block:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: 1px;
+}

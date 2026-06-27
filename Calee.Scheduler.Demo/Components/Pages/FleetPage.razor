@@ -1,0 +1,381 @@
+@page "/fleet"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Fleet view — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <EditorialHeader Kicker="View 04"
+                     Title="Fleet"
+                     Intro="A Timeline view: rows are lanes — drivers, vehicles, rooms, anything you schedule against — and the X-axis is time. An event whose LaneKey doesn't resolve to a row lands in a trailing unassigned bucket; all-day events render as a banner strip on the row label, not in the time grid." />
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeSchedulerTimelineView TEvent="SchedulerSeed.FleetEvent"
+                                    @ref="_view"
+                                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                                    Lanes="@_drivers"
+                                    LaneKey="@(ev => ev.DriverId)"
+                                    Events="@_events"
+                                    TimeScale="TimelineScale.Day"
+                                    StartHour="@_startHour"
+                                    EndHour="@_endHour"
+                                    SlotDurationMinutes="30"
+                                    ShowUnassignedRow="true"
+                                    AllowDragToMove="true"
+                                    AllowDragToResize="true"
+                                    AllowDragToCreate="true"
+                                    AllowDoubleClickToCreate="true"
+                                    AllowMultiSelect="true"
+                                    AllowDelete="true"
+                                    AllowUndoRedo="true"
+                                    AllowCommandPalette="true"
+                                    OnEventMoved="HandleMoved"
+                                    OnEventResized="HandleResized"
+                                    OnEventCreated="HandleCreated"
+                                    OnEventClicked="HandleEventClicked"
+                                    OnEventDeleted="HandleDeleted"
+                                    OnEventsDeleted="HandleEventsDeleted"
+                                    OnDayOverflowClicked="HandleOverflow"
+                                    OnUndoRequested="HandleUndoRequested"
+                                    OnRedoRequested="HandleRedoRequested"
+                                    OnHelpRequested="HandleHelpRequested"
+                                    OnCreateAtFocusRequested="HandleCreateAtFocus"
+                                    OnCommandPaletteRequested="HandleCommandPaletteRequested" />
+    </div>
+
+    <PageFooterNote Caption="Drag events across driver rows to reassign them — the “Emergency call” in the trailing unassigned bucket can be dragged up into any lane. Resize via the right edge; drag empty grid space to draw a new shift; double-click to open the editor dialog (and pick a driver). Click an existing event to open Edit/Delete actions. Press Delete (or Backspace) on a focused event to remove it; multi-select via Ctrl/Cmd-click for batch delete. Press Cmd+Z / Ctrl+Z to undo (including cross-lane reassignments), Cmd+Shift+Z or Ctrl+Y to redo. Press “?” for the full shortcut map, “n” to create at the next hour, Cmd/Ctrl+K to open the command palette. Three drivers — Alex Chen, Maria Garcia, Jordan Park — each with overlapping morning + afternoon routes that the layout engine stacks onto separate sub-rows. Maria carries an all-day “On-call shift” banner. The “Emergency call” event projects to driver id “casey”, which isn't in the lane list, so it drops into the trailing unassigned row." />
+
+</div>
+
+<EventActionPopover IsVisible="_popoverVisible"
+                    Event="@_popoverEvent"
+                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                    OnEditRequested="HandlePopoverEditRequested"
+                    OnDeleteRequested="HandlePopoverDeleteRequested"
+                    OnDismissed="@(() => _popoverVisible = false)" />
+
+<OverflowChooserPopover IsVisible="_chooserVisible"
+                        Events="_chooserEvents"
+                        TimeZone="@SchedulerSeed.DefaultTimeZone"
+                        OnEventSelected="HandleChooserSelected"
+                        OnDismissed="@(() => _chooserVisible = false)" />
+
+<EventEditorDialog IsVisible="_dialogVisible"
+                   IsNew="_dialogIsNew"
+                   InitialTitle="@_dialogTitle"
+                   InitialStart="@_dialogStart"
+                   InitialEnd="@_dialogEnd"
+                   InitialLaneId="@_dialogDriverId"
+                   IsAllDay="false"
+                   Lanes="@_drivers"
+                   LaneFieldLabel="Assigned driver"
+                   OnSave="HandleDialogSaveAsync"
+                   OnCancel="HandleDialogCancelAsync" />
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_view?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>Drivers in display order — three lanes to satisfy the brief.</summary>
+    private IReadOnlyList<ILane> _drivers = SchedulerSeed.GetDrivers();
+
+    /// <summary>Fleet fixtures anchored on today.</summary>
+    private List<SchedulerSeed.FleetEvent> _events = new();
+
+    private CaleeSchedulerTimelineView<SchedulerSeed.FleetEvent>? _view;
+
+    private readonly SimpleUndoStack _history = new();
+
+    private int _startHour = 7;
+    private int _endHour = 19;
+
+    protected override void OnInitialized()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _events = SchedulerSeed.GetFleetEvents(now, SchedulerSeed.DefaultTimeZone).ToList();
+    }
+
+    private void HandleMoved(EventMoveContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var newStart = ctx.NewStart;
+        var newEnd = ctx.NewEnd;
+        var newDriverId = ctx.NewLaneId;
+
+        _events[idx] = before with { Start = newStart, End = newEnd, DriverId = newDriverId };
+
+        var id = before.Id;
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with
+                {
+                    Start = newStart,
+                    End = newEnd,
+                    DriverId = newDriverId,
+                };
+            },
+            inverse: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with
+                {
+                    Start = before.Start,
+                    End = before.End,
+                    DriverId = before.DriverId,
+                };
+            });
+        StateHasChanged();
+    }
+
+    private void HandleResized(EventResizeContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var newEnd = ctx.NewEnd;
+
+        _events[idx] = before with { End = newEnd };
+
+        var id = before.Id;
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { End = newEnd };
+            },
+            inverse: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == id);
+                if (i >= 0) _events[i] = _events[i] with { End = before.End };
+            });
+        StateHasChanged();
+    }
+
+    private bool _dialogVisible;
+    private bool _dialogIsNew = true;
+    private string? _editingEventId;
+    private string _dialogTitle = string.Empty;
+    private DateTimeOffset _dialogStart;
+    private DateTimeOffset _dialogEnd;
+    private string? _dialogDriverId;
+
+    private void HandleCreated(EventCreateContext ctx)
+    {
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = ctx.Slot.Start;
+        _dialogEnd = ctx.Slot.End;
+        _dialogDriverId = ctx.Slot.LaneId;
+        _dialogVisible = true;
+    }
+
+    // ── Click-popover state ─────────────────────────────────────────────────
+    // Clicking an event opens a small action popover instead of jumping
+    // straight into the editor. Edit reuses the existing dialog flow, including
+    // the driver field; Delete routes through the same handler as keyboard delete.
+    private bool _popoverVisible;
+    private SchedulerSeed.FleetEvent? _popoverEvent;
+
+    // ── Overflow-chooser state ──────────────────────────────────────────────
+    private bool _chooserVisible;
+    private IReadOnlyList<ICalendarEvent>? _chooserEvents;
+
+    private void HandleEventClicked(SchedulerSeed.FleetEvent ev)
+    {
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandlePopoverEditRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx < 0) return;
+        var typed = _events[idx];
+        _editingEventId = typed.Id;
+        _dialogIsNew = false;
+        _dialogTitle = typed.Title;
+        _dialogStart = typed.Start;
+        _dialogEnd = typed.End;
+        _dialogDriverId = typed.DriverId;
+        _dialogVisible = true;
+    }
+
+    private void HandlePopoverDeleteRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx < 0) return;
+        HandleDeleted(new EventDeleteContext { Event = _events[idx] });
+    }
+
+    private void HandleOverflow(DayOverflowContext<SchedulerSeed.FleetEvent> ctx)
+    {
+        if (ctx.Kind == OverflowKind.Overlap)
+        {
+            _chooserEvents = ctx.Events;   // IReadOnlyList<SchedulerSeed.FleetEvent> -> IReadOnlyList<ICalendarEvent> (covariant)
+            _chooserVisible = true;
+        }
+        else if (ctx.Kind == OverflowKind.Earlier)
+        {
+            _startHour = 0;
+        }
+        else if (ctx.Kind == OverflowKind.Later)
+        {
+            _endHour = 24;
+        }
+    }
+
+    private void HandleChooserSelected(ICalendarEvent ev)
+    {
+        _chooserVisible = false;
+        _popoverEvent = (SchedulerSeed.FleetEvent)ev;
+        _popoverVisible = true;
+    }
+
+    private void HandleDialogSaveAsync(EventEditorDialog.EventEditorResult result)
+    {
+        if (_editingEventId is null)
+        {
+            var created = new SchedulerSeed.FleetEvent(
+                Id: Guid.NewGuid().ToString("N"),
+                Title: result.Title,
+                Start: result.Start,
+                End: result.End,
+                DriverId: result.LaneId);
+            _events.Add(created);
+
+            _history.Push(
+                forward: () => _events.Add(created),
+                inverse: () =>
+                {
+                    var i = _events.FindIndex(e => e.Id == created.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                });
+        }
+        else
+        {
+            var idx = _events.FindIndex(e => e.Id == _editingEventId);
+            if (idx >= 0)
+            {
+                var before = _events[idx];
+                var after = before with
+                {
+                    Title = result.Title,
+                    Start = result.Start,
+                    End = result.End,
+                    DriverId = result.LaneId,
+                };
+                _events[idx] = after;
+
+                _history.Push(
+                    forward: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == after.Id);
+                        if (i >= 0) _events[i] = after;
+                    },
+                    inverse: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == before.Id);
+                        if (i >= 0) _events[i] = before;
+                    });
+            }
+        }
+        _dialogVisible = false;
+    }
+
+    private void HandleDialogCancelAsync()
+    {
+        _dialogVisible = false;
+    }
+
+    private void HandleDeleted(EventDeleteContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var capturedIdx = idx;
+        _events.RemoveAt(idx);
+
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == before.Id);
+                if (i >= 0) _events.RemoveAt(i);
+            },
+            inverse: () =>
+            {
+                var insertAt = Math.Min(capturedIdx, _events.Count);
+                _events.Insert(insertAt, before);
+            });
+    }
+
+    private void HandleEventsDeleted(EventsDeletedContext<SchedulerSeed.FleetEvent> ctx)
+    {
+        var captured = new List<(int Index, SchedulerSeed.FleetEvent Event)>();
+        foreach (var ev in ctx.Events)
+        {
+            var i = _events.FindIndex(e => e.Id == ev.Id);
+            if (i >= 0) captured.Add((i, _events[i]));
+        }
+        if (captured.Count == 0) return;
+
+        captured.Sort((a, b) => b.Index.CompareTo(a.Index));
+        foreach (var (i, _) in captured) _events.RemoveAt(i);
+
+        _history.Push(
+            forward: () =>
+            {
+                foreach (var (_, ev) in captured)
+                {
+                    var i = _events.FindIndex(e => e.Id == ev.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                }
+            },
+            inverse: () =>
+            {
+                var ascending = captured.OrderBy(c => c.Index).ToList();
+                foreach (var (i, ev) in ascending)
+                {
+                    var insertAt = Math.Min(i, _events.Count);
+                    _events.Insert(insertAt, ev);
+                }
+            });
+    }
+
+    private void HandleUndoRequested()
+    {
+        if (_history.Undo()) StateHasChanged();
+    }
+
+    private void HandleRedoRequested()
+    {
+        if (_history.Redo()) StateHasChanged();
+    }
+
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    private void HandleCreateAtFocus()
+    {
+        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, SchedulerSeed.DefaultTimeZone);
+        var slotStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset);
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = slotStart;
+        _dialogEnd = slotStart.AddMinutes(30);
+        _dialogDriverId = null;
+        _dialogVisible = true;
+    }
+}

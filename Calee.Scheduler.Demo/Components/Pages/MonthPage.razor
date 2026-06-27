@@ -1,0 +1,259 @@
+@page "/month"
+@using Calee.Scheduler.Demo.Components.Pages.Shared
+
+<PageTitle>Month view — Calee.Scheduler</PageTitle>
+
+<div class="px-12 py-16 max-w-7xl">
+
+    <EditorialHeader Kicker="View 03"
+                     Title="Month"
+                     Intro="A 6-week, 7-day grid for the calendar month containing the anchor date. Multi-day events become continuous bars that line up across the cells they cover; single-day chips fill the lanes beneath them." />
+
+    <div class="calee-demo-scheduler-frame">
+        <CaleeSchedulerMonthView TEvent="CalendarEvent"
+                                 @ref="_view"
+                                 TimeZone="@SchedulerSeed.DefaultTimeZone"
+                                 Events="@_events"
+                                 MaxEventsPerDay="3"
+                                 AllowDoubleClickToCreate="true"
+                                 AllowMultiSelect="true"
+                                 AllowDelete="true"
+                                 AllowUndoRedo="true"
+                                 AllowCommandPalette="true"
+                                 OnEventCreated="HandleCreated"
+                                 OnEventClicked="HandleEventClicked"
+                                 OnEventDeleted="HandleDeleted"
+                                 OnEventsDeleted="HandleEventsDeleted"
+                                 OnUndoRequested="HandleUndoRequested"
+                                 OnRedoRequested="HandleRedoRequested"
+                                 OnHelpRequested="HandleHelpRequested"
+                                 OnCreateAtFocusRequested="HandleCreateAtFocus"
+                                 OnCommandPaletteRequested="HandleCommandPaletteRequested" />
+    </div>
+
+    <PageFooterNote Caption="Double-click any empty date cell to open the editor dialog and enter a title before saving the new all-day event. Click an existing chip or bar to open Edit/Delete actions. Press Delete (or Backspace) on a focused event to remove it; multi-select via Ctrl/Cmd-click for batch delete. Press Cmd+Z / Ctrl+Z to undo, Cmd+Shift+Z or Ctrl+Y to redo. Press “?” for the full shortcut map, “n” to create on today, Cmd/Ctrl+K to open the command palette. The fifteenth carries five events with MaxEventsPerDay=3 so the “+2 more” overflow chip surfaces. A four-day “Industry conference” bar sits inside one week row; a six-day “Launch week” bar crosses a week boundary, producing two segments with edge clip indicators." />
+
+</div>
+
+<EventActionPopover IsVisible="_popoverVisible"
+                    Event="@_popoverEvent"
+                    TimeZone="@SchedulerSeed.DefaultTimeZone"
+                    OnEditRequested="HandlePopoverEditRequested"
+                    OnDeleteRequested="HandlePopoverDeleteRequested"
+                    OnDismissed="@(() => _popoverVisible = false)" />
+
+<EventEditorDialog IsVisible="_dialogVisible"
+                   IsNew="_dialogIsNew"
+                   InitialTitle="@_dialogTitle"
+                   InitialStart="@_dialogStart"
+                   InitialEnd="@_dialogEnd"
+                   IsAllDay="true"
+                   OnSave="HandleDialogSaveAsync"
+                   OnCancel="HandleDialogCancelAsync" />
+
+<ShortcutHelpDialog IsVisible="_helpVisible"
+                    OnClose="@(() => _helpVisible = false)" />
+
+<CommandPaletteDialog IsVisible="_paletteVisible"
+                      Commands="@(_view?.Commands ?? Array.Empty<SchedulerCommand>())"
+                      OnClose="@(() => _paletteVisible = false)" />
+
+@code {
+    /// <summary>Month-view fixtures anchored on this month in the demo's display zone.</summary>
+    private List<CalendarEvent> _events = new();
+
+    private CaleeSchedulerMonthView<CalendarEvent>? _view;
+
+    private readonly SimpleUndoStack _history = new();
+
+    protected override void OnInitialized()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _events = SchedulerSeed.GetMonthSeed(now, SchedulerSeed.DefaultTimeZone).ToList();
+    }
+
+    private bool _dialogVisible;
+    private bool _dialogIsNew = true;
+    private string? _editingEventId;
+    private string _dialogTitle = string.Empty;
+    private DateTimeOffset _dialogStart;
+    private DateTimeOffset _dialogEnd;
+
+    private void HandleCreated(EventCreateContext ctx)
+    {
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = ctx.Slot.Start;
+        _dialogEnd = ctx.Slot.End;
+        _dialogVisible = true;
+    }
+
+    // ── Click-popover state ─────────────────────────────────────────────────
+    // Clicking a chip or multi-day bar opens a small action popover instead of
+    // jumping straight into the editor. Edit reuses the existing dialog flow;
+    // Delete routes through the same handler as the keyboard delete path.
+    private bool _popoverVisible;
+    private CalendarEvent? _popoverEvent;
+
+    private void HandleEventClicked(CalendarEvent ev)
+    {
+        _popoverEvent = ev;
+        _popoverVisible = true;
+    }
+
+    private void HandlePopoverEditRequested(ICalendarEvent ev)
+    {
+        _editingEventId = ev.Id;
+        _dialogIsNew = false;
+        _dialogTitle = ev.Title;
+        _dialogStart = ev.Start;
+        _dialogEnd = ev.End;
+        _dialogVisible = true;
+    }
+
+    private void HandlePopoverDeleteRequested(ICalendarEvent ev)
+    {
+        var idx = _events.FindIndex(e => e.Id == ev.Id);
+        if (idx < 0) return;
+        HandleDeleted(new EventDeleteContext { Event = _events[idx] });
+    }
+
+    private void HandleDialogSaveAsync(EventEditorDialog.EventEditorResult result)
+    {
+        if (_editingEventId is null)
+        {
+            var created = new CalendarEvent(
+                Id: Guid.NewGuid().ToString("N"),
+                Title: result.Title,
+                Start: result.Start,
+                End: result.End,
+                IsAllDay: true);
+            _events.Add(created);
+
+            _history.Push(
+                forward: () => _events.Add(created),
+                inverse: () =>
+                {
+                    var i = _events.FindIndex(e => e.Id == created.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                });
+        }
+        else
+        {
+            var idx = _events.FindIndex(e => e.Id == _editingEventId);
+            if (idx >= 0)
+            {
+                var before = _events[idx];
+                var after = before with
+                {
+                    Title = result.Title,
+                    Start = result.Start,
+                    End = result.End,
+                };
+                _events[idx] = after;
+
+                _history.Push(
+                    forward: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == after.Id);
+                        if (i >= 0) _events[i] = after;
+                    },
+                    inverse: () =>
+                    {
+                        var i = _events.FindIndex(e => e.Id == before.Id);
+                        if (i >= 0) _events[i] = before;
+                    });
+            }
+        }
+        _dialogVisible = false;
+    }
+
+    private void HandleDialogCancelAsync()
+    {
+        _dialogVisible = false;
+    }
+
+    private void HandleDeleted(EventDeleteContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var capturedIdx = idx;
+        _events.RemoveAt(idx);
+
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == before.Id);
+                if (i >= 0) _events.RemoveAt(i);
+            },
+            inverse: () =>
+            {
+                var insertAt = Math.Min(capturedIdx, _events.Count);
+                _events.Insert(insertAt, before);
+            });
+    }
+
+    private void HandleEventsDeleted(EventsDeletedContext<CalendarEvent> ctx)
+    {
+        var captured = new List<(int Index, CalendarEvent Event)>();
+        foreach (var ev in ctx.Events)
+        {
+            var i = _events.FindIndex(e => e.Id == ev.Id);
+            if (i >= 0) captured.Add((i, _events[i]));
+        }
+        if (captured.Count == 0) return;
+
+        captured.Sort((a, b) => b.Index.CompareTo(a.Index));
+        foreach (var (i, _) in captured) _events.RemoveAt(i);
+
+        _history.Push(
+            forward: () =>
+            {
+                foreach (var (_, ev) in captured)
+                {
+                    var i = _events.FindIndex(e => e.Id == ev.Id);
+                    if (i >= 0) _events.RemoveAt(i);
+                }
+            },
+            inverse: () =>
+            {
+                var ascending = captured.OrderBy(c => c.Index).ToList();
+                foreach (var (i, ev) in ascending)
+                {
+                    var insertAt = Math.Min(i, _events.Count);
+                    _events.Insert(insertAt, ev);
+                }
+            });
+    }
+
+    private void HandleUndoRequested()
+    {
+        if (_history.Undo()) StateHasChanged();
+    }
+
+    private void HandleRedoRequested()
+    {
+        if (_history.Redo()) StateHasChanged();
+    }
+
+    private bool _helpVisible;
+    private bool _paletteVisible;
+
+    private void HandleHelpRequested() => _helpVisible = true;
+    private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    private void HandleCreateAtFocus()
+    {
+        // Month creates all-day events anchored on today.
+        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, SchedulerSeed.DefaultTimeZone);
+        var start = new DateTimeOffset(today.Year, today.Month, today.Day, 0, 0, 0, today.Offset);
+        _editingEventId = null;
+        _dialogIsNew = true;
+        _dialogTitle = string.Empty;
+        _dialogStart = start;
+        _dialogEnd = start.AddDays(1).AddTicks(-1);
+        _dialogVisible = true;
+    }
+}

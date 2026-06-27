@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Calee.Scheduler</RootNamespace>
+    <AssemblyName>Calee.Scheduler</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- RZ2012: [EditorRequired] missing-attribute warning. The root scheduler composes
+         CaleeSchedulerToolbar with TimeZone supplied via the cascaded SchedulerStateContainer,
+         not via the direct parameter; the analyzer cannot see across the cascade. -->
+    <NoWarn>$(NoWarn);RZ2012</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Calee.Scheduler.Tests" />
+  </ItemGroup>
+
+</Project>

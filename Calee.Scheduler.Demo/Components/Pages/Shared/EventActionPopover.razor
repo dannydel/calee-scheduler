@@ -1,0 +1,88 @@
+@*
+    Demo-only calendar-style click-popover. Per ADR-0010, the library
+    ships no popovers/menus/dialogs — consumers render their own. This is one
+    such consumer rendering: clicking a chip on any view opens this popover
+    anchored next to the chip; the popover exposes Edit + Delete actions and
+    closes on Esc, outside click, or the close button.
+
+    The popover is a non-modal *popover* (aria-modal="false"). It does NOT
+    trap focus — Tab from the last button advances to the next focusable
+    element on the page, matching the popover ARIA pattern rather than the
+    modal-dialog pattern. The full editor dialog (EventEditorDialog) is the
+    modal; clicking Edit closes the popover and opens that dialog instead.
+
+    Anchoring uses an invisible backdrop layer to catch outside clicks
+    (ShortcutHelpDialog uses the same pattern, just with a tinted backdrop
+    for the modal case). The popover itself is `position: fixed` with `top`
+    and `left` computed from the clicked chip's bounding rect — see
+    EventActionPopover.razor.cs for the anchor logic.
+*@
+
+@using Calee.Scheduler.Contracts
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsVisible && Event is not null)
+{
+    @* Invisible backdrop — catches clicks outside the popover and dismisses
+       it. We deliberately don't use bg-ink/40 here: a popover is not a modal
+       and shouldn't dim the page. The backdrop is z-40 so the popover
+       (z-50) renders above it. *@
+    <div class="fixed inset-0 z-40"
+         role="presentation"
+         @onclick="HandleBackdropClickAsync"></div>
+
+    <div @ref="_popoverRef"
+         class="calee-demo-event-popover fixed z-50 bg-surface rounded-lg shadow-2xl border border-line"
+         style="@PopoverInlineStyle"
+         role="dialog"
+         aria-modal="false"
+         aria-label="@($"Event actions: {Event.Title}")"
+         @onclick:stopPropagation="true"
+         @onkeydown="HandleKeyDownAsync">
+
+        <div class="calee-demo-event-popover-header flex items-start gap-3 px-4 pt-4 pb-2">
+            @if (!string.IsNullOrEmpty(Event.Color))
+            {
+                <span class="calee-demo-event-popover-swatch"
+                      style="@($"background-color: {Event.Color};")"
+                      aria-hidden="true"></span>
+            }
+            <div class="flex-1 min-w-0">
+                <div class="font-display text-lg text-ink leading-tight break-words">
+                    @(string.IsNullOrWhiteSpace(Event.Title) ? "Untitled event" : Event.Title)
+                </div>
+                <div class="font-sans text-xs text-ink-muted mt-1 leading-snug">
+                    @FormatTimeRange(Event)
+                </div>
+            </div>
+            <button type="button"
+                    @ref="_closeButtonRef"
+                    class="calee-demo-event-popover-close ml-1 -mt-1 -mr-1 p-1 rounded text-ink-muted hover:text-ink hover:bg-line/40 transition-colors"
+                    aria-label="Close event actions"
+                    @onclick="HandleDismissAsync">
+                @* Inline X icon — keeps the demo independent of any icon font. *@
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div class="calee-demo-event-popover-actions flex gap-2 px-4 pb-4 pt-1">
+            <button type="button"
+                    @ref="_editButtonRef"
+                    class="flex-1 px-3 py-2 text-sm font-sans bg-accent text-white rounded-md hover:bg-accent/90 transition-colors"
+                    @onclick="HandleEditAsync">
+                Edit
+            </button>
+            <button type="button"
+                    class="flex-1 px-3 py-2 text-sm font-sans border border-line text-ink rounded-md hover:bg-line/40 transition-colors"
+                    @onclick="HandleDeleteAsync">
+                Delete
+            </button>
+        </div>
+    </div>
+}

@@ -50,6 +50,14 @@ public static class SchedulerCommandIds
     /// <summary>Switch to Timeline view (<c>"view.timeline"</c>; default binding <c>6</c>).</summary>
     public const string ViewTimeline = "view.timeline";
 
+    /// <summary>
+    /// Switch to Work Week view (<c>"view.workweek"</c>; default binding <c>7</c>). Fires
+    /// <c>OnViewSwitchRequested</c> with <see cref="SchedulerView"/> <c>WorkWeek</c> —
+    /// same live-dispatch shape as <see cref="ViewYear"/> / <see cref="ViewAgenda"/>
+    /// (issue #7).
+    /// </summary>
+    public const string ViewWorkWeek = "view.workweek";
+
     /// <summary>Jump anchor to today (<c>"navigate.today"</c>; default binding <c>t</c>).</summary>
     public const string NavigateToday = "navigate.today";
 

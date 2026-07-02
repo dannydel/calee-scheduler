@@ -67,6 +67,7 @@ public class ShortcutMapTests
         Assert.Contains(SchedulerCommandIds.ViewYear, ids);
         Assert.Contains(SchedulerCommandIds.ViewAgenda, ids);
         Assert.Contains(SchedulerCommandIds.ViewTimeline, ids);
+        Assert.Contains(SchedulerCommandIds.ViewWorkWeek, ids);
         Assert.Contains(SchedulerCommandIds.NavigateToday, ids);
         Assert.Contains(SchedulerCommandIds.EditCreate, ids);
         Assert.Contains(SchedulerCommandIds.EditDelete, ids);
@@ -515,6 +516,12 @@ public class ShortcutMapTests
             cut.Find("[data-calee-region='hour-grid'] .calee-scheduler-event")
                 .KeyDown(new KeyboardEventArgs { Key = "6" }));
         Assert.Equal(SchedulerView.Timeline, lastSwitch);
+
+        // Press "7" → ViewWorkWeek (issue #7).
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid'] .calee-scheduler-event")
+                .KeyDown(new KeyboardEventArgs { Key = "7" }));
+        Assert.Equal(SchedulerView.WorkWeek, lastSwitch);
     }
 
     // ───────────────────────────────────────────────────────────────────────────
@@ -544,6 +551,27 @@ public class ShortcutMapTests
                 .KeyDown(new KeyboardEventArgs { Key = "Backspace" }));
 
         Assert.Equal(0, deleteCount);
+    }
+
+    [Fact]
+    public async Task DisabledShortcuts_ViewWorkWeek_Suppresses_Digit_Seven()
+    {
+        using var ctx = NewContext();
+        SchedulerView? lastSwitch = null;
+        var a = Timed("a", 9, 10);
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { a })
+            .Add(c => c.DisabledShortcuts, new[] { SchedulerCommandIds.ViewWorkWeek })
+            .Add(c => c.OnViewSwitchRequested,
+                EventCallback.Factory.Create<SchedulerView>(this, v => lastSwitch = v)));
+
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid'] .calee-scheduler-event")
+                .KeyDown(new KeyboardEventArgs { Key = "7" }));
+
+        Assert.Null(lastSwitch);
     }
 
     [Fact]

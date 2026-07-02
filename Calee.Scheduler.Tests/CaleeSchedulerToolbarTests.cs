@@ -514,6 +514,117 @@ public class CaleeSchedulerToolbarTests
         Assert.Equal(TZ.GetUtcOffset(captured.Value.Date), captured.Value.Offset);
     }
 
+    // ───────────────────────────────────────────────────────────────────────────
+    // Issue #7 — SchedulerView.WorkWeek surfacing in the standalone toolbar.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Renders_WorkWeek_Button_When_AvailableViews_Includes_It()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.AvailableViews, new[]
+            {
+                SchedulerView.Day, SchedulerView.WorkWeek, SchedulerView.Week, SchedulerView.Month,
+            }));
+
+        var labels = cut.FindAll("[data-calee-region='toolbar-view-button']")
+            .Select(b => b.TextContent.Trim())
+            .ToList();
+        Assert.Contains("Work Week", labels);
+    }
+
+    [Fact]
+    public void WorkWeek_Button_Click_Fires_ViewChanged_With_WorkWeek()
+    {
+        using var ctx = NewContext();
+        SchedulerView? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.AvailableViews, new[]
+            {
+                SchedulerView.Day, SchedulerView.WorkWeek, SchedulerView.Week, SchedulerView.Month,
+            })
+            .Add(c => c.ViewChanged, v => captured = v));
+
+        var workWeekBtn = cut.FindAll("[data-calee-region='toolbar-view-button']")
+            .First(b => b.TextContent.Trim() == "Work Week");
+        workWeekBtn.Click();
+
+        Assert.Equal(SchedulerView.WorkWeek, captured);
+    }
+
+    [Fact]
+    public void Prev_And_Next_Button_Step_Seven_Days_When_View_WorkWeek()
+    {
+        using var ctx = NewContext();
+        DateTimeOffset? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.DateChanged, d => captured = d));
+
+        cut.Find("[data-calee-region='toolbar-prev']").Click();
+        Assert.Equal(Anchor.AddDays(-7), captured);
+
+        cut.Find("[data-calee-region='toolbar-next']").Click();
+        Assert.Equal(Anchor.AddDays(7), captured);
+    }
+
+    [Fact]
+    public void Range_Label_WorkWeek_Default_MonToFri_Format()
+    {
+        using var ctx = NewContext();
+        // Anchor Tue 2026-03-17, FirstDayOfWeek=Sunday → week is Sun 3/15..Sat 3/21.
+        // WorkWeekDays defaults to Mon-Fri → 3/16..3/20 → "Mar 16 – 20, 2026".
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek));
+
+        var label = cut.Find("[data-calee-region='range-label']");
+        Assert.Equal("Mar 16 – 20, 2026", label.TextContent.Trim());
+    }
+
+    [Fact]
+    public void Range_Label_WorkWeek_Honors_WorkWeekDays_Override()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday }));
+
+        var label = cut.Find("[data-calee-region='range-label']");
+        Assert.Equal("Mar 17 – 19, 2026", label.TextContent.Trim());
+    }
+
+    [Fact]
+    public void View_Switcher_Active_Button_Highlights_WorkWeek_Exactly_Once()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.AvailableViews, new[]
+            {
+                SchedulerView.Day, SchedulerView.WorkWeek, SchedulerView.Week, SchedulerView.Month,
+            }));
+
+        var buttons = cut.FindAll("[data-calee-region='toolbar-view-button']");
+        var checkedButtons = buttons.Where(b => b.GetAttribute("aria-checked") == "true").ToList();
+        Assert.Single(checkedButtons);
+        Assert.Equal("Work Week", checkedButtons[0].TextContent.Trim());
+    }
+
     [Fact]
     public void Missing_TimeZone_In_Standalone_Mode_Throws()
     {

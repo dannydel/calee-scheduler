@@ -168,6 +168,7 @@ public class CommandsApiTests
         Assert.Contains(SchedulerCommandIds.ViewYear, ids);
         Assert.Contains(SchedulerCommandIds.ViewAgenda, ids);
         Assert.Contains(SchedulerCommandIds.ViewTimeline, ids);
+        Assert.Contains(SchedulerCommandIds.ViewWorkWeek, ids);
         Assert.Contains(SchedulerCommandIds.NavigateToday, ids);
         Assert.Contains(SchedulerCommandIds.EditCreate, ids);
         Assert.Contains(SchedulerCommandIds.EditMove, ids);
@@ -187,6 +188,7 @@ public class CommandsApiTests
         var cmds = cut.Instance.Commands;
         Assert.Equal("View", FindById(cmds, SchedulerCommandIds.ViewDay)!.Group);
         Assert.Equal("View", FindById(cmds, SchedulerCommandIds.ViewTimeline)!.Group);
+        Assert.Equal("View", FindById(cmds, SchedulerCommandIds.ViewWorkWeek)!.Group);
         Assert.Equal("Navigate", FindById(cmds, SchedulerCommandIds.NavigateToday)!.Group);
         Assert.Equal("Edit", FindById(cmds, SchedulerCommandIds.EditCreate)!.Group);
         Assert.Equal("Edit", FindById(cmds, SchedulerCommandIds.EditMove)!.Group);
@@ -205,6 +207,7 @@ public class CommandsApiTests
 
         var cmds = cut.Instance.Commands;
         Assert.Equal("Day view", FindById(cmds, SchedulerCommandIds.ViewDay)!.Label);
+        Assert.Equal("Work Week view", FindById(cmds, SchedulerCommandIds.ViewWorkWeek)!.Label);
         Assert.Equal("Go to today", FindById(cmds, SchedulerCommandIds.NavigateToday)!.Label);
         Assert.Equal("Create event", FindById(cmds, SchedulerCommandIds.EditCreate)!.Label);
         Assert.Equal("Help", FindById(cmds, SchedulerCommandIds.HelpOpen)!.Label);
@@ -223,7 +226,7 @@ public class CommandsApiTests
             .Add(c => c.Date, Anchor)
             .Add(c => c.Events, Array.Empty<CalendarEvent>())
             .Add(c => c.AllowCommandPalette, true));
-            // AllowDelete defaults false.
+        // AllowDelete defaults false.
 
         Assert.Null(FindById(cut.Instance.Commands, SchedulerCommandIds.EditDelete));
     }
@@ -254,7 +257,7 @@ public class CommandsApiTests
             .Add(c => c.Date, Anchor)
             .Add(c => c.Events, Array.Empty<CalendarEvent>())
             .Add(c => c.AllowCommandPalette, true));
-            // AllowUndoRedo defaults false.
+        // AllowUndoRedo defaults false.
 
         Assert.Null(FindById(cut.Instance.Commands, SchedulerCommandIds.EditUndo));
         Assert.Null(FindById(cut.Instance.Commands, SchedulerCommandIds.EditRedo));
@@ -611,6 +614,27 @@ public class CommandsApiTests
         await cut.InvokeAsync(() => year!.Invoke());
 
         Assert.Equal(SchedulerView.Year, lastSwitch);
+    }
+
+    [Fact]
+    public async Task ViewWorkWeek_Invoke_Fires_OnViewSwitchRequested_With_WorkWeek()
+    {
+        // Issue #7 — same live-dispatch shape as ViewYear/ViewAgenda above.
+        using var ctx = NewContext();
+        SchedulerView? lastSwitch = null;
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, Array.Empty<CalendarEvent>())
+            .Add(c => c.AllowCommandPalette, true)
+            .Add(c => c.OnViewSwitchRequested,
+                EventCallback.Factory.Create<SchedulerView>(this, v => lastSwitch = v)));
+
+        var workWeek = FindById(cut.Instance.Commands, SchedulerCommandIds.ViewWorkWeek);
+        Assert.NotNull(workWeek);
+        await cut.InvokeAsync(() => workWeek!.Invoke());
+
+        Assert.Equal(SchedulerView.WorkWeek, lastSwitch);
     }
 
     // ───────────────────────────────────────────────────────────────────────────

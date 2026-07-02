@@ -33,4 +33,15 @@ public enum SchedulerView
 
     /// <summary>Timeline grid: one row per <see cref="ILane"/>, time on the horizontal axis.</summary>
     Timeline,
+
+    /// <summary>
+    /// Work-week time grid: the same seven-day engine as <see cref="Week"/>, narrowed to
+    /// a configurable day subset — Monday–Friday by default. Composed on the root
+    /// scheduler from <c>CaleeSchedulerWeekView&lt;TEvent&gt;</c>'s <c>VisibleDays</c>
+    /// parameter (see issue #7, which builds on the engine primitive added for issue #6).
+    /// Appended at the end of the enum — additive per the 1.x source-stable promise;
+    /// existing switch statements and any serialized <see cref="SchedulerView"/> values
+    /// are unaffected by this member's addition.
+    /// </summary>
+    WorkWeek,
 }

@@ -253,18 +253,10 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             return allDays;
         }
 
-        // HashSet both dedupes and gives O(1) membership checks; garbage DayOfWeek
-        // values (outside the 7 defined enum members) simply never match below.
-        var requested = new HashSet<DayOfWeek>(VisibleDays);
-
-        var filtered = new List<(DateTimeOffset Start, DateTimeOffset End)>(allDays.Count);
-        foreach (var day in allDays)
-        {
-            if (requested.Contains(day.Start.DayOfWeek))
-            {
-                filtered.Add(day);
-            }
-        }
+        // Shared with the root scheduler's WorkWeek range/label computation (issue #7)
+        // so both stay in lockstep on which days are "in view" — see
+        // SchedulerViewPrimitives.FilterVisibleDays remarks.
+        var filtered = SchedulerViewPrimitives.FilterVisibleDays(allDays, VisibleDays);
 
         if (filtered.Count == 0)
         {

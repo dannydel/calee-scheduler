@@ -66,6 +66,16 @@ internal sealed class SchedulerStateContainer
     public int AgendaDays { get; set; } = 7;
 
     /// <summary>
+    /// The resolved day subset rendered by the <see cref="SchedulerView.WorkWeek"/> view
+    /// (issue #7). Always non-null and non-empty — the root resolves its <c>WorkWeekDays</c>
+    /// parameter to <see cref="SchedulerViewPrimitives.DefaultWorkWeekDays"/> (Monday–Friday)
+    /// when the consumer hasn't overridden it, before storing the result here. Drives the
+    /// toolbar's range-label computation when <see cref="CurrentView"/> is
+    /// <see cref="SchedulerView.WorkWeek"/>.
+    /// </summary>
+    public IReadOnlyList<DayOfWeek> WorkWeekDays { get; set; } = SchedulerViewPrimitives.DefaultWorkWeekDays;
+
+    /// <summary>
     /// Callback the toolbar invokes when the user picks a different view from the switcher.
     /// The root scheduler wires this to its own view-state update so the bindable
     /// <c>View</c> parameter and <c>OnViewChanged</c> callback fire correctly (FR-31, FR-22).

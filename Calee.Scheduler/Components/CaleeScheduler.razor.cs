@@ -146,6 +146,23 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     public DayOfWeek? FirstDayOfWeek { get; set; }
 
     /// <summary>
+    /// Opt-in day subset forwarded to the composed Week view's <c>VisibleDays</c>
+    /// parameter when <see cref="EffectiveView"/> is <see cref="SchedulerView.WorkWeek"/>
+    /// (issue #7). When <see langword="null"/> (the default), resolves to Monday–Friday.
+    /// Ignored for every other view — in particular, <see cref="SchedulerView.Week"/>
+    /// always renders all seven days from the root; this parameter never forwards to it.
+    /// </summary>
+    /// <remarks>
+    /// Same soft-degradation rule as <c>CaleeSchedulerWeekView.VisibleDays</c> (PRD §4.6):
+    /// an empty list, or one whose values match none of the week's seven days, degrades
+    /// to "all seven days" — the composed child view logs the warning once; the root's
+    /// own range/label computation mirrors the same fallback silently so the two never
+    /// disagree about which days are "in view."
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<DayOfWeek>? WorkWeekDays { get; set; }
+
+    /// <summary>
     /// Forwarded to time-grid views and the Timeline[Day] view. Defaults to
     /// <see langword="true"/> (FR-07).
     /// </summary>
@@ -361,16 +378,20 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
 
     /// <summary>
     /// The set of view-switcher entries surfaced by the toolbar. Always includes
-    /// Day / Week / Month. Year and Agenda are included by default and gated on
-    /// <see cref="ShowYearButton"/> / <see cref="ShowAgendaButton"/> respectively
-    /// (Phase 2 Task 18 — FR-38 / FR-39). Timeline appears only when both
-    /// <see cref="Lanes"/> and <see cref="LaneKey"/> are wired (FR-09c).
+    /// Day / WorkWeek / Week / Month — WorkWeek is unconditionally renderable, the same
+    /// as Day/Week/Month (no Timeline-style gate; issue #7). Year and Agenda are
+    /// included by default and gated on <see cref="ShowYearButton"/> /
+    /// <see cref="ShowAgendaButton"/> respectively (Phase 2 Task 18 — FR-38 / FR-39).
+    /// Timeline appears only when both <see cref="Lanes"/> and <see cref="LaneKey"/> are
+    /// wired (FR-09c).
     /// </summary>
     /// <remarks>
     /// Built once per <see cref="SyncStateContainer"/> and cached on the cascading
-    /// <see cref="SchedulerStateContainer.AvailableViews"/> field; the order matches the
-    /// <see cref="SchedulerView"/> enum declaration so the toolbar's view-switcher
-    /// renders Day → Week → Month → Year → Agenda → Timeline left-to-right.
+    /// <see cref="SchedulerStateContainer.AvailableViews"/> field. The toolbar's order is
+    /// constructed explicitly here — <c>Day, WorkWeek, Week, Month, Year, Agenda,
+    /// Timeline</c> — and is intentionally decoupled from the <see cref="SchedulerView"/>
+    /// enum's declaration order (WorkWeek is appended at the end of the enum per the 1.x
+    /// source-stable promise, but slots in right after Day in the toolbar).
     /// </remarks>
     protected IReadOnlyList<SchedulerView> AvailableViews => BuildAvailableViews();
 
@@ -385,11 +406,12 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
             return _availableViewsCache;
         }
 
-        // Day / Week / Month are always present. Year and Agenda follow the per-view
-        // visibility toggles; Timeline is gated on the lane binding (FR-09c).
-        var list = new List<SchedulerView>(6)
+        // Day / WorkWeek / Week / Month are always present. Year and Agenda follow the
+        // per-view visibility toggles; Timeline is gated on the lane binding (FR-09c).
+        var list = new List<SchedulerView>(7)
         {
             SchedulerView.Day,
+            SchedulerView.WorkWeek,
             SchedulerView.Week,
             SchedulerView.Month,
         };
@@ -452,6 +474,12 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
             _resolvedAgendaDays = AgendaDays;
         }
 
+        // Issue #7 — resolve WorkWeekDays to Monday–Friday when the consumer hasn't
+        // overridden it. Mirrors the AgendaDays resolution shape above so the cascaded
+        // state, ComputeRange, and the composed Week view's VisibleDays parameter all
+        // agree on the same resolved list within a single render.
+        _resolvedWorkWeekDays = WorkWeekDays ?? SchedulerViewPrimitives.DefaultWorkWeekDays;
+
         SyncStateContainer();
     }
 
@@ -467,6 +495,18 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     internal int ResolvedAgendaDays => _resolvedAgendaDays;
 
     /// <summary>
+    /// Post-resolution value of <see cref="WorkWeekDays"/> after <c>OnParametersSet</c> —
+    /// never <see langword="null"/>; defaults to Monday–Friday (issue #7). Used for the
+    /// cascaded value, <see cref="ComputeRange"/>, and forwarded to the composed Week
+    /// view's <c>VisibleDays</c> parameter when <see cref="EffectiveView"/> is
+    /// <see cref="SchedulerView.WorkWeek"/>.
+    /// </summary>
+    private IReadOnlyList<DayOfWeek> _resolvedWorkWeekDays = SchedulerViewPrimitives.DefaultWorkWeekDays;
+
+    /// <summary>Internal accessor for tests covering the WorkWeekDays default/override resolution.</summary>
+    internal IReadOnlyList<DayOfWeek> ResolvedWorkWeekDays => _resolvedWorkWeekDays;
+
+    /// <summary>
     /// Recompute the canonical visible range and update every field on the cascading
     /// <see cref="_state"/> container in place. Called from <see cref="OnParametersSet"/>
     /// AND from the toolbar-initiated change handlers (<see cref="HandleRequestViewChangeAsync"/>,
@@ -480,7 +520,7 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         // Compute the canonical visible range for the current effective state. This is
         // the source of truth for OnRangeChanged — child view range events are absorbed
         // and re-derived here so consumers receive a single notification per render.
-        var range = ComputeRange(EffectiveView, CurrentDate, EffectiveFirstDayOfWeek, TimeZone, EffectiveTimelineScale, _resolvedAgendaDays);
+        var range = ComputeRange(EffectiveView, CurrentDate, EffectiveFirstDayOfWeek, TimeZone, EffectiveTimelineScale, _resolvedAgendaDays, _resolvedWorkWeekDays);
 
         // Mutate the cascading container in place. The toolbar reads these values on
         // every render; the stable reference identity prevents wholesale subtree
@@ -499,6 +539,10 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         // active Agenda view's window. The view re-clamps; the root's clamp is the
         // single source the toolbar reads.
         _state.AgendaDays = _resolvedAgendaDays;
+        // Issue #7 — propagate the resolved WorkWeek day subset down through the cascade
+        // so the toolbar's range-label computation matches the composed Week view's
+        // VisibleDays parameter.
+        _state.WorkWeekDays = _resolvedWorkWeekDays;
         // Propagate the multi-select opt-in to descendants via the cascade. Views read
         // this from the cascaded container (so their per-click handler ignores Ctrl/
         // Shift when the consumer has not opted in — FR-29 fail-closed default).
@@ -533,9 +577,9 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
 
     /// <summary>
     /// Compute the canonical visible range for the supplied (view, date, firstDayOfWeek, tz,
-    /// timelineScale). Mirrors what the active child view will internally derive —
-    /// reusing the shared primitives keeps the root and the child in lockstep on which
-    /// days are "in view".
+    /// timelineScale, agendaDays, workWeekDays). Mirrors what the active child view will
+    /// internally derive — reusing the shared primitives keeps the root and the child in
+    /// lockstep on which days are "in view".
     /// </summary>
     private static SchedulerRange ComputeRange(
         SchedulerView view,
@@ -543,80 +587,97 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         DayOfWeek firstDayOfWeek,
         TimeZoneInfo tz,
         TimelineScale timelineScale,
-        int agendaDays)
+        int agendaDays,
+        IReadOnlyList<DayOfWeek> workWeekDays)
     {
         switch (view)
         {
             case SchedulerView.Day:
-            {
-                var local = date.Date;
-                var offset = tz.GetUtcOffset(local);
-                var start = new DateTimeOffset(local, offset);
-                return new SchedulerRange(start, start.AddDays(1));
-            }
-            case SchedulerView.Week:
-            {
-                var days = SchedulerViewPrimitives.ComputeWeekDays(date, firstDayOfWeek, tz);
-                return new SchedulerRange(days[0].Start, days[^1].End);
-            }
-            case SchedulerView.Month:
-            {
-                // Month view's grid is 42 cells anchored at firstDayOfWeek — its range
-                // matches the child's <c>GridStart</c>/<c>GridEndExclusive</c>.
-                var anchor = date.Date;
-                var firstOfMonth = new DateTime(anchor.Year, anchor.Month, 1);
-                var dayOffset = ((int)firstOfMonth.DayOfWeek - (int)firstDayOfWeek + 7) % 7;
-                var gridStartDate = firstOfMonth.AddDays(-dayOffset);
-                var startOffset = tz.GetUtcOffset(gridStartDate);
-                var start = new DateTimeOffset(gridStartDate, startOffset);
-                var endDate = gridStartDate.AddDays(42);
-                var endOffset = tz.GetUtcOffset(endDate);
-                return new SchedulerRange(start, new DateTimeOffset(endDate, endOffset));
-            }
-            case SchedulerView.Year:
-            {
-                // Year view's range is Jan 1 → Jan 1 of next year (matches
-                // CaleeSchedulerYearView.ComputeYearRange).
-                var anchor = date.Date;
-                var first = new DateTime(anchor.Year, 1, 1);
-                var next = new DateTime(anchor.Year + 1, 1, 1);
-                return new SchedulerRange(
-                    new DateTimeOffset(first, tz.GetUtcOffset(first)),
-                    new DateTimeOffset(next, tz.GetUtcOffset(next)));
-            }
-            case SchedulerView.Agenda:
-            {
-                // Agenda's window is [anchor-midnight, anchor-midnight + agendaDays).
-                // Matches CaleeSchedulerAgendaView.ComputeWindow.
-                var firstDate = date.Date;
-                var startOffset = tz.GetUtcOffset(firstDate);
-                var endDate = firstDate.AddDays(agendaDays);
-                var endOffset = tz.GetUtcOffset(endDate);
-                return new SchedulerRange(
-                    new DateTimeOffset(firstDate, startOffset),
-                    new DateTimeOffset(endDate, endOffset));
-            }
-            case SchedulerView.Timeline:
-            {
-                switch (timelineScale)
                 {
-                    case Contracts.TimelineScale.Day:
-                        return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays);
-                    case Contracts.TimelineScale.Week:
-                        return ComputeRange(SchedulerView.Week, date, firstDayOfWeek, tz, timelineScale, agendaDays);
-                    case Contracts.TimelineScale.Month:
-                    {
-                        // Timeline[Month] spans the natural calendar month (not the 42-cell
-                        // Month-view grid), matching <c>CaleeSchedulerTimelineView.ComputeMonthRange</c>.
-                        var (s, e) = SchedulerViewPrimitives.ComputeMonthRange(date, tz);
-                        return new SchedulerRange(s, e);
-                    }
-                    default:
-                        return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays);
+                    var local = date.Date;
+                    var offset = tz.GetUtcOffset(local);
+                    var start = new DateTimeOffset(local, offset);
+                    return new SchedulerRange(start, start.AddDays(1));
                 }
-            }
+            case SchedulerView.Week:
+                {
+                    var days = SchedulerViewPrimitives.ComputeWeekDays(date, firstDayOfWeek, tz);
+                    return new SchedulerRange(days[0].Start, days[^1].End);
+                }
+            case SchedulerView.WorkWeek:
+                {
+                    // Issue #7 — mirrors what CaleeSchedulerWeekView.VisibleDays derives:
+                    // first visible day start → last visible day end. Reuses the same
+                    // FilterVisibleDays primitive the child's ResolveVisibleWeekDays calls
+                    // so root and child never disagree on which days are "in view." Silent
+                    // soft-degradation here (no logging) — the composed child already logs
+                    // the PRD §4.6 warning once when the subset is empty/no-match.
+                    var allDays = SchedulerViewPrimitives.ComputeWeekDays(date, firstDayOfWeek, tz);
+                    var filtered = SchedulerViewPrimitives.FilterVisibleDays(allDays, workWeekDays);
+                    if (filtered.Count == 0)
+                    {
+                        filtered = allDays;
+                    }
+                    return new SchedulerRange(filtered[0].Start, filtered[^1].End);
+                }
+            case SchedulerView.Month:
+                {
+                    // Month view's grid is 42 cells anchored at firstDayOfWeek — its range
+                    // matches the child's <c>GridStart</c>/<c>GridEndExclusive</c>.
+                    var anchor = date.Date;
+                    var firstOfMonth = new DateTime(anchor.Year, anchor.Month, 1);
+                    var dayOffset = ((int)firstOfMonth.DayOfWeek - (int)firstDayOfWeek + 7) % 7;
+                    var gridStartDate = firstOfMonth.AddDays(-dayOffset);
+                    var startOffset = tz.GetUtcOffset(gridStartDate);
+                    var start = new DateTimeOffset(gridStartDate, startOffset);
+                    var endDate = gridStartDate.AddDays(42);
+                    var endOffset = tz.GetUtcOffset(endDate);
+                    return new SchedulerRange(start, new DateTimeOffset(endDate, endOffset));
+                }
+            case SchedulerView.Year:
+                {
+                    // Year view's range is Jan 1 → Jan 1 of next year (matches
+                    // CaleeSchedulerYearView.ComputeYearRange).
+                    var anchor = date.Date;
+                    var first = new DateTime(anchor.Year, 1, 1);
+                    var next = new DateTime(anchor.Year + 1, 1, 1);
+                    return new SchedulerRange(
+                        new DateTimeOffset(first, tz.GetUtcOffset(first)),
+                        new DateTimeOffset(next, tz.GetUtcOffset(next)));
+                }
+            case SchedulerView.Agenda:
+                {
+                    // Agenda's window is [anchor-midnight, anchor-midnight + agendaDays).
+                    // Matches CaleeSchedulerAgendaView.ComputeWindow.
+                    var firstDate = date.Date;
+                    var startOffset = tz.GetUtcOffset(firstDate);
+                    var endDate = firstDate.AddDays(agendaDays);
+                    var endOffset = tz.GetUtcOffset(endDate);
+                    return new SchedulerRange(
+                        new DateTimeOffset(firstDate, startOffset),
+                        new DateTimeOffset(endDate, endOffset));
+                }
+            case SchedulerView.Timeline:
+                {
+                    switch (timelineScale)
+                    {
+                        case Contracts.TimelineScale.Day:
+                            return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays, workWeekDays);
+                        case Contracts.TimelineScale.Week:
+                            return ComputeRange(SchedulerView.Week, date, firstDayOfWeek, tz, timelineScale, agendaDays, workWeekDays);
+                        case Contracts.TimelineScale.Month:
+                            {
+                                // Timeline[Month] spans the natural calendar month (not the 42-cell
+                                // Month-view grid), matching <c>CaleeSchedulerTimelineView.ComputeMonthRange</c>.
+                                var (s, e) = SchedulerViewPrimitives.ComputeMonthRange(date, tz);
+                                return new SchedulerRange(s, e);
+                            }
+                        default:
+                            return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays, workWeekDays);
+                    }
+                }
             default:
-                return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays);
+                return ComputeRange(SchedulerView.Day, date, firstDayOfWeek, tz, timelineScale, agendaDays, workWeekDays);
         }
     }
 
@@ -796,20 +857,21 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         }
 
         // Guard against switching to a view the root can't actually render. Timeline
-        // requires the lane binding; Day / Week / Month / Year / Agenda are all
-        // unconditionally renderable.
+        // requires the lane binding; Day / WorkWeek / Week / Month / Year / Agenda are
+        // all unconditionally renderable — WorkWeek gets no Timeline-style gate (issue #7).
         if (requested == SchedulerView.Timeline && !TimelineViewAvailable)
         {
             return;
         }
         if (requested != SchedulerView.Day
+            && requested != SchedulerView.WorkWeek
             && requested != SchedulerView.Week
             && requested != SchedulerView.Month
             && requested != SchedulerView.Year
             && requested != SchedulerView.Agenda
             && requested != SchedulerView.Timeline)
         {
-            // Defensive — unknown enum value. Not reached for the six declared views.
+            // Defensive — unknown enum value. Not reached for the seven declared views.
             return;
         }
 

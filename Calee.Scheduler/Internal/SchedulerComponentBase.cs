@@ -612,7 +612,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <summary>
     /// Fired when the user presses one of the view-switch bindings
     /// (<see cref="SchedulerCommandIds.ViewDay"/> through
-    /// <see cref="SchedulerCommandIds.ViewTimeline"/>; default <c>1</c>–<c>6</c>) inside
+    /// <see cref="SchedulerCommandIds.ViewWorkWeek"/>; default <c>1</c>–<c>7</c>) inside
     /// the scheduler region. The payload is the requested <see cref="SchedulerView"/>;
     /// the consumer typically pushes it into the root's bindable <c>View</c> parameter.
     /// </summary>
@@ -628,7 +628,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <para>
     /// <strong>Dispatch sources.</strong> The library raises this callback for both the
     /// keystroke bindings (<see cref="SchedulerCommandIds.ViewDay"/> through
-    /// <see cref="SchedulerCommandIds.ViewTimeline"/>) and the command-palette dispatch of
+    /// <see cref="SchedulerCommandIds.ViewWorkWeek"/>) and the command-palette dispatch of
     /// the same command ids — both surfaces route through the same emit path so a
     /// consumer-wired handler sees one signal regardless of which surface the user used.
     /// </para>
@@ -784,6 +784,10 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     ///     <see cref="SchedulerCommand.Invoke"/> fires <see cref="OnViewSwitchRequested"/>
     ///     with <see cref="SchedulerView.Agenda"/> per Task 17's wiring)</description></item>
     ///   <item><description><c>view.timeline</c> — "Timeline view" (<c>View</c>; always present)</description></item>
+    ///   <item><description><c>view.workweek</c> — "Work Week view" (<c>View</c>; always
+    ///     present; <see cref="SchedulerCommand.Invoke"/> fires
+    ///     <see cref="OnViewSwitchRequested"/> with <see cref="SchedulerView.WorkWeek"/> —
+    ///     issue #7)</description></item>
     ///   <item><description><c>navigate.today</c> — "Go to today" (group <c>Navigate</c>; always present)</description></item>
     ///   <item><description><c>edit.create</c> — "Create event" (group <c>Edit</c>; always present)</description></item>
     ///   <item><description><c>edit.delete</c> — "Delete focused event" (<c>Edit</c>;
@@ -888,10 +892,10 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
             return;
         }
 
-        // Build a 13-slot list (worst case: all gated-on, no custom). The exact built-in
+        // Build a 14-slot list (worst case: all gated-on, no custom). The exact built-in
         // list shape is documented on the Commands XML doc above; this is the single
         // source of truth for the list's content + order.
-        var builtIns = new List<SchedulerCommand>(13);
+        var builtIns = new List<SchedulerCommand>(14);
 
         // View group — every entry always present. With Task 17 (Agenda) live every
         // built-in view command Invoke now flows through InvokeViewSwitchFromCommand
@@ -915,6 +919,9 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         builtIns.Add(new SchedulerCommand(
             SchedulerCommandIds.ViewTimeline, "Timeline view", "View",
             () => InvokeViewSwitchFromCommand(SchedulerView.Timeline)));
+        builtIns.Add(new SchedulerCommand(
+            SchedulerCommandIds.ViewWorkWeek, "Work Week view", "View",
+            () => InvokeViewSwitchFromCommand(SchedulerView.WorkWeek)));
 
         // Navigate group.
         builtIns.Add(new SchedulerCommand(
@@ -1555,6 +1562,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         SchedulerCommandIds.ViewYear => true,
         SchedulerCommandIds.ViewAgenda => true,
         SchedulerCommandIds.ViewTimeline => true,
+        SchedulerCommandIds.ViewWorkWeek => true,
         SchedulerCommandIds.PaletteOpen => true,
         SchedulerCommandIds.HelpOpen => true,
         SchedulerCommandIds.EditMove => true,
@@ -1579,6 +1587,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         SchedulerCommandIds.ViewYear => true,
         SchedulerCommandIds.ViewAgenda => true,
         SchedulerCommandIds.ViewTimeline => true,
+        SchedulerCommandIds.ViewWorkWeek => true,
         SchedulerCommandIds.PaletteOpen => true,
         SchedulerCommandIds.HelpOpen => true,
         _ => false, // chip-only: edit.delete, select.toggle, edit.move, edit.resize.
@@ -1746,6 +1755,10 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
                 return true;
             case SchedulerCommandIds.ViewTimeline:
                 await OnViewSwitchRequested.InvokeAsync(SchedulerView.Timeline);
+                return true;
+            case SchedulerCommandIds.ViewWorkWeek:
+                // Issue #7 — same live-dispatch shape as ViewYear/ViewAgenda above.
+                await OnViewSwitchRequested.InvokeAsync(SchedulerView.WorkWeek);
                 return true;
         }
 

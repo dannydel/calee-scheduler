@@ -1213,6 +1213,86 @@ public class CaleeSchedulerTests
     }
 
     [Fact]
+    public void WorkWeekDays_NonContiguous_MonWedFri_FirstDayOfWeekMonday_RendersInOrder_SingleRangeChangedFire()
+    {
+        // Non-contiguous subset guard: WorkWeekDays doesn't have to be a contiguous
+        // run of days. FirstDayOfWeek=Monday → week Mon 5/18..Sun 5/24. Mon/Wed/Fri
+        // subset → columns Mon 5/18, Wed 5/20, Fri 5/22, in that order. Range spans
+        // first-visible-day start (Mon 00:00) to last-visible-day exclusive end
+        // (Sat 00:00, the day after Friday) — reviewer-verified span.
+        using var ctx = NewContext();
+        var ranges = new List<SchedulerRange>();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => ranges.Add(r))));
+
+        var initialCount = ranges.Count;
+        cut.Render(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => ranges.Add(r))));
+
+        var headers = cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']");
+        var weekdays = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-weekday")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "Mon", "Wed", "Fri" }, weekdays);
+
+        // Exactly one additional fire for the view switch.
+        Assert.Equal(initialCount + 1, ranges.Count);
+        var last = ranges[^1];
+        Assert.Equal(new DateTimeOffset(2026, 5, 18, 0, 0, 0, TimeSpan.FromHours(-4)), last.Start);
+        Assert.Equal(new DateTimeOffset(2026, 5, 23, 0, 0, 0, TimeSpan.FromHours(-4)), last.End);
+    }
+
+    [Fact]
+    public void WorkWeekDays_NonContiguous_MonWedFri_FirstDayOfWeekSunday_StillOrdersMonWedFri_RangeUnaffected()
+    {
+        // Guards the FirstDayOfWeek-not-first-visible interaction: FirstDayOfWeek=Sunday
+        // means the underlying week grid starts on Sun 5/17, but the rendered WorkWeek
+        // columns and the fired range are unaffected — Mon/Wed/Fri are the same calendar
+        // dates regardless of which day the week grid starts on.
+        using var ctx = NewContext();
+        var ranges = new List<SchedulerRange>();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Sunday)
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => ranges.Add(r))));
+
+        var initialCount = ranges.Count;
+        cut.Render(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Sunday)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => ranges.Add(r))));
+
+        var headers = cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']");
+        var weekdays = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-weekday")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "Mon", "Wed", "Fri" }, weekdays);
+
+        Assert.Equal(initialCount + 1, ranges.Count);
+        var last = ranges[^1];
+        Assert.Equal(new DateTimeOffset(2026, 5, 18, 0, 0, 0, TimeSpan.FromHours(-4)), last.Start);
+        Assert.Equal(new DateTimeOffset(2026, 5, 23, 0, 0, 0, TimeSpan.FromHours(-4)), last.End);
+    }
+
+    [Fact]
     public void WorkWeek_OnRangeChanged_Spans_FirstVisibleDayStart_To_LastVisibleDayEnd_SingleFire()
     {
         using var ctx = NewContext();

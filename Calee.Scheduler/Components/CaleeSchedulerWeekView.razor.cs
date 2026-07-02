@@ -1306,9 +1306,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// not from re-deriving a column via <c>ev.Start</c> — a multi-day event whose true
     /// <c>Start</c> falls on a day <see cref="VisibleDays"/> hides still resizes
     /// correctly from its one visible (clipped-at-start) chunk. <c>ev.End</c>'s
-    /// contribution to the math uses its wall-clock time-of-day only, never its date, so
-    /// the band lookup never depends on <c>ev.End</c> and <paramref name="originColIndex"/>'s
-    /// day agreeing.
+    /// contribution is measured as elapsed time since <c>visibleStart</c> (itself
+    /// anchored on <paramref name="originColIndex"/>) — deliberately <em>not</em> via
+    /// <c>ev.End.TimeOfDay</c>, which is ambiguous for an End exactly at midnight
+    /// (00:00 is indistinguishable from the top of the band; see the code-review fix
+    /// that reverted this from a wall-clock-only formula after it collapsed
+    /// midnight-ending events on drop).
     /// </para>
     /// </remarks>
     /// <param name="ev">The full, underlying consumer event (never a chunk).</param>
@@ -1341,11 +1344,16 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var visibleStart = origDayStart.AddHours(_resolvedStartHour);
         var visibleEnd = origDayStart.AddHours(_resolvedEndHour);
 
-        // ev.End's wall-clock time-of-day, independent of which calendar date it's
-        // actually on — mirrors HandleMoveDropAsync's treatment of ev.Start. Necessary
-        // because the origin chunk's own date need not equal ev.End's true date (e.g. the
-        // grabbed chunk continues further per its clip-end flag).
-        var origEndMinutes = ev.End.TimeOfDay.TotalMinutes - _resolvedStartHour * 60;
+        // Minutes-from-band-start, measured as elapsed time from the origin chunk's own
+        // visibleStart — NOT via ev.End.TimeOfDay. Unlike ev.Start (used in
+        // HandleMoveDropAsync), ev.End has a 24:00 ambiguity: an event ending exactly at
+        // midnight has TimeOfDay == 00:00, which is indistinguishable from an event
+        // starting the visible band at the top. Elapsed-time-since-visibleStart resolves
+        // this correctly (a midnight End is a full day past visibleStart, not zero
+        // minutes past it) and still works for the hidden-day-start repro, because
+        // visibleStart above is already anchored on originColIndex — the chunk actually
+        // grabbed — not on a re-derived lookup of ev.End's own date.
+        var origEndMinutes = (ev.End - visibleStart).TotalMinutes;
         var minutesPerPx = (_resolvedEndHour - _resolvedStartHour) * 60.0 / gridHeightPx;
         var newEndPxInGrid = (origEndMinutes / minutesPerPx) + payload.DeltaYPx;
 

@@ -193,6 +193,17 @@ With typical parameters:
 }
 ```
 
+Restricting to a subset of days — e.g. a work week — via `VisibleDays`:
+
+```razor
+<CaleeSchedulerWeekView TEvent="CalendarEvent"
+                        TimeZone="@_tz"
+                        Events="@_events"
+                        VisibleDays="@(new[] { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday })" />
+```
+
+`VisibleDays` is `null` by default (all seven days — no behavior change for existing consumers). When supplied, only the listed days render as columns, always ordered by `FirstDayOfWeek`; the subset doesn't need to be contiguous (e.g. Monday/Wednesday/Friday). Events falling entirely on a hidden day are excluded from the view; a multi-day timed event that continues into a hidden day still shows the existing clip-edge arrow on the visible chunk next to it. `OnRangeChanged` and drag/keyboard navigation operate over the visible subset only. An empty list (or one that matches none of the week's seven days) is treated as "all seven days" with a logged warning, rather than rendering a zero-column grid.
+
 ### 4.3 Month
 
 A six-week (42-cell) grid anchored at `FirstDayOfWeek`. Each cell shows up to `MaxEventsPerDay` chips; overflow surfaces as a "+N more" chip that fires `OnDayOverflowClicked(... OverflowKind.Month ...)`. Multi-day all-day events always render in full as continuous bars across the cells they span (the "+N more" budget shrinks accordingly).

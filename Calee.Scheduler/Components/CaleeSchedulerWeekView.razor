@@ -4,14 +4,17 @@
 @*
     ARIA structure note (NFR-06):
 
-    The hour grid is a 7-column-by-N-row table — the column axis is days, the row axis
-    is time slots. To make Ctrl+Alt+Arrow navigation work in screen readers the way
-    consumers expect (Right/Left move across days at the same time, Up/Down move across
-    times in the same day), we model the table with:
+    The hour grid is a ColumnCount-column-by-N-row table — the column axis is days, the
+    row axis is time slots. ColumnCount is 7 by default, or the size of the VisibleDays
+    subset (e.g. 5 for Monday–Friday) when one is supplied — hidden days simply aren't
+    represented as columns, so no other markup changes are needed. To make
+    Ctrl+Alt+Arrow navigation work in screen readers the way consumers expect (Right/Left
+    move across days at the same time, Up/Down move across times in the same day), we
+    model the table with:
 
-      [role="grid"]                  the outer scroll container
-        [role="row"]                 one per slot (spans all 7 day columns)
-          [role="gridcell"] x 7      one per (col, row) intersection
+      [role="grid"]                        the outer scroll container
+        [role="row"]                       one per slot (spans all visible day columns)
+          [role="gridcell"] x ColumnCount  one per (col, row) intersection
 
     Day columns themselves are NOT row containers — they're just visual stacking. Per
     column we still render a wrapper <div> with role="presentation" so layered content
@@ -30,7 +33,7 @@
 
 <div class="calee-scheduler-week" @attributes="AdditionalAttributes">
 
-    @* (1) Day header row — 7 columns, FR-04 + today highlight per FR-07 visual + NFR-06.
+    @* (1) Day header row — ColumnCount columns, FR-04 + today highlight per FR-07 visual + NFR-06.
        The header sits outside the role="grid" hour-grid below and is not part of any
        grid widget structurally, so we do NOT emit role="columnheader" / role="row" here
        (axe would chain-fail those roles up to a grid ancestor that doesn't exist).
@@ -149,7 +152,7 @@
         </div>
     }
 
-    @* (4) Hour grid — shared scroll container, shared gutter, 7 columns + slot rows *@
+    @* (4) Hour grid — shared scroll container, shared gutter, ColumnCount columns + slot rows *@
     <div class="calee-scheduler-hour-grid-wrapper"
          @ref="_hourGridRef"
          role="grid"
@@ -342,7 +345,7 @@
                 <div class="calee-scheduler-hour-line" style="@($"top: {HourToPercent(hour)}%;")"></div>
             }
 
-            @* Slot rows — one row spanning all 7 columns, with 7 gridcells. Sits on top of
+            @* Slot rows — one row spanning all ColumnCount columns, with ColumnCount gridcells. Sits on top of
                the column visuals so empty-slot clicks land here. The :stopPropagation on
                events ensures event clicks don't pass through.
                When AllowDragToCreate=true (FR-24) each cell also wires @onpointerdown to

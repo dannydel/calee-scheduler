@@ -3,17 +3,19 @@ using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Internal;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
 namespace Calee.Scheduler.Components;
 
 /// <summary>
 /// Week view for Calee.Scheduler (FR-02). Renders seven consecutive days
-/// starting at the first-day-of-week boundary that contains <c>CurrentDate</c>, with
-/// a shared day-header row, a shared all-day row (multi-day events render as a single
-/// continuous bar across the columns they cover), per-day "+N earlier"/"+N later"
-/// overflow chips, and a shared scrollable hour grid in which timed multi-day events
-/// are split into per-day chunks.
+/// starting at the first-day-of-week boundary that contains <c>CurrentDate</c> — or,
+/// when <see cref="VisibleDays"/> is supplied, only the requested subset of those seven
+/// days — with a shared day-header row, a shared all-day row (multi-day events render
+/// as a single continuous bar across the columns they cover), per-day "+N earlier"/"+N
+/// later" overflow chips, and a shared scrollable hour grid in which timed multi-day
+/// events are split into per-day chunks.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,6 +28,7 @@ namespace Calee.Scheduler.Components;
 /// Parameter validation follows PRD §4.6: invalid <see cref="StartHour"/>,
 /// <see cref="EndHour"/>, or <see cref="SlotDurationMinutes"/> hard-fails with
 /// <see cref="ArgumentException"/>; null events soft-degrade through the base.
+/// See <see cref="VisibleDays"/> for its own soft-degradation case.
 /// </para>
 /// </remarks>
 /// <typeparam name="TEvent">Consumer event type implementing <see cref="ICalendarEvent"/>.</typeparam>
@@ -60,6 +63,39 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// </summary>
     [Parameter]
     public DayOfWeek? FirstDayOfWeek { get; set; }
+
+    /// <summary>
+    /// Opt-in subset of days to render as columns — e.g. Monday–Friday for a work week.
+    /// Order in the supplied list is irrelevant and duplicates are ignored; the rendered
+    /// column order always follows <see cref="FirstDayOfWeek"/>, and the subset need not
+    /// be contiguous (e.g. Monday/Wednesday/Friday).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see langword="null"/> (the default) renders all seven days — existing consumers
+    /// see no behavior change (additive per the 1.x source-stable promise). An empty
+    /// collection, or one whose values match none of the week's seven days, is a
+    /// soft-degradation case per PRD §4.6: treated as "all seven days," with a Warning
+    /// logged via <see cref="SchedulerComponentBase{TEvent}.Logger"/> when one is
+    /// available. This differs from the Debug level the base uses for a null
+    /// <see cref="SchedulerComponentBase{TEvent}.Events"/> list — an empty
+    /// <see cref="VisibleDays"/> is far more likely to indicate a consumer bug (e.g. an
+    /// unfiltered day-picker selection) than an intentionally omitted optional parameter.
+    /// </para>
+    /// <para>
+    /// This is the engine primitive behind a future Work Week view: layout, the all-day
+    /// row, multi-day event chunking, overflow chips, and keyboard/drag navigation all
+    /// operate over the resolved <see cref="ColumnCount"/> visible columns rather than a
+    /// hardcoded seven, so any subset renders correctly without further changes. Events
+    /// falling entirely on a hidden day are excluded from the view. A multi-day timed
+    /// event that continues into a hidden day is unaffected by that day's visibility —
+    /// <see cref="VisibleEventSet{TEvent}"/>'s per-day chunk split walks actual calendar
+    /// days, not visible columns, so the adjacent visible chunk still carries the
+    /// existing clip-edge arrow indicator (see <see cref="EventChunk{TEvent}"/>).
+    /// </para>
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<DayOfWeek>? VisibleDays { get; set; }
 
     /// <summary>
     /// Whether to render a horizontal current-time indicator on today's column when
@@ -183,7 +219,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // Day view does — keeps consumer-facing diagnostics uniform.
         SchedulerViewPrimitives.ValidateHourParameters(_resolvedStartHour, _resolvedEndHour, _resolvedSlotMinutes);
 
-        _weekDays = SchedulerViewPrimitives.ComputeWeekDays(CurrentDate, _resolvedFirstDayOfWeek, TimeZone);
+        _weekDays = ResolveVisibleWeekDays();
 
         // Optimistic-pin housekeeping (ADR-0006). Drop entries the consumer has caught
         // up on — i.e., the consumer's authoritative Start/End for the event now matches
@@ -200,6 +236,44 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             _lastRangeEnd = WeekEndExclusive;
             _ = OnRangeChanged.InvokeAsync(new SchedulerRange(WeekStart, WeekEndExclusive));
         }
+    }
+
+    /// <summary>
+    /// Compute the full seven-day week, then narrow it to the days requested by
+    /// <see cref="VisibleDays"/>, preserving <see cref="FirstDayOfWeek"/> order. See
+    /// <see cref="VisibleDays"/>'s remarks for the soft-degradation rule applied when
+    /// the requested subset is empty or matches none of the seven days.
+    /// </summary>
+    private IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> ResolveVisibleWeekDays()
+    {
+        var allDays = SchedulerViewPrimitives.ComputeWeekDays(CurrentDate, _resolvedFirstDayOfWeek, TimeZone);
+
+        if (VisibleDays is null)
+        {
+            return allDays;
+        }
+
+        // HashSet both dedupes and gives O(1) membership checks; garbage DayOfWeek
+        // values (outside the 7 defined enum members) simply never match below.
+        var requested = new HashSet<DayOfWeek>(VisibleDays);
+
+        var filtered = new List<(DateTimeOffset Start, DateTimeOffset End)>(allDays.Count);
+        foreach (var day in allDays)
+        {
+            if (requested.Contains(day.Start.DayOfWeek))
+            {
+                filtered.Add(day);
+            }
+        }
+
+        if (filtered.Count == 0)
+        {
+            Logger?.LogWarning(
+                "Calee.Scheduler: VisibleDays parameter was empty or matched no day of the week; treating as all seven days (PRD §4.6 soft-degradation).");
+            return allDays;
+        }
+
+        return filtered;
     }
 
     /// <summary>
@@ -333,7 +407,10 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <summary>Slot rows per column.</summary>
     internal int SlotCountForRender => SlotCount;
 
-    /// <summary>Column count (always 7 — week view).</summary>
+    /// <summary>
+    /// Rendered day-column count — 7 by default, or the size of the resolved
+    /// <see cref="VisibleDays"/> subset (1..7) when supplied.
+    /// </summary>
     internal int ColumnCount => _weekDays.Count;
 
     /// <summary>Convert hour-of-day into a percentage of the visible vertical band.</summary>

@@ -1513,4 +1513,339 @@ public class CaleeSchedulerWeekViewTests
         Assert.Equal(2, captured.Events.Count);
         Assert.NotNull(captured.RegionStart);
     }
+
+    // ----- VisibleDays (issue #6 — Work Week engine primitive) --------------------
+
+    [Fact]
+    public void VisibleDays_Null_Default_RendersAllSevenDays_Unchanged()
+    {
+        // Explicit null (the default) must be byte-for-byte identical to omitting the
+        // parameter entirely — no behavior change for existing consumers.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.VisibleDays, (IReadOnlyList<DayOfWeek>?)null));
+
+        Assert.Equal(7, cut.FindAll("[data-calee-region='day-header']").Count);
+        var columns = cut.Find("[data-calee-region='hour-grid']").QuerySelectorAll(".calee-scheduler-week-column");
+        Assert.Equal(7, columns.Length);
+    }
+
+    [Fact]
+    public void VisibleDays_MonToFri_RendersFiveColumns_OrderedByFirstDayOfWeek()
+    {
+        // FirstDayOfWeek=Monday → week is Mon 18 .. Sun 24 May 2026. Supplying the
+        // subset out of order and interleaved with a non-visible day must not affect
+        // the rendered order — that always derives from FirstDayOfWeek.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[]
+            {
+                DayOfWeek.Friday, DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Tuesday, DayOfWeek.Thursday,
+            }));
+
+        var headers = cut.FindAll("[data-calee-region='day-header']");
+        Assert.Equal(5, headers.Count);
+        var dates = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-date")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "18", "19", "20", "21", "22" }, dates);
+    }
+
+    [Fact]
+    public void VisibleDays_NonContiguous_MonWedFri_RendersThreeColumns_InOrder()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday }));
+
+        var headers = cut.FindAll("[data-calee-region='day-header']");
+        Assert.Equal(3, headers.Count);
+        var dates = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-date")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "18", "20", "22" }, dates);
+    }
+
+    [Fact]
+    public void VisibleDays_EmptyList_SoftDegrades_To_AllSevenDays()
+    {
+        // PRD §4.6 soft-degradation: an empty VisibleDays renders "all seven days"
+        // rather than a zero-column grid, mirroring the null-Events idiom.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.VisibleDays, Array.Empty<DayOfWeek>()));
+
+        Assert.Equal(7, cut.FindAll("[data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public void VisibleDays_ValuesMatchingNoDayOfWeek_SoftDegrades_To_AllSevenDays()
+    {
+        // Effectively-empty case: a non-empty list whose values don't intersect the
+        // week's seven days must fall back the same way as a literal empty list.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.VisibleDays, new[] { (DayOfWeek)99 }));
+
+        Assert.Equal(7, cut.FindAll("[data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public void VisibleDays_Duplicates_Deduped()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[]
+            {
+                DayOfWeek.Monday, DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Wednesday, DayOfWeek.Wednesday,
+            }));
+
+        var headers = cut.FindAll("[data-calee-region='day-header']");
+        Assert.Equal(2, headers.Count);
+        var dates = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-date")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "18", "20" }, dates);
+    }
+
+    [Fact]
+    public void VisibleDays_MultiDayEvent_ClipsAcrossHiddenDay_HiddenDayNotRendered()
+    {
+        // Mon/Wed/Fri subset (Tuesday hidden). Event spans Monday 23:00 → Wednesday
+        // 02:00 — continues straight through the hidden Tuesday. The Monday chunk must
+        // still show the continues-to-later indicator and the Wednesday chunk the
+        // continues-from-earlier indicator, exactly as if Tuesday were visible — the
+        // per-day chunk split is calendar-day-based, not visible-column-based.
+        using var ctx = NewContext();
+
+        var monday11pm = new DateTimeOffset(2026, 5, 18, 23, 0, 0, TimeSpan.FromHours(-4));
+        var wed2am = new DateTimeOffset(2026, 5, 20, 2, 0, 0, TimeSpan.FromHours(-4));
+        var ev = Timed("overnight", monday11pm, wed2am);
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.Events, new[] { ev }));
+
+        var hourGrid = cut.Find("[data-calee-region='hour-grid']");
+        var columns = hourGrid.QuerySelectorAll(".calee-scheduler-week-column");
+        Assert.Equal(3, columns.Length); // Mon, Wed, Fri only — no hidden Tuesday column.
+
+        var monEvents = columns[0].QuerySelectorAll(".calee-scheduler-event");
+        Assert.Single(monEvents);
+        Assert.Contains("calee-scheduler-event--clip-bottom", monEvents[0].GetAttribute("class") ?? "");
+        Assert.DoesNotContain("calee-scheduler-event--clip-top", monEvents[0].GetAttribute("class") ?? "");
+
+        var wedEvents = columns[1].QuerySelectorAll(".calee-scheduler-event");
+        Assert.Single(wedEvents);
+        Assert.Contains("calee-scheduler-event--clip-top", wedEvents[0].GetAttribute("class") ?? "");
+        Assert.DoesNotContain("calee-scheduler-event--clip-bottom", wedEvents[0].GetAttribute("class") ?? "");
+
+        var friEvents = columns[2].QuerySelectorAll(".calee-scheduler-event");
+        Assert.Empty(friEvents);
+
+        // Exactly two rendered chunks total — the would-be Tuesday chunk is dropped.
+        Assert.Equal(2, hourGrid.QuerySelectorAll(".calee-scheduler-event").Length);
+    }
+
+    [Fact]
+    public void VisibleDays_TimedEvent_EntirelyOnHiddenDay_Excluded()
+    {
+        using var ctx = NewContext();
+
+        // Tuesday May 19, 10:00–11:00 — hidden in the Mon/Wed/Fri subset.
+        var ev = Timed("hidden-day", Anchor, 10, 11);
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.Events, new[] { ev }));
+
+        Assert.Empty(cut.FindAll(".calee-scheduler-event"));
+    }
+
+    [Fact]
+    public void VisibleDays_AllDayEvent_EntirelyOnHiddenDay_Excluded()
+    {
+        using var ctx = NewContext();
+
+        // All-day event on Tuesday May 19 — hidden in the Mon/Wed/Fri subset.
+        var ev = AllDay("hidden-allday", Edt(2026, 5, 19), Edt(2026, 5, 20));
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.Events, new[] { ev }));
+
+        Assert.Empty(cut.FindAll(".calee-scheduler-all-day-event"));
+    }
+
+    [Fact]
+    public void VisibleDays_OnRangeChanged_SpansFirstVisibleDayStart_To_LastVisibleDayEnd()
+    {
+        using var ctx = NewContext();
+        SchedulerRange? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => captured = r)));
+
+        Assert.NotNull(captured);
+        Assert.Equal(Edt(2026, 5, 18), captured!.Start);  // Monday 00:00 — first visible day.
+        Assert.Equal(Edt(2026, 5, 23), captured.End);     // Saturday 00:00 — Friday's day end.
+    }
+
+    [Fact]
+    public async Task VisibleDays_KeyboardNav_ArrowRight_MovesOnlyAcrossVisibleColumns()
+    {
+        using var ctx = NewContext();
+        SchedulerSlot? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.OnSlotClicked,
+                EventCallback.Factory.Create<SchedulerSlot>(this, s => captured = s)));
+
+        var grid = cut.Find("[role='grid']");
+
+        // Initial focus col=0 (Monday). One ArrowRight → col=1, which must be Wednesday
+        // (not the hidden Tuesday — there is no column for it at all).
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+        Assert.NotNull(captured);
+        Assert.Equal(20, captured!.Start.Day); // Wednesday May 20.
+
+        // Second ArrowRight → col=2 (Friday).
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+        Assert.Equal(22, captured!.Start.Day); // Friday May 22.
+
+        // A third ArrowRight has nowhere further to go — clamps at the last visible
+        // column (Friday), never wandering into a hidden day.
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+        Assert.Equal(22, captured!.Start.Day); // Still Friday May 22.
+    }
+
+    [Fact]
+    public async Task VisibleDays_DragToMove_ClampsToLastVisibleColumn_NotHiddenDay()
+    {
+        // Mon/Wed/Fri subset (ColumnCount=3). A drop with an enormous rightward
+        // DeltaXPx must clamp to the last *visible* column (Friday, index 2) — not to
+        // some index that would land on a hidden Tuesday/Thursday if they were still
+        // counted.
+        using var ctx = NewContext();
+
+        var monday10am = new DateTimeOffset(2026, 5, 18, 10, 0, 0, TimeSpan.FromHours(-4));
+        var ev = Timed("mon-event", monday10am, monday10am.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 99999, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(22, captured!.NewStart.Day); // Friday May 22 — last visible column.
+    }
+
+    [Fact]
+    public async Task VisibleDays_DragToCreate_AnchorColumnIndex_MapsToVisibleDay()
+    {
+        // Column index 1 in a Mon/Wed/Fri subset must resolve to Wednesday — the hidden
+        // Tuesday never occupies a column index at all.
+        using var ctx = NewContext();
+
+        EventCreateContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDragToCreate, true)
+            .Add(c => c.OnEventCreated,
+                EventCallback.Factory.Create<EventCreateContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 0, 28, "create-region");
+        await cut.InvokeAsync(() => cut.Instance.InvokeCreateDropForTestAsync(1, 4, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(20, captured!.Slot.Start.Day); // Wednesday May 20.
+    }
+
+    [Fact]
+    public async Task VisibleDays_DoubleClickToCreate_AnchorColumnIndex_MapsToVisibleDay()
+    {
+        using var ctx = NewContext();
+
+        EventCreateContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.FirstDayOfWeek, DayOfWeek.Monday)
+            .Add(c => c.VisibleDays, new[] { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday })
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDoubleClickToCreate, true)
+            .Add(c => c.OnEventCreated,
+                EventCallback.Factory.Create<EventCreateContext>(this, m => captured = m)));
+
+        // Column index 2 must be Friday — the third and last visible column.
+        await cut.InvokeAsync(() => cut.Instance.InvokeDoubleClickCreateForTestAsync(2, 4));
+
+        Assert.NotNull(captured);
+        Assert.Equal(22, captured!.Slot.Start.Day); // Friday May 22.
+    }
 }

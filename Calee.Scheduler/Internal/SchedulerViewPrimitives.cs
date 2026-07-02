@@ -468,6 +468,25 @@ internal static class SchedulerViewPrimitives
     }
 
     /// <summary>
+    /// Build the accessible label announced for a blocked day (issue #8) — the day's
+    /// full date plus either the consumer's <see cref="SchedulerDayState.Label"/> (when
+    /// supplied) or a generic "blocked" fallback. Shared by Day/Week's day-header and
+    /// slot-cell labels and Month's cell label so the three views announce blocked days
+    /// identically.
+    /// </summary>
+    /// <param name="day">The day being described (its date portion is used).</param>
+    /// <param name="state">
+    /// The resolved <see cref="SchedulerDayState"/> for <paramref name="day"/>. Callers
+    /// only invoke this when <c>state?.IsBlocked == true</c>.
+    /// </param>
+    internal static string BlockedDayAccessibleLabel(DateTimeOffset day, SchedulerDayState? state)
+    {
+        var dateText = day.ToString("dddd, MMMM d, yyyy", CultureInfo.GetCultureInfo("en-US"));
+        var label = state?.Label;
+        return string.IsNullOrEmpty(label) ? $"{dateText}, blocked" : $"{dateText}, {label}";
+    }
+
+    /// <summary>
     /// Compute one (start, end) midnight-midnight bound per day in the supplied half-open
     /// range, in the supplied time zone. Used by TimelineView's <c>TimeScale.Month</c>
     /// (one entry per day in the month) and <c>TimeScale.Week</c> (delegates to

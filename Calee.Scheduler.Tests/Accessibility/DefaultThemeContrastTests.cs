@@ -34,6 +34,12 @@ public class DefaultThemeContrastTests
     [InlineData("body text on muted-cell bg", "#18181b", "#fafafa", NormalTextRatio)]
     [InlineData("body text on overflow chip", "#18181b", "#f4f4f5", NormalTextRatio)]
     [InlineData("body text on unassigned row", "#52525b", "#f4f4f5", NormalTextRatio)]
+    // Blocked-day background (issue #8) — day headers, slot cells, and month cells
+    // marked blocked by the consumer's DayModifier hook. WCAG 2.2 AA kept the same
+    // numeric thresholds as 2.1 for contrast (SC 1.4.3 / 1.4.11), so this pair
+    // satisfies both.
+    [InlineData("body text on blocked day bg", "#18181b", "#e4e4e7", NormalTextRatio)]
+    [InlineData("subtle text on blocked day bg", "#52525b", "#e4e4e7", NormalTextRatio)]
     // Year view out-of-month ("muted") day numbers on the white cell background.
     [InlineData("year muted date on cell bg", "#71717a", "#ffffff", NormalTextRatio)]
     // Subtle text (#52525b) — date secondary labels, time-gutter labels, event-time strip.

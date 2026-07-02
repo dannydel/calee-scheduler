@@ -367,3 +367,26 @@
     outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
     outline-offset: 1px;
 }
+
+/* Blocked-day visual treatment (issue #8) — applied to the day header and every
+ * slot cell of a day the consumer's DayModifier hook marks blocked. A tint plus a
+ * diagonal-stripe pattern, not color alone, so the state reads without relying on
+ * color perception; the aria-label carries the same information to screen readers.
+ * Declared after .calee-scheduler-day-header--today and .calee-scheduler-slot so a
+ * day that is both "today" and blocked still renders as blocked (equal single-class
+ * specificity — source order decides which background wins).
+ *
+ * New theme tokens:
+ *   --calee-scheduler-blocked-day-bg              #e4e4e7
+ *   --calee-scheduler-blocked-day-pattern-color   rgba(24, 24, 27, 0.1)
+ */
+.calee-scheduler-day-blocked {
+    background-color: var(--calee-scheduler-blocked-day-bg, #e4e4e7);
+    background-image: repeating-linear-gradient(
+        135deg,
+        var(--calee-scheduler-blocked-day-pattern-color, rgba(24, 24, 27, 0.1)) 0,
+        var(--calee-scheduler-blocked-day-pattern-color, rgba(24, 24, 27, 0.1)) 1px,
+        transparent 1px,
+        transparent 8px
+    );
+}

@@ -77,6 +77,11 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     // Index = week-row * 7 + column.
     private (DateTimeOffset Start, DateTimeOffset End)[] _gridCells = Array.Empty<(DateTimeOffset, DateTimeOffset)>();
 
+    // Cached DayModifier results (issue #8), one entry per _gridCells index — evaluated
+    // once per parameter set, not per render frame, for every rendered cell (including
+    // in/out-of-month cells — Month always renders 42 real dates).
+    private SchedulerDayState?[] _cellDayStates = Array.Empty<SchedulerDayState?>();
+
     // The month being displayed, used to detect "outside the month" cells.
     private int _displayedMonth;
     private int _displayedYear;
@@ -122,6 +127,18 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         }
 
         ComputeGrid();
+
+        // Issue #8 — evaluate the per-day state hook once per rendered cell, in the
+        // grid time zone (_gridCells' midnight boundaries), not per render frame.
+        _cellDayStates = new SchedulerDayState?[_gridCells.Length];
+        if (DayModifier is not null)
+        {
+            for (var i = 0; i < _gridCells.Length; i++)
+            {
+                _cellDayStates[i] = GetDayState(_gridCells[i].Start);
+            }
+        }
+
         ComputeLayout();
 
         if (_lastRangeStart != GridStart || _lastRangeEnd != GridEndExclusive)
@@ -419,15 +436,37 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <summary>The date displayed in the corner of the cell.</summary>
     internal int CellDayNumber(int cellIndex) => _gridCells[cellIndex].Start.Day;
 
-    /// <summary>Accessible name for the cell: "Wednesday, May 20, 2026".</summary>
+    /// <summary>
+    /// Accessible name for the cell: "Wednesday, May 20, 2026" — or the blocked-day
+    /// label (issue #8) when the cell's day is blocked.
+    /// </summary>
     internal string CellAccessibleName(int cellIndex)
     {
         var d = _gridCells[cellIndex].Start;
-        return d.ToString("dddd, MMMM d, yyyy");
+        return IsCellBlocked(cellIndex)
+            ? SchedulerViewPrimitives.BlockedDayAccessibleLabel(d, _cellDayStates[cellIndex])
+            : d.ToString("dddd, MMMM d, yyyy");
     }
 
     /// <summary>Returns true when the supplied cell index is the currently-tabbable cell.</summary>
     internal bool IsCellTabbable(int cellIndex) => cellIndex == _focusedCellIndex;
+
+    // ----- Blocked days (issue #8) -----------------------------------------------------
+
+    /// <summary>True when the cell's day is blocked per <see cref="SchedulerComponentBase{TEvent}.DayModifier"/>.</summary>
+    internal bool IsCellBlocked(int cellIndex) => _cellDayStates[cellIndex]?.IsBlocked ?? false;
+
+    /// <summary>Consumer-supplied per-day class hook for the cell's day, or null.</summary>
+    internal string? DayBlockedClassFor(int cellIndex) => _cellDayStates[cellIndex]?.Class;
+
+    /// <summary>
+    /// Issue #8 — Month's grid-focus concept is the roving cell index; the
+    /// create-at-focus suppression check looks at the focused cell's day. Month has
+    /// no drag-to-create, so this only gates the create-at-focus keystroke — the
+    /// double-click path is gated directly in <see cref="HandleDoubleClickCreateAsync"/>.
+    /// </summary>
+    private protected override bool IsFocusedGridDayBlocked() =>
+        _focusedCellIndex >= 0 && _focusedCellIndex < _cellDayStates.Length && IsCellBlocked(_focusedCellIndex);
 
     /// <summary>Bars to render on the supplied week row.</summary>
     internal IReadOnlyList<BarSegment> BarsForWeekRow(int rowIndex) => _barsPerWeekRow[rowIndex];
@@ -632,6 +671,12 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         // the consumer asked for that exact duration, and Month view's caller is free to
         // interpret the resulting Start/End however suits their domain.
         _ = cellEnd; // Keep the destructuring symmetric for readers.
+
+        // Issue #8 — fail-closed: no-op on a blocked day (no phantom, no OnEventCreated).
+        // Uses the general span check (not just IsCellBlocked(cellIndex)) so a consumer
+        // override of DefaultCreateDurationMinutes that pushes End past the cell's
+        // midnight still catches a blocked day it crosses into.
+        if (CreateSpanTouchesBlockedDay(start, end)) return Task.CompletedTask;
 
         var context = new EventCreateContext
         {

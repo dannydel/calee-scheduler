@@ -46,13 +46,17 @@
         {
             var col = i;
             var isToday = IsTodayColumn(col);
+            var colBlocked = IsColumnBlocked(col);
             var headerClasses = "calee-scheduler-day-header"
                 + (isToday ? " calee-scheduler-day-header--today" : string.Empty)
+                + (colBlocked ? " calee-scheduler-day-blocked" : string.Empty)
+                + (string.IsNullOrEmpty(DayBlockedClassFor(col)) ? string.Empty : " " + DayBlockedClassFor(col))
                 + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
             <div class="@headerClasses"
                  data-calee-region="day-header"
-                 aria-label="@WeekDays[col].Start.ToString("dddd, MMMM d, yyyy")"
-                 aria-current="@(isToday ? "date" : null)">
+                 aria-label="@(colBlocked ? BlockedDayHeaderLabel(col) : WeekDays[col].Start.ToString("dddd, MMMM d, yyyy"))"
+                 aria-current="@(isToday ? "date" : null)"
+                 aria-disabled="@(colBlocked ? "true" : null)">
                 <div class="calee-scheduler-day-header-weekday">@WeekDays[col].Start.ToString("ddd")</div>
                 <div class="calee-scheduler-day-header-date">@WeekDays[col].Start.Day</div>
             </div>
@@ -351,10 +355,6 @@
                When AllowDragToCreate=true (FR-24) each cell also wires @onpointerdown to
                start a vertical drag region; the create stays within the anchor column
                (lane axis is locked — DeltaXPx is ignored in the drop handler). *@
-            @{
-                var createEnabled = AllowDragToCreate;
-                var slotExtraClass = createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty;
-            }
             @for (var slotIndex = 0; slotIndex < SlotCountForRender; slotIndex++)
             {
                 var row = slotIndex;
@@ -370,13 +370,22 @@
                         var isTabbable = IsSlotTabbable(col, row);
                         var cellLeft = col * 100.0 / ColumnCount;
                         var cellWidth = 100.0 / ColumnCount;
+                        // Issue #8 — a blocked day suppresses create affordances
+                        // fail-closed: no create-affordance cursor cue, no
+                        // double-click/drag-create wiring. OnSlotClicked is untouched.
+                        var colBlocked = IsColumnBlocked(col);
+                        var createEnabled = AllowDragToCreate && !colBlocked;
+                        var doubleClickEnabled = AllowDoubleClickToCreate && !colBlocked;
+                        var slotExtraClass = (createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty)
+                            + (colBlocked ? " calee-scheduler-day-blocked" : string.Empty);
                         <div role="gridcell"
                              class="@("calee-scheduler-slot" + slotExtraClass)"
                              style="@($"left: {cellLeft:F4}%; width: {cellWidth:F4}%;")"
                              tabindex="@(isTabbable ? 0 : -1)"
                              aria-label="@SlotAccessibleName(col, row)"
+                             aria-disabled="@(colBlocked ? "true" : null)"
                              @onclick="@(() => HandleSlotClickAsync(col, row))"
-                             @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(col, row)) : default)"
+                             @ondblclick="@(doubleClickEnabled ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(col, row)) : default)"
                              @onpointerdown="@(createEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnGridPointerDownAsync(e, col, row)) : default)">
                         </div>
                     }

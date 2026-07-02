@@ -145,6 +145,11 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     // The 7 visible days, each as a midnight–midnight bound in TimeZone.
     private IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> _weekDays = Array.Empty<(DateTimeOffset, DateTimeOffset)>();
 
+    // Cached DayModifier results (issue #8), one entry per _weekDays column — evaluated
+    // once per parameter set, not per slot, and only for the visible column subset
+    // (VisibleDays-hidden days are never passed to the hook).
+    private SchedulerDayState?[] _dayStates = Array.Empty<SchedulerDayState?>();
+
     // Per-day layout result (parallel to _weekDays).
     private LayoutResult[] _layoutPerDay = Array.Empty<LayoutResult>();
 
@@ -220,6 +225,18 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         SchedulerViewPrimitives.ValidateHourParameters(_resolvedStartHour, _resolvedEndHour, _resolvedSlotMinutes);
 
         _weekDays = ResolveVisibleWeekDays();
+
+        // Issue #8 — evaluate the per-day state hook once per visible column, in the
+        // grid time zone (_weekDays' midnight boundaries). Hidden VisibleDays columns
+        // are never in _weekDays, so they're never evaluated.
+        _dayStates = new SchedulerDayState?[_weekDays.Count];
+        if (DayModifier is not null)
+        {
+            for (var i = 0; i < _weekDays.Count; i++)
+            {
+                _dayStates[i] = GetDayState(_weekDays[i].Start);
+            }
+        }
 
         // Optimistic-pin housekeeping (ADR-0006). Drop entries the consumer has caught
         // up on — i.e., the consumer's authoritative Start/End for the event now matches
@@ -431,8 +448,34 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var day = _weekDays[col].Start;
         var minutes = row * _resolvedSlotMinutes;
         var time = day.Date.AddHours(_resolvedStartHour).AddMinutes(minutes);
+        if (IsColumnBlocked(col))
+        {
+            var label = _dayStates[col]?.Label;
+            return string.IsNullOrEmpty(label)
+                ? $"{day:dddd}, {time:h:mm tt}, blocked"
+                : $"{day:dddd}, {time:h:mm tt}, {label}";
+        }
         return $"{day:dddd}, {time:h:mm tt}, empty slot";
     }
+
+    // ----- Blocked days (issue #8) -----------------------------------------------------
+
+    /// <summary>True when the column's day is blocked per <see cref="SchedulerComponentBase{TEvent}.DayModifier"/>.</summary>
+    internal bool IsColumnBlocked(int col) => _dayStates[col]?.IsBlocked ?? false;
+
+    /// <summary>Consumer-supplied per-day class hook for the column's day, or null.</summary>
+    internal string? DayBlockedClassFor(int col) => _dayStates[col]?.Class;
+
+    /// <summary>Accessible label announced on the column's day header when it is blocked.</summary>
+    internal string BlockedDayHeaderLabel(int col) =>
+        SchedulerViewPrimitives.BlockedDayAccessibleLabel(_weekDays[col].Start, _dayStates[col]);
+
+    /// <summary>
+    /// Issue #8 — the grid-focus concept for Week is the roving (column, row) pair;
+    /// the create-at-focus suppression check looks at the focused column's day.
+    /// </summary>
+    private protected override bool IsFocusedGridDayBlocked() =>
+        _focusedColumnIndex >= 0 && _focusedColumnIndex < _dayStates.Length && IsColumnBlocked(_focusedColumnIndex);
 
     /// <summary>Format an hour-of-day for the time gutter.</summary>
     internal static string FormatHour(int hour) => SchedulerViewPrimitives.FormatHour(hour);
@@ -1429,6 +1472,9 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     {
         if (!AllowDragToCreate) return;
         if (e.Button != 0) return;
+        // Issue #8 — fail-closed: don't start the drag on a blocked day so no ghost
+        // rectangle is ever drawn over it.
+        if (IsColumnBlocked(anchorColIndex)) return;
 
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
@@ -1496,6 +1542,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var start = dayStart.AddMinutes(startMinutes);
         var end = dayStart.AddMinutes(endMinutes);
 
+        // Issue #8 — fail-closed: if the swept region touches a blocked day, the
+        // create does not fire. Week's drag is column-locked (lane axis locked to the
+        // anchor), so this reduces to the anchor column, but the shared helper keeps
+        // Day/Week/Month consistent.
+        if (CreateSpanTouchesBlockedDay(start, end)) return;
+
         var context = new EventCreateContext
         {
             // LaneId stays null — Week view has no lanes (ADR-0011).
@@ -1543,6 +1595,9 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
         var start = dayStart.AddMinutes(startMinutes);
         var end = dayStart.AddMinutes(endMinutes);
+
+        // Issue #8 — fail-closed: no-op on a blocked day (no phantom, no OnEventCreated).
+        if (CreateSpanTouchesBlockedDay(start, end)) return Task.CompletedTask;
 
         var context = new EventCreateContext
         {

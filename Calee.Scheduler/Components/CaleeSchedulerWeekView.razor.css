@@ -436,3 +436,24 @@
     outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
     outline-offset: 1px;
 }
+
+/* Blocked-day visual treatment (issue #8) — applied to a column's day header and
+ * every slot cell in that column when the consumer's DayModifier hook marks the
+ * day blocked. See CaleeSchedulerDayView.razor.css for the full rationale (tint +
+ * pattern, not color alone; declared after the --today / .calee-scheduler-slot
+ * rules so blocked wins on a day that is also "today").
+ *
+ * New theme tokens:
+ *   --calee-scheduler-blocked-day-bg              #e4e4e7
+ *   --calee-scheduler-blocked-day-pattern-color   rgba(24, 24, 27, 0.1)
+ */
+.calee-scheduler-day-blocked {
+    background-color: var(--calee-scheduler-blocked-day-bg, #e4e4e7);
+    background-image: repeating-linear-gradient(
+        135deg,
+        var(--calee-scheduler-blocked-day-pattern-color, rgba(24, 24, 27, 0.1)) 0,
+        var(--calee-scheduler-blocked-day-pattern-color, rgba(24, 24, 27, 0.1)) 1px,
+        transparent 1px,
+        transparent 8px
+    );
+}

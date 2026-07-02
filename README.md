@@ -341,6 +341,49 @@ Minimal (TimeScale=Day):
 
 The Timeline view is also reachable through `CaleeScheduler` itself — wiring both `Lanes` and `LaneKey` on the root makes the toolbar's view switcher surface the sixth "Timeline" entry.
 
+### 4.7 Blocked days
+
+`DayModifier` (issue #8) is a per-day state hook on Day, Week (including WorkWeek and any `VisibleDays` subset), and Month — the same `Func<T, TResult>` idiom as `EventFilter` / `EventClass`, but keyed on a day instead of an event:
+
+```razor
+<CaleeSchedulerWeekView TEvent="CalendarEvent"
+                        TimeZone="@_tz"
+                        Events="@_events"
+                        DayModifier="@GetDayState" />
+
+@code {
+    private SchedulerDayState? GetDayState(DateTimeOffset day) =>
+        _blockedDates.Contains(day.Date)
+            ? new SchedulerDayState(IsBlocked: true, Label: "Blocked — no route published yet")
+            : null;
+}
+```
+
+The hook is evaluated once per rendered day, in the grid time zone (ADR-0001) — not per slot — and only for the columns/cells actually rendered: a Week/WorkWeek view with a `VisibleDays` subset never evaluates the hook for a hidden day. Returning `null` for a day (the default when `DayModifier` itself is `null`) means "normal day" — zero visual or behavioral change.
+
+`SchedulerDayState` carries:
+
+| Property     | Type      | Meaning                                                                         |
+| ------------ | --------- | -------------------------------------------------------------------------------- |
+| `IsBlocked`  | `bool`    | Renders the day with the blocked-day visual treatment and suppresses create affordances on it. |
+| `Class`      | `string?` | Optional per-day CSS class hook, composed alongside the library's own classes (same convention as `EventClass`). Independent of `IsBlocked` — usable to annotate a day without blocking it. |
+| `Label`      | `string?` | Accessible label announced to screen readers. Falls back to a generic "blocked" announcement when null and `IsBlocked` is true. |
+
+**Create-only suppression — the create-vs-move split.** A blocked day fails closed on every *create* affordance:
+
+- Double-click-to-create (`AllowDoubleClickToCreate`) — no-op, no `OnEventCreated`.
+- Drag-to-create (`AllowDragToCreate`) — no-op; the drag doesn't even start on a blocked anchor day, so no ghost rectangle is drawn. If a drag's swept region touches *any* blocked day (e.g. it starts on an open day and crosses into a blocked one), the create does not fire — the simplest defensible fail-closed rule.
+- The create-at-focus keystroke (`OnCreateAtFocusRequested`, default `n`) — no-op when the keyboard-focused grid cell sits on a blocked day.
+
+It does **not** suppress:
+
+- **Drag-to-move / drag-to-resize onto the day.** `OnEventMoved` / `OnEventResized` still fire — reschedule and create are different permissions in the consuming product. Reject the move/resize yourself via `EventMoveContext.Cancel` / `EventResizeContext.Cancel` if your permission model requires it.
+- **`OnSlotClicked`.** Selection and navigation are not creation, so clicking (or Enter-ing) a blocked slot/cell still fires it.
+
+**Accessibility.** Blocked cells/headers carry `aria-disabled="true"` and an `aria-label` announcing why the day is inert, but stay in the roving-tabindex sequence — a blocked cell is reachable and focusable like any other cell, it just can't be used to create. The default visual treatment (`calee-scheduler-day-blocked`, §8.1) combines a background tint with a diagonal-stripe pattern so the state doesn't rely on color alone.
+
+**Month view has no per-date header.** Month's weekday header row (`Sun`, `Mon`, …) is generic across all six weeks, not per-date, so `DayModifier` only affects Month's day *cells* — there's no separate per-date header element to mark.
+
 ---
 
 ## 5. TimeZone semantics and footguns
@@ -527,6 +570,8 @@ Full surface (defaults shown):
 | `--calee-scheduler-event-color`                    | (inline)    | Per-event color. Set inline by the renderer from `ICalendarEvent.Color`.    |
 | `--calee-scheduler-focus-color`                    | `#2563eb`   | 2px focus outline on every interactive element.                             |
 | `--calee-scheduler-today-background`               | `#eef4ff`   | Background of the today column / today cell / today header.                 |
+| `--calee-scheduler-blocked-day-bg`                 | `#e4e4e7`   | Background tint of a blocked day's header/cell (§4.7, issue #8).            |
+| `--calee-scheduler-blocked-day-pattern-color`      | `rgba(24, 24, 27, 0.1)` | Diagonal-stripe pattern color layered over `--calee-scheduler-blocked-day-bg` — the pattern (not color alone) signals the blocked state. |
 | `--calee-scheduler-grid-line-color`                | `#d4d4d8`   | Primary grid separator color (hour rules, day-column borders).              |
 | `--calee-scheduler-slot-line-color`                | `#ececef`   | Lighter slot-boundary lines inside the hour grid.                           |
 | `--calee-scheduler-current-time-indicator-color`   | `#dc2626`   | Current-time line and leading dot.                                          |
@@ -574,6 +619,7 @@ Per-region class hooks (FR-54) for finer-grained styling without `::deep`:
 | `AllDayRowClass`      | `string?`                 | All-day row (Day / Week / Timeline).                      |
 | `LaneLabelClass`      | `string?`                 | Lane row labels (Timeline view only).                     |
 | `EventClass`          | `Func<TEvent, string?>?`  | Per-event class — receives the event, returns a class or null. |
+| `DayModifier`         | `Func<DateTimeOffset, SchedulerDayState?>?` | Per-day state (§4.7, issue #8) — receives a day's midnight boundary, returns `null` for a normal day or a `SchedulerDayState` carrying `IsBlocked` / `Class` / `Label`. Day / Week / Month only. |
 
 ### 8.4 `::deep` escape hatch via `data-calee-region`
 

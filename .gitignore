@@ -74,6 +74,9 @@ $RECYCLE.BIN/
 # Superpowers
 .superpowers
 
+# Git worktrees
+.worktrees/
+
 # Other
 /docs
 

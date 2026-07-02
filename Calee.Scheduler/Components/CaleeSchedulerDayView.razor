@@ -6,6 +6,8 @@
     // the risk-row guidance on CSS isolation (PRD §7).
     var dayHeaderClasses = "calee-scheduler-day-header"
         + (Today.Date == CurrentDate.Date ? " calee-scheduler-day-header--today" : string.Empty)
+        + (IsRenderedDayBlocked ? " calee-scheduler-day-blocked" : string.Empty)
+        + (string.IsNullOrEmpty(DayBlockedClass) ? string.Empty : " " + DayBlockedClass)
         + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
 
     var allDayRowClasses = "calee-scheduler-all-day-row"
@@ -18,7 +20,9 @@
 <div class="calee-scheduler-day" @attributes="AdditionalAttributes">
 
     @* (1) Day header row — FR-04 implicit, §5.1 *@
-    <div class="@dayHeaderClasses" data-calee-region="day-header">
+    <div class="@dayHeaderClasses" data-calee-region="day-header"
+         aria-disabled="@(IsRenderedDayBlocked ? "true" : null)"
+         aria-label="@(IsRenderedDayBlocked ? BlockedDayHeaderLabel : null)">
         <div class="calee-scheduler-day-header-weekday">@CurrentDate.ToString("ddd")</div>
         <div class="calee-scheduler-day-header-date">@CurrentDate.Day</div>
     </div>
@@ -118,8 +122,14 @@
                through to the existing @onclick → OnSlotClicked path; above-threshold fires
                OnEventCreated (the JS module is the threshold gatekeeper — see ADR-0015). *@
             @{
-                var createEnabled = AllowDragToCreate;
-                var slotExtraClass = createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty;
+                // Issue #8 — a blocked day suppresses create affordances fail-closed:
+                // no create-affordance cursor cue, no double-click/drag-create wiring.
+                // OnSlotClicked (below) is untouched — selection/navigation is not create.
+                var dayBlocked = IsRenderedDayBlocked;
+                var createEnabled = AllowDragToCreate && !dayBlocked;
+                var doubleClickEnabled = AllowDoubleClickToCreate && !dayBlocked;
+                var slotExtraClass = (createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty)
+                    + (dayBlocked ? " calee-scheduler-day-blocked" : string.Empty);
             }
             @for (var slotIndex = 0; slotIndex < SlotCountForRender; slotIndex++)
             {
@@ -133,8 +143,9 @@
                          class="@("calee-scheduler-slot" + slotExtraClass)"
                          tabindex="@(isTabbable ? 0 : -1)"
                          aria-label="@SlotAccessibleName(idx)"
+                         aria-disabled="@(dayBlocked ? "true" : null)"
                          @onclick="@(() => HandleSlotClickAsync(idx))"
-                         @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(idx)) : default)"
+                         @ondblclick="@(doubleClickEnabled ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(idx)) : default)"
                          @onpointerdown="@(createEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnGridPointerDownAsync(e, idx)) : default)">
                     </div>
                 </div>

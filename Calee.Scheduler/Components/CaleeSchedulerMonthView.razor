@@ -65,10 +65,17 @@
                     var isToday = IsTodayCell(cellIndex);
                     var isTabbable = IsCellTabbable(cellIndex);
                     var cellBarLaneCount = BarLaneCountForCell(row, col);
+                    // Issue #8 — a blocked day suppresses double-click-to-create
+                    // fail-closed. OnSlotClicked (via HandleCellSlotClickAsync) is
+                    // untouched — selection/navigation is not create.
+                    var cellBlocked = IsCellBlocked(cellIndex);
+                    var cellDoubleClickEnabled = AllowDoubleClickToCreate && !cellBlocked;
 
                     var cellClasses = "calee-scheduler-month-cell"
                         + (inMonth ? string.Empty : " calee-scheduler-month-cell--muted")
-                        + (isToday ? " calee-scheduler-month-cell--today" : string.Empty);
+                        + (isToday ? " calee-scheduler-month-cell--today" : string.Empty)
+                        + (cellBlocked ? " calee-scheduler-day-blocked" : string.Empty)
+                        + (string.IsNullOrEmpty(DayBlockedClassFor(cellIndex)) ? string.Empty : " " + DayBlockedClassFor(cellIndex));
 
                     <div class="@cellClasses"
                          data-calee-region="month-cell"
@@ -76,8 +83,9 @@
                          tabindex="@(isTabbable ? 0 : -1)"
                          aria-current="@(isToday ? "date" : null)"
                          aria-label="@CellAccessibleName(cellIndex)"
+                         aria-disabled="@(cellBlocked ? "true" : null)"
                          @onclick="@(() => HandleCellSlotClickAsync(cellIndex))"
-                         @ondblclick="@(AllowDoubleClickToCreate ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(cellIndex)) : default)">
+                         @ondblclick="@(cellDoubleClickEnabled ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(cellIndex)) : default)">
 
                         <div class="calee-scheduler-month-cell-date">@CellDayNumber(cellIndex)</div>
 

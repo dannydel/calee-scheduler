@@ -123,6 +123,11 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     private DateTimeOffset _dayStartLocal;
     private DateTimeOffset _dayEndLocal;
 
+    // Cached DayModifier result for the rendered day (issue #8) — evaluated once per
+    // parameter set, not per slot. Null when no hook is configured or the hook returns
+    // null for this day ("normal day" in both cases).
+    private SchedulerDayState? _dayState;
+
     // For FR-23 — fire OnRangeChanged only when the visible range actually changes
     // between renders, not on every parameter set.
     private DateTimeOffset? _lastRangeStart;
@@ -187,6 +192,10 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         var offsetAtMidnight = TimeZone.GetUtcOffset(localDate);
         _dayStartLocal = new DateTimeOffset(localDate, offsetAtMidnight);
         _dayEndLocal = _dayStartLocal.AddDays(1);
+
+        // Issue #8 — evaluate the per-day state hook once for the rendered day, in the
+        // grid time zone (the midnight boundary just computed above), not per slot.
+        _dayState = GetDayState(_dayStartLocal);
 
         // Optimistic-pin housekeeping (ADR-0006). Drop entries the consumer has caught
         // up on — i.e., the consumer's authoritative Start/End for the event now matches
@@ -404,13 +413,38 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     /// Accessible name for the slot at the supplied index: "&lt;time&gt;, empty slot" in
     /// the configured time zone. Empty cells need a meaningful announcement so screen-reader
     /// users tabbing into the grid hear "9:00 AM, empty slot" instead of just "gridcell."
+    /// When the day is blocked (issue #8) the announcement swaps to the blocked-day
+    /// label so a screen-reader user tabbing through the day's slots hears why the day
+    /// is inert rather than "empty slot" repeated on every cell.
     /// </summary>
     internal string SlotAccessibleName(int idx)
     {
         var minutes = idx * _resolvedSlotMinutes;
         var time = new DateTime(2000, 1, 1, _resolvedStartHour, 0, 0).AddMinutes(minutes);
+        if (IsRenderedDayBlocked)
+        {
+            var label = _dayState?.Label;
+            return string.IsNullOrEmpty(label) ? $"{time:h:mm tt}, blocked" : $"{time:h:mm tt}, {label}";
+        }
         return $"{time:h:mm tt}, empty slot";
     }
+
+    // ----- Blocked days (issue #8) -----------------------------------------------------
+
+    /// <summary>True when the rendered day is blocked per <see cref="SchedulerComponentBase{TEvent}.DayModifier"/>.</summary>
+    internal bool IsRenderedDayBlocked => _dayState?.IsBlocked ?? false;
+
+    /// <summary>Consumer-supplied per-day class hook for the rendered day, or null.</summary>
+    internal string? DayBlockedClass => _dayState?.Class;
+
+    /// <summary>Accessible label announced on the day header when the day is blocked.</summary>
+    internal string BlockedDayHeaderLabel => SchedulerViewPrimitives.BlockedDayAccessibleLabel(_dayStartLocal, _dayState);
+
+    /// <summary>
+    /// Issue #8 — the Day view's single grid-focus concept is "this whole rendered
+    /// day," so the create-at-focus suppression check is just <see cref="IsRenderedDayBlocked"/>.
+    /// </summary>
+    private protected override bool IsFocusedGridDayBlocked() => IsRenderedDayBlocked;
 
     /// <summary>Compute whether the all-day event is clipped on the left (continues from previous day).</summary>
     internal bool AllDayClippedLeft(TEvent ev) => ev.Start < _dayStartLocal;
@@ -1104,6 +1138,9 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         if (!AllowDragToCreate) return;
         // Only primary button starts a create. Touch always reports 0.
         if (e.Button != 0) return;
+        // Issue #8 — fail-closed: don't even start the drag on a blocked day, so no
+        // ghost rectangle is ever drawn over it.
+        if (IsRenderedDayBlocked) return;
 
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
@@ -1181,6 +1218,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         var start = _dayStartLocal.AddMinutes(startMinutes);
         var end = _dayStartLocal.AddMinutes(endMinutes);
 
+        // Issue #8 — fail-closed: if the swept region touches a blocked day, the
+        // create does not fire. Day view's drag never leaves the anchor day, so this
+        // reduces to IsRenderedDayBlocked, but the shared helper is used for consistency with
+        // Week/Month and to stay correct if that ever changes.
+        if (CreateSpanTouchesBlockedDay(start, end)) return;
+
         var context = new EventCreateContext
         {
             Slot = new SchedulerSlot(start, end),
@@ -1232,6 +1275,9 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
         var start = _dayStartLocal.AddMinutes(startMinutes);
         var end = _dayStartLocal.AddMinutes(endMinutes);
+
+        // Issue #8 — fail-closed: no-op on a blocked day (no phantom, no OnEventCreated).
+        if (CreateSpanTouchesBlockedDay(start, end)) return Task.CompletedTask;
 
         var context = new EventCreateContext
         {

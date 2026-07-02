@@ -70,6 +70,42 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     public Func<TEvent, string?>? EventClass { get; set; }
 
     /// <summary>
+    /// Optional per-day state hook (issue #8), following the <see cref="EventFilter"/> /
+    /// <see cref="EventClass"/> idiom. Lets the consumer mark specific days as blocked —
+    /// e.g. days with no published route, a holiday, or a maintenance window. A
+    /// <see langword="null"/> return (including when this parameter itself is
+    /// <see langword="null"/>, the default) means "normal day": zero visual change and
+    /// zero behavioral change on that day.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Evaluated per rendered day, not per slot.</strong> Day/Week/Month views
+    /// call this once per rendered day (in the grid time zone, ADR-0001 — the argument
+    /// is always a day's midnight boundary in <see cref="TimeZone"/>) and cache the
+    /// result for the render, the same way <c>EventClass</c> is evaluated once per
+    /// event rather than recomputed per pixel. A Week/WorkWeek view with a
+    /// <c>VisibleDays</c> subset only evaluates the hook for the visible columns —
+    /// hidden days are never passed to it.
+    /// </para>
+    /// <para>
+    /// <strong>What blocking suppresses.</strong> See <see cref="SchedulerDayState"/>'s
+    /// remarks for the exact create-vs-move split: create affordances (double-click,
+    /// drag-to-create, the create-at-focus keystroke) are fail-closed no-ops on a
+    /// blocked day; drag-to-move/resize onto the day and <c>OnSlotClicked</c> are
+    /// unaffected.
+    /// </para>
+    /// <para>
+    /// <strong>Which views honor this.</strong> Day, Week (including WorkWeek and any
+    /// <c>VisibleDays</c> subset), and Month. Year, Agenda, and Timeline do not
+    /// currently read this parameter — it is inherited (so consumers composing those
+    /// views under the same generic surface don't get a compile error) but has no
+    /// effect there.
+    /// </para>
+    /// </remarks>
+    [Parameter]
+    public Func<DateTimeOffset, SchedulerDayState?>? DayModifier { get; set; }
+
+    /// <summary>
     /// Unmatched HTML attributes captured from the consumer's markup and splatted onto
     /// the view's outermost rendered element. <c>class</c>, <c>style</c>, <c>data-*</c>,
     /// and <c>aria-*</c> from the consumer compose with the library's own values rather
@@ -879,6 +915,23 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     }
 
     /// <summary>
+    /// Hook letting a view report whether the currently keyboard-focused grid position
+    /// (the roving-tabindex slot/cell, not a focused event chip) sits on a day the
+    /// consumer's <see cref="DayModifier"/> marked blocked (issue #8). The base
+    /// dispatch's <see cref="SchedulerCommandIds.EditCreate"/> branch consults this
+    /// before firing <see cref="OnCreateAtFocusRequested"/> so the create-at-focus
+    /// keystroke suppresses fail-closed on blocked days — the same create-only rule
+    /// double-click-to-create and drag-to-create follow.
+    /// </summary>
+    /// <remarks>
+    /// Default implementation returns <see langword="false"/> (no suppression) — a
+    /// view that doesn't track a focused grid position, or hasn't been wired for
+    /// <see cref="DayModifier"/> support, is unaffected. Day/Week/Month override this
+    /// against their own focused-slot / focused-column / focused-cell state.
+    /// </remarks>
+    private protected virtual bool IsFocusedGridDayBlocked() => false;
+
+    /// <summary>
     /// Cached static "Built-in" commands without consumer wiring would be a footgun —
     /// the <see cref="SchedulerCommand.Invoke"/> closures must capture <c>this</c> so
     /// they fire the right view's callbacks. We rebuild on every input change rather
@@ -931,7 +984,15 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         // Edit group.
         builtIns.Add(new SchedulerCommand(
             SchedulerCommandIds.EditCreate, "Create event", "Edit",
-            () => _ = OnCreateAtFocusRequested.InvokeAsync()));
+            () =>
+            {
+                // Issue #8 — the palette's Invoke must match the keystroke dispatch's
+                // fail-closed gate (see the EditCreate case in the shortcut-dispatch
+                // switch below): a blocked focused grid position suppresses create
+                // here too, not just on the "n" keystroke.
+                if (IsFocusedGridDayBlocked()) return;
+                _ = OnCreateAtFocusRequested.InvokeAsync();
+            }));
 
         if (AllowDelete)
         {
@@ -1726,6 +1787,11 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
                 await OnCommandPaletteRequested.InvokeAsync();
                 return true;
             case SchedulerCommandIds.EditCreate:
+                // Issue #8 — fail-closed: the create-at-focus keystroke is a no-op when
+                // the focused grid position is on a blocked day. Still "matched" (return
+                // true) so no other case-arm double-handles the keystroke — same shape
+                // as edit.delete's "matched but no-op when nothing is focused" pattern.
+                if (IsFocusedGridDayBlocked()) return true;
                 await OnCreateAtFocusRequested.InvokeAsync();
                 return true;
             case SchedulerCommandIds.EditMove:
@@ -2076,6 +2142,52 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <param name="ev">The event to query.</param>
     /// <returns>A CSS class string, or <see langword="null"/>.</returns>
     protected string? GetEventClass(TEvent ev) => EventClass?.Invoke(ev);
+
+    /// <summary>
+    /// Returns the consumer-supplied per-day state for <paramref name="day"/> (issue
+    /// #8), or <see langword="null"/> when no <see cref="DayModifier"/> hook is
+    /// configured or the hook itself returns <see langword="null"/> for that day
+    /// (the "normal day" case in both branches).
+    /// </summary>
+    /// <param name="day">
+    /// The day's midnight boundary in <see cref="TimeZone"/> (ADR-0001) — callers pass
+    /// the same per-day instant used elsewhere for that day's grid math, not an
+    /// arbitrary time-of-day.
+    /// </param>
+    protected SchedulerDayState? GetDayState(DateTimeOffset day) => DayModifier?.Invoke(day);
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="day"/> is blocked per
+    /// <see cref="DayModifier"/>. Shorthand for the common
+    /// <c>GetDayState(day)?.IsBlocked ?? false</c> check.
+    /// </summary>
+    protected bool IsDayBlocked(DateTimeOffset day) => GetDayState(day)?.IsBlocked ?? false;
+
+    /// <summary>
+    /// Fail-closed check for a create's spanned region (issue #8): returns
+    /// <see langword="true"/> when any whole day touched by
+    /// <c>[start, endExclusive)</c> is blocked per <see cref="DayModifier"/>. Callers
+    /// skip firing <see cref="OnEventCreated"/> when this returns <see langword="true"/>
+    /// — "the swept region touches any blocked day" is the simplest defensible rule for
+    /// a create that starts on an open day and crosses into a blocked one (or the
+    /// reverse). Every current view's create paths (double-click, drag-to-create) are
+    /// column/cell-locked to a single day, so in practice this reduces to checking that
+    /// one anchor day — but the check is written generally so it stays correct if a
+    /// future multi-day create sweep is ever added.
+    /// </summary>
+    /// <param name="start">Inclusive start of the proposed create span.</param>
+    /// <param name="endExclusive">Exclusive end of the proposed create span.</param>
+    protected bool CreateSpanTouchesBlockedDay(DateTimeOffset start, DateTimeOffset endExclusive)
+    {
+        if (DayModifier is null) return false;
+
+        var days = SchedulerViewPrimitives.ComputeDayBounds(start, endExclusive, TimeZone);
+        for (var i = 0; i < days.Count; i++)
+        {
+            if (DayModifier(days[i].Start)?.IsBlocked == true) return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Returns the current wall-clock time in the configured <see cref="TimeZone"/>

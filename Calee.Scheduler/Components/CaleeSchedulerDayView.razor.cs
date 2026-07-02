@@ -440,6 +440,41 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     /// <summary>Accessible label announced on the day header when the day is blocked.</summary>
     internal string BlockedDayHeaderLabel => SchedulerViewPrimitives.BlockedDayAccessibleLabel(_dayStartLocal, _dayState);
 
+    // ----- Day header template + click (issue #9) -------------------------------------
+
+    /// <summary>
+    /// True when <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> has a
+    /// delegate wired. Gates whether the header cell is rendered as focusable/
+    /// interactive at all — fail-closed default (see the parameter's remarks).
+    /// </summary>
+    internal bool IsDayHeaderInteractive => OnDayHeaderClicked.HasDelegate;
+
+    /// <summary>Accessible name for the day header when it is interactive and not blocked.</summary>
+    internal string DayHeaderAccessibleName => SchedulerViewPrimitives.DayHeaderAccessibleName(_dayStartLocal);
+
+    /// <summary>
+    /// Fires <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> with the
+    /// rendered day's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// No-op while a drag is active (ADR-0006 precedence — matches every other click
+    /// handler in the view).
+    /// </summary>
+    internal Task HandleDayHeaderClickAsync()
+    {
+        if (IsDragActive) return Task.CompletedTask;
+        return OnDayHeaderClicked.InvokeAsync(_dayStartLocal);
+    }
+
+    /// <summary>
+    /// Keyboard handler bound to the day header when <see cref="IsDayHeaderInteractive"/>.
+    /// Enter and Space activate the header; every other key is a no-op (the header is
+    /// not part of the roving-tabindex grid).
+    /// </summary>
+    internal Task HandleDayHeaderKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" && e.Key != " ") return Task.CompletedTask;
+        return HandleDayHeaderClickAsync();
+    }
+
     /// <summary>
     /// Issue #8 — the Day view's single grid-focus concept is "this whole rendered
     /// day," so the create-at-focus suppression check is just <see cref="IsRenderedDayBlocked"/>.
@@ -827,6 +862,14 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     }
 
     // ----- Drag-to-move (Phase 2 Task 4 — FR-25) --------------------------------------
+
+    /// <summary>
+    /// Test-only forwarder for the base's <c>private protected IsDragActive</c> —
+    /// lets tests confirm a real drag (started via <see cref="OnEventPointerDownAsync"/>)
+    /// is active before asserting on drag-active precedence elsewhere (e.g. the day
+    /// header's click/keydown guard, issue #9).
+    /// </summary>
+    internal bool IsDragActiveForTest => IsDragActive;
 
     /// <summary>The dictionary the .razor template binds via
     /// <c>@ref="EventRefsByEventId[eventId]"</c>. Internal so tests can inspect the

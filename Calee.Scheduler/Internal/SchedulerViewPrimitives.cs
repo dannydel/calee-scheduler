@@ -481,10 +481,21 @@ internal static class SchedulerViewPrimitives
     /// </param>
     internal static string BlockedDayAccessibleLabel(DateTimeOffset day, SchedulerDayState? state)
     {
-        var dateText = day.ToString("dddd, MMMM d, yyyy", CultureInfo.GetCultureInfo("en-US"));
+        var dateText = DayHeaderAccessibleName(day);
         var label = state?.Label;
         return string.IsNullOrEmpty(label) ? $"{dateText}, blocked" : $"{dateText}, {label}";
     }
+
+    /// <summary>
+    /// Build the accessible name announced for a day-header cell (issue #9) — the
+    /// day's full date, e.g. "Monday, June 1, 2026". Shared by Day and Week so an
+    /// interactive header (<c>OnDayHeaderClicked</c> wired) announces the same name
+    /// shape regardless of view, and by <see cref="BlockedDayAccessibleLabel"/> so a
+    /// blocked day's announcement uses the identical date text as its prefix.
+    /// </summary>
+    /// <param name="day">The day being described (its date portion is used).</param>
+    internal static string DayHeaderAccessibleName(DateTimeOffset day) =>
+        day.ToString("dddd, MMMM d, yyyy", CultureInfo.GetCultureInfo("en-US"));
 
     /// <summary>
     /// Compute one (start, end) midnight-midnight bound per day in the supplied half-open

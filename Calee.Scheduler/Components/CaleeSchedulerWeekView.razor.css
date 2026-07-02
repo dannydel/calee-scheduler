@@ -67,6 +67,22 @@
     background: var(--calee-scheduler-today-background, #eef4ff);
 }
 
+/* Interactive day header (issue #9) — applied only when OnDayHeaderClicked has a
+ * delegate wired; an unwired header carries none of this. The cell's own padding
+ * already yields a rendered height well above the WCAG 2.2 24px minimum target. */
+.calee-scheduler-day-header--interactive {
+    cursor: pointer;
+}
+
+.calee-scheduler-day-header--interactive:hover {
+    background: #f0f0f2;
+}
+
+.calee-scheduler-day-header--interactive:focus-visible {
+    outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
+    outline-offset: -2px;
+}
+
 .calee-scheduler-day-header-weekday {
     font-size: 0.75rem;
     text-transform: uppercase;

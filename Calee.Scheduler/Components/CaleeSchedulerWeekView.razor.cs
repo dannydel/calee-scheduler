@@ -470,6 +470,44 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     internal string BlockedDayHeaderLabel(int col) =>
         SchedulerViewPrimitives.BlockedDayAccessibleLabel(_weekDays[col].Start, _dayStates[col]);
 
+    // ----- Day header template + click (issue #9) -------------------------------------
+
+    /// <summary>
+    /// True when <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> has a
+    /// delegate wired. Gates whether every column's header cell is rendered as
+    /// focusable/interactive at all — fail-closed default (see the parameter's
+    /// remarks). Not per-column: either every visible column's header is interactive
+    /// or none are.
+    /// </summary>
+    internal bool IsDayHeaderInteractive => OnDayHeaderClicked.HasDelegate;
+
+    /// <summary>Accessible name for the column's day header when it is interactive and not blocked.</summary>
+    internal string DayHeaderAccessibleName(int col) =>
+        SchedulerViewPrimitives.DayHeaderAccessibleName(_weekDays[col].Start);
+
+    /// <summary>
+    /// Fires <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> with the
+    /// column's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// No-op while a drag is active (ADR-0006 precedence — matches every other click
+    /// handler in the view).
+    /// </summary>
+    internal Task HandleDayHeaderClickAsync(int col)
+    {
+        if (IsDragActive) return Task.CompletedTask;
+        return OnDayHeaderClicked.InvokeAsync(_weekDays[col].Start);
+    }
+
+    /// <summary>
+    /// Keyboard handler bound to a day header when <see cref="IsDayHeaderInteractive"/>.
+    /// Enter and Space activate the header; every other key is a no-op (the header row
+    /// is not part of the hour grid's roving-tabindex flow).
+    /// </summary>
+    internal Task HandleDayHeaderKeyDownAsync(KeyboardEventArgs e, int col)
+    {
+        if (e.Key != "Enter" && e.Key != " ") return Task.CompletedTask;
+        return HandleDayHeaderClickAsync(col);
+    }
+
     /// <summary>
     /// Issue #8 — the grid-focus concept for Week is the roving (column, row) pair;
     /// the create-at-focus suppression check looks at the focused column's day.

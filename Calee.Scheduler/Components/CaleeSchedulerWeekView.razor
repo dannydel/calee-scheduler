@@ -51,14 +51,30 @@
                 + (isToday ? " calee-scheduler-day-header--today" : string.Empty)
                 + (colBlocked ? " calee-scheduler-day-blocked" : string.Empty)
                 + (string.IsNullOrEmpty(DayBlockedClassFor(col)) ? string.Empty : " " + DayBlockedClassFor(col))
-                + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
+                + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass)
+                + (IsDayHeaderInteractive ? " calee-scheduler-day-header--interactive" : string.Empty);
+            @* DayHeaderTemplate + OnDayHeaderClicked (issue #9): the template renders
+               after the default weekday/date label, inside the same cell (ADR-0002
+               spirit). The cell is only made focusable/interactive (tabindex,
+               role="button", pointer cursor) when OnDayHeaderClicked has a delegate —
+               an unwired header stays byte-identical to the pre-#9 markup. Blocked
+               (issue #8) columns keep their blocked aria-label regardless; the
+               template still renders and the click still fires for a blocked day. *@
             <div class="@headerClasses"
                  data-calee-region="day-header"
-                 aria-label="@(colBlocked ? BlockedDayHeaderLabel(col) : WeekDays[col].Start.ToString("dddd, MMMM d, yyyy"))"
+                 tabindex="@(IsDayHeaderInteractive ? 0 : (int?)null)"
+                 role="@(IsDayHeaderInteractive ? "button" : null)"
+                 aria-label="@(colBlocked ? BlockedDayHeaderLabel(col) : DayHeaderAccessibleName(col))"
                  aria-current="@(isToday ? "date" : null)"
-                 aria-disabled="@(colBlocked ? "true" : null)">
+                 aria-disabled="@(colBlocked ? "true" : null)"
+                 @onclick="@(IsDayHeaderInteractive ? EventCallback.Factory.Create(this, () => HandleDayHeaderClickAsync(col)) : default)"
+                 @onkeydown="@(IsDayHeaderInteractive ? EventCallback.Factory.Create<KeyboardEventArgs>(this, e => HandleDayHeaderKeyDownAsync(e, col)) : default)">
                 <div class="calee-scheduler-day-header-weekday">@WeekDays[col].Start.ToString("ddd")</div>
                 <div class="calee-scheduler-day-header-date">@WeekDays[col].Start.Day</div>
+                @if (DayHeaderTemplate is not null)
+                {
+                    @DayHeaderTemplate(WeekDays[col].Start)
+                }
             </div>
         }
     </div>

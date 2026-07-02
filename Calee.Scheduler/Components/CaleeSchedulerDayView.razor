@@ -8,7 +8,8 @@
         + (Today.Date == CurrentDate.Date ? " calee-scheduler-day-header--today" : string.Empty)
         + (IsRenderedDayBlocked ? " calee-scheduler-day-blocked" : string.Empty)
         + (string.IsNullOrEmpty(DayBlockedClass) ? string.Empty : " " + DayBlockedClass)
-        + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass);
+        + (string.IsNullOrEmpty(DayHeaderClass) ? string.Empty : " " + DayHeaderClass)
+        + (IsDayHeaderInteractive ? " calee-scheduler-day-header--interactive" : string.Empty);
 
     var allDayRowClasses = "calee-scheduler-all-day-row"
         + (string.IsNullOrEmpty(AllDayRowClass) ? string.Empty : " " + AllDayRowClass);
@@ -19,12 +20,27 @@
 
 <div class="calee-scheduler-day" @attributes="AdditionalAttributes">
 
-    @* (1) Day header row — FR-04 implicit, §5.1 *@
+    @* (1) Day header row — FR-04 implicit, §5.1. DayHeaderTemplate + OnDayHeaderClicked
+       (issue #9): the template renders after the default weekday/date label, inside
+       the same cell (ADR-0002 spirit). The cell is only made focusable/interactive
+       (tabindex, role="button", pointer cursor, aria-label) when OnDayHeaderClicked
+       has a delegate — a header with no listener stays byte-identical to the pre-#9
+       markup. When the day is blocked (issue #8) the blocked aria-label wins over the
+       plain date name; the template still renders and the click still fires — blocking
+       gates create affordances, not header interaction. *@
     <div class="@dayHeaderClasses" data-calee-region="day-header"
+         tabindex="@(IsDayHeaderInteractive ? 0 : (int?)null)"
+         role="@(IsDayHeaderInteractive ? "button" : null)"
          aria-disabled="@(IsRenderedDayBlocked ? "true" : null)"
-         aria-label="@(IsRenderedDayBlocked ? BlockedDayHeaderLabel : null)">
+         aria-label="@(IsRenderedDayBlocked ? BlockedDayHeaderLabel : (IsDayHeaderInteractive ? DayHeaderAccessibleName : null))"
+         @onclick="@(IsDayHeaderInteractive ? EventCallback.Factory.Create(this, HandleDayHeaderClickAsync) : default)"
+         @onkeydown="@(IsDayHeaderInteractive ? EventCallback.Factory.Create<KeyboardEventArgs>(this, HandleDayHeaderKeyDownAsync) : default)">
         <div class="calee-scheduler-day-header-weekday">@CurrentDate.ToString("ddd")</div>
         <div class="calee-scheduler-day-header-date">@CurrentDate.Day</div>
+        @if (DayHeaderTemplate is not null)
+        {
+            @DayHeaderTemplate(_dayStartLocal)
+        }
     </div>
 
     @* (2) All-day row — FR-14, FR-15 (all-day path) *@

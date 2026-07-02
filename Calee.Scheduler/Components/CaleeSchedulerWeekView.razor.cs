@@ -307,7 +307,16 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
                     lastCol = i;
                 }
             }
-            if (firstCol < 0) continue; // Shouldn't happen — VisibleEventSet pre-filters by range overlap.
+            // No overlap with any *visible* day column. Under the all-7-days default this
+            // genuinely shouldn't happen (VisibleEventSet pre-filters by range overlap
+            // against the same bounds _weekDays spans). Under a VisibleDays subset, though,
+            // this is the expected — and frequently hit — path for an all-day event that
+            // falls entirely on a hidden day: VisibleEventSet's range filter still admits
+            // it (the range spans first-visible-day-start..last-visible-day-end, which can
+            // include hidden days in between), but no entry in _weekDays overlaps it, so
+            // the bar is correctly dropped here rather than rendered. Do not "clean up" this
+            // branch as dead code.
+            if (firstCol < 0) continue;
 
             var clipLeft = ev.Start < _weekDays[firstCol].Start;
             var clipRight = ev.End > _weekDays[lastCol].End;
@@ -951,7 +960,17 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// the drop branch routes to <see cref="HandleMoveDropAsync"/>. The cancel
     /// branch is a no-op per ADR-0006 — mid-drag cancel never pinned anything.
     /// </summary>
-    internal async Task OnEventPointerDownAsync(PointerEventArgs e, ICalendarEvent ev)
+    /// <param name="e">The pointer-down event.</param>
+    /// <param name="ev">The chunk (or plain event) rendered at the pressed chip.</param>
+    /// <param name="colIndex">
+    /// The visible day-column index the pressed chip is actually rendered in. Threaded
+    /// through to <see cref="HandleMoveDropAsync"/> as the drag's origin column instead
+    /// of re-deriving it from the underlying event's <c>Start</c> — a multi-day event
+    /// can have its true <c>Start</c> on a day <see cref="VisibleDays"/> hides, in which
+    /// case only a later chunk (this one) renders at all, and <c>Start</c>'s own day
+    /// isn't addressable in <c>_weekDays</c>. See the code-review fix on issue #6.
+    /// </param>
+    internal async Task OnEventPointerDownAsync(PointerEventArgs e, ICalendarEvent ev, int colIndex)
     {
         if (!AllowDragToMove) return;
         // Only primary button (left mouse / first touch) starts a drag (PointerEvent spec:
@@ -981,7 +1000,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             snapPixelsX: snapPixelsX,
             snapPixelsY: snapPixelsY,
             ghostClass: "calee-scheduler-event--ghost",
-            onDrop: payload => HandleMoveDropAsync(typed, payload),
+            onDrop: payload => HandleMoveDropAsync(typed, colIndex, payload),
             onCancel: static () => Task.CompletedTask);
     }
 
@@ -992,8 +1011,28 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/>, and rolls the
     /// pin back if the consumer set <see cref="EventMoveContext.Cancel"/>.
     /// </summary>
-    private async Task HandleMoveDropAsync(TEvent ev, DropPayload payload)
+    /// <param name="ev">The full, underlying consumer event (never a chunk).</param>
+    /// <param name="originColIndex">
+    /// The visible day-column index of the chunk the drag actually started from (see
+    /// <see cref="OnEventPointerDownAsync"/>). This drives the day-shift math directly —
+    /// it does <em>not</em> need to equal the column <c>ev.Start</c> would resolve to,
+    /// which matters when <c>ev.Start</c> falls on a day <see cref="VisibleDays"/> hides.
+    /// </param>
+    /// <param name="payload">The JS-reported drop delta.</param>
+    private async Task HandleMoveDropAsync(TEvent ev, int originColIndex, DropPayload payload)
     {
+        if (originColIndex < 0 || originColIndex >= ColumnCount)
+        {
+            // Defensive only — pointer-down always captures a column index for a chunk
+            // that's currently rendered, so this shouldn't happen outside of a stale
+            // closure surviving a parameter change mid-drag. Log rather than fail
+            // silently, per code review on issue #6.
+            Logger?.LogWarning(
+                "Calee.Scheduler: drag-to-move drop could not resolve a valid origin day column ({OriginColIndex}, ColumnCount={ColumnCount}); ignoring drop.",
+                originColIndex, ColumnCount);
+            return;
+        }
+
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var gridWidthPx = await GetHourGridWidthPxAsync();
         if (gridHeightPx <= 0)
@@ -1012,46 +1051,53 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             gridWidthPx = 700.0;
         }
 
-        // 1) Time-of-day axis: same delta-Y trick as Day view. Compute the chunk's pre-drop
-        //    top inside the grid from its start time, add DeltaYPx, then InverseY against
-        //    a *single* day's visible band (the grid is one day tall vertically — the
-        //    7 columns are just X-axis days, not vertically-stacked days).
-        var origDayIndex = FindColumnIndex(ev.Start);
-        if (origDayIndex < 0)
-        {
-            // Drag was started before the consumer pushed the event into the visible week
-            // (defensive guard — pointer-down wouldn't have fired otherwise, but be safe).
-            return;
-        }
-
-        var origDayStart = _weekDays[origDayIndex].Start;
-        var visibleDayStart = origDayStart.AddHours(_resolvedStartHour);
-        var visibleDayEnd = origDayStart.AddHours(_resolvedEndHour);
-
-        var origStartMinutes = (ev.Start - visibleDayStart).TotalMinutes;
+        // 1) Time-of-day axis: derive the pre-drop pixel offset from ev.Start's wall-clock
+        //    time-of-day alone — never from its calendar date. The date is handled
+        //    separately in step 2 via daysMoved. Using time-of-day only means this math
+        //    is correct even when ev.Start's own date isn't the origin chunk's date (the
+        //    hidden-day-start case above) — the drag always starts from the pixel row the
+        //    grabbed chunk actually renders at, which corresponds to ev.Start's time, not
+        //    to a lookup of which column ev.Start's date happens to be in.
+        var origStartMinutes = ev.Start.TimeOfDay.TotalMinutes - _resolvedStartHour * 60;
         var minutesPerPx = (_resolvedEndHour - _resolvedStartHour) * 60.0 / gridHeightPx;
         var newStartPxInGrid = (origStartMinutes / minutesPerPx) + payload.DeltaYPx;
 
-        // 2) Day-column axis: round DeltaXPx to whole-column shifts, clamped to [0, ColumnCount-1].
-        //    The Y inverse maps to a time-of-day on the *new* day column.
+        // 2) Day-column axis: round DeltaXPx to whole visible-column shifts *from the
+        //    origin chunk's own column*, clamped to [0, ColumnCount-1]. daysMoved is the
+        //    calendar-day delta between the origin and target *visible* days — under a
+        //    non-contiguous VisibleDays subset a single column step can span more than
+        //    one calendar day (e.g. Monday -> Wednesday is +2 days for a 1-column drag).
+        //    Applying daysMoved to ev.Start's own date (not the origin chunk's clipped
+        //    Start) is what makes a hidden-day-start event's true Start shift correctly
+        //    instead of getting truncated to the visible chunk.
         var colWidth = gridWidthPx / ColumnCount;
         var dayShift = colWidth > 0
             ? (int)Math.Round(payload.DeltaXPx / colWidth, MidpointRounding.AwayFromZero)
             : 0;
-        var newDayIndex = Math.Clamp(origDayIndex + dayShift, 0, ColumnCount - 1);
-        var targetDayStart = _weekDays[newDayIndex].Start;
+        var newColIndex = Math.Clamp(originColIndex + dayShift, 0, ColumnCount - 1);
+        var originDayDate = _weekDays[originColIndex].Start.Date;
+        var targetDayStart = _weekDays[newColIndex].Start;
+        var daysMoved = (targetDayStart.Date - originDayDate).Days;
+
         var targetVisibleStart = targetDayStart.AddHours(_resolvedStartHour);
         var targetVisibleEnd = targetDayStart.AddHours(_resolvedEndHour);
 
-        var snappedStart = EventLayoutEngine.InverseY(
+        var snappedOnTargetDay = EventLayoutEngine.InverseY(
             pixelY: newStartPxInGrid,
             totalHeightPx: gridHeightPx,
             rangeStart: targetVisibleStart,
             rangeEndExclusive: targetVisibleEnd,
             slotMinutes: _resolvedSlotMinutes);
 
+        // Re-anchor the snapped time-of-day (currently expressed against targetDayStart's
+        // date, which is irrelevant here — only the offset-from-midnight matters) onto
+        // ev.Start's own date shifted by daysMoved, in the grid time zone (ADR-0001).
+        var snappedTimeOfDay = snappedOnTargetDay - targetDayStart;
+        var newStartDate = ev.Start.Date.AddDays(daysMoved);
+        var newStartDayBase = new DateTimeOffset(newStartDate, TimeZone.GetUtcOffset(newStartDate));
+        var newStart = newStartDayBase + snappedTimeOfDay;
+
         var duration = ev.End - ev.Start;
-        var newStart = snappedStart;
         var newEnd = newStart + duration;
 
         // Optimistic pin: apply visually before consumer commits (ADR-0006).
@@ -1080,9 +1126,14 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     /// <summary>
     /// Locate the day-column index whose visible-window bounds contain the supplied
-    /// <see cref="DateTimeOffset"/>. Returns <c>-1</c> when the value falls outside
-    /// the visible week (which shouldn't happen for a chip the user can press, but
-    /// the drop handler guards against this defensively).
+    /// <see cref="DateTimeOffset"/>. Returns <c>-1</c> when the value falls outside the
+    /// visible week — notably including the case where <paramref name="value"/>'s date
+    /// falls on a day <see cref="VisibleDays"/> hides. Kept only as the origin-column
+    /// default for the test-only <c>Invoke*DropForTestAsync</c> overloads that don't
+    /// specify an explicit column; the production pointer-down path threads the actual
+    /// rendered chunk's column through directly instead of calling this (see the
+    /// code-review fix on issue #6 — the whole point is that a chunk's own render column
+    /// can legitimately differ from where this method would resolve its event's Start).
     /// </summary>
     private int FindColumnIndex(DateTimeOffset value)
     {
@@ -1137,8 +1188,36 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// produce). Visibility is <see langword="internal"/>; the test assembly sees
     /// it via <c>InternalsVisibleTo</c>.
     /// </summary>
-    internal Task InvokeMoveDropForTestAsync(TEvent ev, DropPayload payload) =>
-        HandleMoveDropAsync(ev, payload);
+    /// <remarks>
+    /// Resolves the origin column via <see cref="FindColumnIndex"/> against <c>ev.Start</c>
+    /// — correct for every pre-existing test (none of them hide the event's own Start
+    /// day), but not representative of a multi-day event whose Start falls on a day
+    /// <see cref="VisibleDays"/> hides. Tests covering that scenario must use the
+    /// <see cref="InvokeMoveDropForTestAsync(TEvent, int, DropPayload)"/> overload and
+    /// pass the origin column explicitly, exactly as production's pointer-down handler
+    /// does.
+    /// </remarks>
+    internal Task InvokeMoveDropForTestAsync(TEvent ev, DropPayload payload)
+    {
+        var originColIndex = FindColumnIndex(ev.Start);
+        if (originColIndex < 0)
+        {
+            Logger?.LogWarning(
+                "Calee.Scheduler: InvokeMoveDropForTestAsync could not resolve ev.Start's day column; " +
+                "use the (TEvent, int, DropPayload) overload with an explicit origin column instead.");
+            return Task.CompletedTask;
+        }
+        return HandleMoveDropAsync(ev, originColIndex, payload);
+    }
+
+    /// <summary>
+    /// Test-only entry point mirroring <see cref="InvokeMoveDropForTestAsync(TEvent, DropPayload)"/>,
+    /// but with the origin day-column supplied explicitly instead of derived from
+    /// <c>ev.Start</c> — exercises the same path production's pointer-down handler takes,
+    /// including the case where <c>ev.Start</c>'s own day isn't in the visible subset.
+    /// </summary>
+    internal Task InvokeMoveDropForTestAsync(TEvent ev, int originColIndex, DropPayload payload) =>
+        HandleMoveDropAsync(ev, originColIndex, payload);
 
     // ----- Drag-to-resize (Phase 2 Task 7 — FR-26) -------------------------------------
 
@@ -1158,7 +1237,14 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// branch routes to <see cref="HandleResizeDropAsync"/>; the cancel branch is a
     /// no-op per ADR-0006.
     /// </summary>
-    internal async Task OnEventResizePointerDownAsync(PointerEventArgs e, ICalendarEvent ev)
+    /// <param name="e">The pointer-down event.</param>
+    /// <param name="ev">The chunk (or plain event) rendered at the pressed chip.</param>
+    /// <param name="colIndex">
+    /// The visible day-column index the pressed chip is actually rendered in — threaded
+    /// through to <see cref="HandleResizeDropAsync"/> for the same reason as
+    /// <see cref="OnEventPointerDownAsync"/>.
+    /// </param>
+    internal async Task OnEventResizePointerDownAsync(PointerEventArgs e, ICalendarEvent ev, int colIndex)
     {
         if (!AllowDragToResize) return;
         if (e.Button != 0) return;
@@ -1181,7 +1267,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             snapPixelsX: 0,                      // Week view doesn't resize across columns.
             snapPixelsY: snapPixelsY,
             ghostClass: "calee-scheduler-event--ghost",
-            onDrop: payload => HandleResizeDropAsync(typed, payload),
+            onDrop: payload => HandleResizeDropAsync(typed, colIndex, payload),
             onCancel: static () => Task.CompletedTask,
             resizeAxis: ResizeAxis.Y);
     }
@@ -1214,29 +1300,52 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// resize is single-axis (vertical-time only); cross-day-column resize is not in
     /// scope for FR-26.
     /// </para>
+    /// <para>
+    /// <strong>Hidden-day Start.</strong> Like <see cref="HandleMoveDropAsync"/>, the band
+    /// bounds come from <paramref name="originColIndex"/> (the chunk actually grabbed),
+    /// not from re-deriving a column via <c>ev.Start</c> — a multi-day event whose true
+    /// <c>Start</c> falls on a day <see cref="VisibleDays"/> hides still resizes
+    /// correctly from its one visible (clipped-at-start) chunk. <c>ev.End</c>'s
+    /// contribution to the math uses its wall-clock time-of-day only, never its date, so
+    /// the band lookup never depends on <c>ev.End</c> and <paramref name="originColIndex"/>'s
+    /// day agreeing.
+    /// </para>
     /// </remarks>
-    private async Task HandleResizeDropAsync(TEvent ev, DropPayload payload)
+    /// <param name="ev">The full, underlying consumer event (never a chunk).</param>
+    /// <param name="originColIndex">
+    /// The visible day-column index of the chunk the resize handle was pressed on (see
+    /// <see cref="OnEventResizePointerDownAsync"/>).
+    /// </param>
+    /// <param name="payload">The JS-reported drop delta.</param>
+    private async Task HandleResizeDropAsync(TEvent ev, int originColIndex, DropPayload payload)
     {
+        if (originColIndex < 0 || originColIndex >= ColumnCount)
+        {
+            // Defensive only — see the matching guard in HandleMoveDropAsync.
+            Logger?.LogWarning(
+                "Calee.Scheduler: drag-to-resize drop could not resolve a valid origin day column ({OriginColIndex}, ColumnCount={ColumnCount}); ignoring drop.",
+                originColIndex, ColumnCount);
+            return;
+        }
+
         var gridHeightPx = await GetHourGridHeightPxAsync();
         if (gridHeightPx <= 0)
         {
             gridHeightPx = 56.0 * (_resolvedEndHour - _resolvedStartHour);
         }
 
-        // Resize stays in the original day column — the bottom-edge drag is purely
-        // vertical (snapPixelsX = 0 above so DeltaXPx is unsnapped, but we don't use
-        // it). Recover the day index from the event's own Start so we have the right
-        // band bounds for the End clamp.
-        var dayIndex = FindColumnIndex(ev.Start);
-        if (dayIndex < 0)
-        {
-            return; // Defensive — pointer-down wouldn't fire for an unrendered chip.
-        }
-        var origDayStart = _weekDays[dayIndex].Start;
+        // Resize stays in the origin chunk's own day column — the bottom-edge drag is
+        // purely vertical (snapPixelsX = 0 above so DeltaXPx is unsnapped, but we don't
+        // use it).
+        var origDayStart = _weekDays[originColIndex].Start;
         var visibleStart = origDayStart.AddHours(_resolvedStartHour);
         var visibleEnd = origDayStart.AddHours(_resolvedEndHour);
 
-        var origEndMinutes = (ev.End - visibleStart).TotalMinutes;
+        // ev.End's wall-clock time-of-day, independent of which calendar date it's
+        // actually on — mirrors HandleMoveDropAsync's treatment of ev.Start. Necessary
+        // because the origin chunk's own date need not equal ev.End's true date (e.g. the
+        // grabbed chunk continues further per its clip-end flag).
+        var origEndMinutes = ev.End.TimeOfDay.TotalMinutes - _resolvedStartHour * 60;
         var minutesPerPx = (_resolvedEndHour - _resolvedStartHour) * 60.0 / gridHeightPx;
         var newEndPxInGrid = (origEndMinutes / minutesPerPx) + payload.DeltaYPx;
 
@@ -1279,10 +1388,30 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     /// <summary>
     /// Test-only entry point for the resize drop-handling pipeline. Mirrors
-    /// <see cref="InvokeMoveDropForTestAsync"/>.
+    /// <see cref="InvokeMoveDropForTestAsync(TEvent, DropPayload)"/> — resolves the origin
+    /// column via <see cref="FindColumnIndex"/> against <c>ev.Start</c>. Not representative
+    /// of a hidden-Start multi-day event; use the explicit-column overload for that.
     /// </summary>
-    internal Task InvokeResizeDropForTestAsync(TEvent ev, DropPayload payload) =>
-        HandleResizeDropAsync(ev, payload);
+    internal Task InvokeResizeDropForTestAsync(TEvent ev, DropPayload payload)
+    {
+        var originColIndex = FindColumnIndex(ev.Start);
+        if (originColIndex < 0)
+        {
+            Logger?.LogWarning(
+                "Calee.Scheduler: InvokeResizeDropForTestAsync could not resolve ev.Start's day column; " +
+                "use the (TEvent, int, DropPayload) overload with an explicit origin column instead.");
+            return Task.CompletedTask;
+        }
+        return HandleResizeDropAsync(ev, originColIndex, payload);
+    }
+
+    /// <summary>
+    /// Test-only entry point mirroring <see cref="InvokeResizeDropForTestAsync(TEvent, DropPayload)"/>,
+    /// but with the origin day-column supplied explicitly — see
+    /// <see cref="InvokeMoveDropForTestAsync(TEvent, int, DropPayload)"/>.
+    /// </summary>
+    internal Task InvokeResizeDropForTestAsync(TEvent ev, int originColIndex, DropPayload payload) =>
+        HandleResizeDropAsync(ev, originColIndex, payload);
 
     // ----- Drag-to-create (Phase 2 Task 8 — FR-24) -------------------------------------
 
@@ -1378,7 +1507,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <summary>
     /// Test-only entry point for the create drop-handling pipeline. Lets the test project
     /// exercise the callback flow without driving a real pointer-drag sequence. Mirrors
-    /// <see cref="InvokeMoveDropForTestAsync"/> / <see cref="InvokeResizeDropForTestAsync"/>.
+    /// <see cref="InvokeMoveDropForTestAsync(TEvent, DropPayload)"/> /
+    /// <see cref="InvokeResizeDropForTestAsync(TEvent, DropPayload)"/>.
     /// </summary>
     internal Task InvokeCreateDropForTestAsync(int anchorColIndex, int anchorSlotIndex, DropPayload payload) =>
         HandleCreateDropAsync(anchorColIndex, anchorSlotIndex, payload);

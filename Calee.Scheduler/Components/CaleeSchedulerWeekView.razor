@@ -253,7 +253,7 @@
                                         @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
                                         @onkeydown:preventDefault="@IsShortcutMapActive"
                                         @onkeydown:stopPropagation="@IsShortcutMapActive"
-                                        @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventPointerDownAsync(e, clickTarget)) : default)">
+                                        @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventPointerDownAsync(e, clickTarget, col)) : default)">
                                     @if (clipTop)
                                     {
                                         <span class="calee-scheduler-event-clip calee-scheduler-event-clip--top" aria-hidden="true">&uarr;</span>
@@ -284,7 +284,7 @@
                                         <span class="calee-scheduler-event-resize-handle"
                                               data-calee-drag-handle="resize-end"
                                               aria-hidden="true"
-                                              @onpointerdown="@(EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventResizePointerDownAsync(e, clickTarget)))"
+                                              @onpointerdown="@(EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventResizePointerDownAsync(e, clickTarget, col)))"
                                               @onpointerdown:stopPropagation="true"></span>
                                     }
                                 </button>

@@ -83,6 +83,60 @@
                     OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
                 break;
 
+            case SchedulerView.WorkWeek:
+                @* Issue #7 — WorkWeek composes the same CaleeSchedulerWeekView as the
+                   Week case below, forwarding the resolved Mon-Fri (or consumer-
+                   overridden) day subset via VisibleDays. Everything else mirrors the
+                   Week case verbatim so drag/resize/keyboard behavior is identical —
+                   see the VisibleDays engine primitive added for issue #6. *@
+                <CaleeSchedulerWeekView TEvent="TEvent"
+                    TimeZone="@TimeZone"
+                    Date="@CurrentDate"
+                    DateChanged="@OnDateChangedFromChildAsync"
+                    Events="@Events"
+                    EventFilter="@EventFilter"
+                    EventClass="@EventClass"
+                    StartHour="@StartHour"
+                    EndHour="@EndHour"
+                    SlotDurationMinutes="@SlotDurationMinutes"
+                    FirstDayOfWeek="@FirstDayOfWeek"
+                    VisibleDays="@_resolvedWorkWeekDays"
+                    ShowCurrentTimeIndicator="@ShowCurrentTimeIndicator"
+                    EventTemplate="@EventTemplate"
+                    DayHeaderClass="@DayHeaderClass"
+                    TimeGutterClass="@TimeGutterClass"
+                    AllDayRowClass="@AllDayRowClass"
+                    OnEventClicked="@OnEventClicked"
+                    OnSlotClicked="@OnSlotClicked"
+                    OnRangeChanged="@OnChildRangeChangedAsync"
+                    OnDayOverflowClicked="@OnDayOverflowClicked"
+                    AllowDragToMove="@AllowDragToMove"
+                    OnEventMoved="@OnEventMoved"
+                    AllowDragToResize="@AllowDragToResize"
+                    OnEventResized="@OnEventResized"
+                    AllowDragToCreate="@AllowDragToCreate"
+                    AllowDoubleClickToCreate="@AllowDoubleClickToCreate"
+                    OnEventCreated="@OnEventCreated"
+                    AllowMultiSelect="@AllowMultiSelect"
+                    AllowDelete="@AllowDelete"
+                    OnEventDeleted="@OnEventDeleted"
+                    OnEventsDeleted="@OnEventsDeleted"
+                    AllowUndoRedo="@AllowUndoRedo"
+                    OnUndoRequested="@OnUndoRequested"
+                    OnRedoRequested="@OnRedoRequested"
+                    DisabledShortcuts="@DisabledShortcuts"
+                    ShortcutMap="@ShortcutMap"
+                    OnTodayRequested="@(EventCallback.Factory.Create(this, HandleChildTodayRequestedAsync))"
+                    OnCreateAtFocusRequested="@OnCreateAtFocusRequested"
+                    OnHelpRequested="@OnHelpRequested"
+                    OnViewSwitchRequested="@(EventCallback.Factory.Create<SchedulerView>(this, HandleChildViewSwitchRequestedAsync))"
+                    OnCommandPaletteRequested="@OnCommandPaletteRequested"
+                    AllowCommandPalette="@AllowCommandPalette"
+                    CustomCommands="@CustomCommands"
+                    OnMoveModeRequested="@OnMoveModeRequested"
+                    OnResizeKeystrokeRequested="@OnResizeKeystrokeRequested" />
+                break;
+
             case SchedulerView.Week:
                 <CaleeSchedulerWeekView TEvent="TEvent"
                     TimeZone="@TimeZone"

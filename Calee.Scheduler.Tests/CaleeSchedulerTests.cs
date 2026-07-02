@@ -65,6 +65,26 @@ public class CaleeSchedulerTests
     }
 
     [Fact]
+    public void DefaultView_WorkWeek_Validates_And_Seeds_Uncontrolled_Mode()
+    {
+        // Issue #7: CaleeSchedulerOptions.DefaultView = WorkWeek must validate (no
+        // OptionsValidationException) and seed the root's uncontrolled-mode internal
+        // view, rendering the composed Week view narrowed to Monday–Friday.
+        using var ctx = new BunitContext();
+        ctx.Services.AddCaleeScheduler(o => o.DefaultView = SchedulerView.WorkWeek);
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        Assert.Equal(SchedulerView.WorkWeek, cut.Instance._internalView);
+        Assert.Equal(5, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+        var active = cut.Find("[data-calee-region='toolbar-view-button'][aria-checked='true']");
+        Assert.Equal("Work Week", active.TextContent.Trim());
+    }
+
+    [Fact]
     public void Bindable_View_Switches_Active_View()
     {
         using var ctx = NewContext();
@@ -190,11 +210,13 @@ public class CaleeSchedulerTests
             .Add(c => c.TimeZone, TZ)
             .Add(c => c.Date, Anchor));
 
-        // Phase 2 Task 18 — Day, Week, Month, Year, Agenda surface by default.
-        // Timeline is gated on the lane binding (FR-09c) and absent here.
+        // Day, WorkWeek, Week, Month, Year, Agenda surface by default (issue #7 adds
+        // WorkWeek to the always-present set). Timeline is gated on the lane binding
+        // (FR-09c) and absent here.
         var viewButtons = cut.FindAll("[data-calee-region='toolbar-view-button']");
-        Assert.Equal(5, viewButtons.Count);
+        Assert.Equal(6, viewButtons.Count);
         Assert.DoesNotContain(viewButtons, b => b.TextContent.Trim() == "Timeline");
+        Assert.Contains(viewButtons, b => b.TextContent.Trim() == "Work Week");
         Assert.Contains(viewButtons, b => b.TextContent.Trim() == "Year");
         Assert.Contains(viewButtons, b => b.TextContent.Trim() == "Agenda");
     }
@@ -209,9 +231,10 @@ public class CaleeSchedulerTests
             .Add(c => c.Lanes, new[] { LaneOf("r1", "Lane 1") })
             .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
 
-        // Phase 2 Task 18 — full six-view surface when the lane binding is in place.
+        // Full seven-view surface when the lane binding is in place (issue #7 adds
+        // WorkWeek to the always-present set).
         var viewButtons = cut.FindAll("[data-calee-region='toolbar-view-button']");
-        Assert.Equal(6, viewButtons.Count);
+        Assert.Equal(7, viewButtons.Count);
         Assert.Contains(viewButtons, b => b.TextContent.Trim() == "Timeline");
     }
 
@@ -746,8 +769,9 @@ public class CaleeSchedulerTests
             .ToList();
         Assert.Contains("Year", labels);
         Assert.Contains("Agenda", labels);
-        // Order: Day, Week, Month, Year, Agenda (Timeline absent because no lanes).
-        Assert.Equal(new[] { "Day", "Week", "Month", "Year", "Agenda" }, labels);
+        // Order: Day, WorkWeek, Week, Month, Year, Agenda (Timeline absent because no
+        // lanes; issue #7 slots WorkWeek in right after Day).
+        Assert.Equal(new[] { "Day", "Work Week", "Week", "Month", "Year", "Agenda" }, labels);
     }
 
     [Fact]
@@ -1086,5 +1110,280 @@ public class CaleeSchedulerTests
         var classes = toolbar.GetAttribute("class") ?? string.Empty;
         Assert.Contains("calee-scheduler-toolbar", classes);
         Assert.Contains("my-fancy-toolbar", classes);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // Issue #7 — SchedulerView.WorkWeek on the root scheduler.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Bindable_View_WorkWeek_Renders_FiveDayColumns_MonToFri_Default()
+    {
+        // Anchor Tue 2026-05-19, default FirstDayOfWeek=Sunday → week is Sun 5/17..Sat
+        // 5/23. WorkWeekDays defaults to Mon–Fri → Mon 5/18 .. Fri 5/22.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek));
+
+        var headers = cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']");
+        Assert.Equal(5, headers.Count);
+        var weekdays = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-weekday")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "Mon", "Tue", "Wed", "Thu", "Fri" }, weekdays);
+    }
+
+    [Fact]
+    public void WorkWeekDays_Override_Renders_Custom_Subset()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday }));
+
+        var headers = cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']");
+        var weekdays = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-weekday")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "Tue", "Wed", "Thu" }, weekdays);
+    }
+
+    [Fact]
+    public void WorkWeek_Regular_Week_View_Still_Renders_All_Seven_Days()
+    {
+        // Regression guard: WorkWeekDays must never leak into the plain Week case —
+        // the root only forwards VisibleDays when WorkWeek is the active view.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Monday }));
+
+        Assert.Equal(7, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public void WorkWeek_Toolbar_Switch_Sets_ActiveHighlight_And_RangeLabel()
+    {
+        // Uncontrolled mode (no View param bound) so the toolbar click actually flips
+        // the root's own active view — mirrors
+        // Toolbar_Uncontrolled_View_Switch_Updates_Active_Highlight_Same_Render.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var workWeekButton = cut.FindAll("[data-calee-region='toolbar-view-button']")
+            .First(b => b.TextContent.Trim() == "Work Week");
+        workWeekButton.Click();
+
+        var active = cut.FindAll("[data-calee-region='toolbar-view-button'][aria-checked='true']");
+        Assert.Single(active);
+        Assert.Equal("Work Week", active[0].TextContent.Trim());
+
+        // Anchor is Tue 2026-05-19; default FirstDayOfWeek=Sunday, WorkWeekDays=Mon-Fri
+        // → Mon 5/18 .. Fri 5/22 (same month) → "May 18 – 22, 2026".
+        var label = cut.Find("[data-calee-region='range-label']");
+        Assert.Equal("May 18 – 22, 2026", label.TextContent.Trim());
+    }
+
+    [Fact]
+    public void WorkWeekDays_Override_Flows_Through_To_Toolbar_RangeLabel()
+    {
+        // Regression guard for the cascade plumbing: the toolbar's range label must
+        // reflect the *resolved* WorkWeekDays (via SchedulerStateContainer.WorkWeekDays),
+        // not silently fall back to the Monday–Friday default when the consumer
+        // overrides it.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.WorkWeekDays, new[] { DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday }));
+
+        // Anchor Tue 2026-05-19; default FirstDayOfWeek=Sunday → week Sun 5/17..Sat
+        // 5/23. Tue/Wed/Thu subset → 5/19..5/21 → "May 19 – 21, 2026".
+        var label = cut.Find("[data-calee-region='range-label']");
+        Assert.Equal("May 19 – 21, 2026", label.TextContent.Trim());
+    }
+
+    [Fact]
+    public void WorkWeek_OnRangeChanged_Spans_FirstVisibleDayStart_To_LastVisibleDayEnd_SingleFire()
+    {
+        using var ctx = NewContext();
+        var ranges = new List<SchedulerRange>();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.OnRangeChanged,
+                EventCallback.Factory.Create<SchedulerRange>(this, r => ranges.Add(r))));
+
+        var initialCount = ranges.Count;
+        cut.Render(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek));
+
+        // Exactly one additional fire for the view switch.
+        Assert.Equal(initialCount + 1, ranges.Count);
+        var last = ranges[^1];
+        Assert.Equal(new DateTime(2026, 5, 18), last.Start.Date);
+        Assert.Equal(new DateTime(2026, 5, 23), last.End.Date); // exclusive end = day after Friday
+    }
+
+    [Fact]
+    public async Task WorkWeek_Toolbar_Prev_Next_Step_Seven_Calendar_Days()
+    {
+        using var ctx = NewContext();
+        DateTimeOffset? captured = null;
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.DateChanged, EventCallback.Factory.Create<DateTimeOffset>(this, d => captured = d)));
+
+        await cut.InvokeAsync(() => cut.Find("[data-calee-region='toolbar-next']").Click());
+        Assert.Equal(Anchor.AddDays(7), captured);
+
+        await cut.InvokeAsync(() => cut.Find("[data-calee-region='toolbar-prev']").Click());
+        Assert.Equal(Anchor.AddDays(-7), captured);
+    }
+
+    [Fact]
+    public void WorkWeek_Toolbar_Today_Snaps_To_Current_Work_Week()
+    {
+        using var ctx = NewContext();
+        DateTimeOffset? captured = null;
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek)
+            .Add(c => c.DateChanged, EventCallback.Factory.Create<DateTimeOffset>(this, d => captured = d)));
+
+        cut.Find("[data-calee-region='toolbar-today']").Click();
+
+        // "Today" reanchors to today's date; the composed Week view then derives its
+        // own Mon-Fri window around that anchor, so the grid stays a 5-column work week.
+        Assert.NotNull(captured);
+        var todayInZone = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+        Assert.Equal(todayInZone.Date, captured!.Value.Date);
+        var headers = cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']");
+        Assert.Equal(5, headers.Count);
+        var weekdays = headers
+            .Select(h => h.QuerySelector(".calee-scheduler-day-header-weekday")!.TextContent.Trim())
+            .ToArray();
+        Assert.Equal(new[] { "Mon", "Tue", "Wed", "Thu", "Fri" }, weekdays);
+    }
+
+    [Fact]
+    public void Bindable_View_Controlled_RoundTrips_WorkWeek()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day));
+
+        Assert.NotNull(cut.Find(".calee-scheduler-day"));
+
+        cut.Render(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek));
+
+        Assert.Equal(5, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+        Assert.Throws<ElementNotFoundException>(() => cut.Find(".calee-scheduler-day"));
+    }
+
+    [Fact]
+    public async Task Keystroke_7_Flips_Root_To_WorkWeek_In_Uncontrolled_Mode()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("a", 9, 10);
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev }));
+        // Default-view is Week; the Week view's grid receives the keystroke.
+
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid']")
+                .KeyDown(new KeyboardEventArgs { Key = "7" }));
+
+        Assert.Equal(SchedulerView.WorkWeek, cut.Instance._internalView);
+        Assert.Equal(5, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public async Task DisabledShortcuts_ViewWorkWeek_Suppresses_Keystroke_7()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("a", 9, 10);
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.DisabledShortcuts, new[] { SchedulerCommandIds.ViewWorkWeek }));
+
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid']")
+                .KeyDown(new KeyboardEventArgs { Key = "7" }));
+
+        Assert.Equal(SchedulerView.Week, cut.Instance._internalView);
+    }
+
+    [Fact]
+    public async Task Palette_ViewWorkWeek_Invoke_Flips_Root_To_WorkWeek_In_Uncontrolled_Mode()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.AllowCommandPalette, true)
+            .Add(c => c.Events, Array.Empty<CalendarEvent>()));
+
+        var cmd = cut.Instance.Commands.First(c => c.Id == SchedulerCommandIds.ViewWorkWeek);
+        await cut.InvokeAsync(() => cmd.Invoke());
+
+        Assert.Equal(SchedulerView.WorkWeek, cut.Instance._internalView);
+        Assert.Equal(5, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public void View_WorkWeek_Without_Lanes_Does_Not_Throw()
+    {
+        // Contrast with View=Timeline (which throws without Lanes/LaneKey — PRD §4.6):
+        // WorkWeek is unconditionally renderable, same as Day/Week/Month, with no
+        // Timeline-style availability gate (issue #7).
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.WorkWeek));
+
+        Assert.Equal(5, cut.FindAll(".calee-scheduler-week [data-calee-region='day-header']").Count);
+    }
+
+    [Fact]
+    public void WorkWeek_Always_Present_In_AvailableViews_Regardless_Of_ShowYearAgendaButtons()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.ShowYearButton, false)
+            .Add(c => c.ShowAgendaButton, false));
+
+        var labels = cut.FindAll("[data-calee-region='toolbar-view-button']")
+            .Select(b => b.TextContent.Trim())
+            .ToList();
+        Assert.Contains("Work Week", labels);
+        Assert.Equal(new[] { "Day", "Work Week", "Week", "Month" }, labels);
     }
 }

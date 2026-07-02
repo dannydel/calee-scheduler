@@ -132,6 +132,86 @@ public class SchedulerViewPrimitivesFormatRangeLabelTests
         Assert.Equal("Mar 16 – 22, 2026", mon);
     }
 
+    // ----- WorkWeek coverage (issue #7) ---------------------------------------------
+
+    [Fact]
+    public void Format_WorkWeek_Default_MonToFri()
+    {
+        // Anchor Wed 2026-03-18, FirstDayOfWeek=Sunday → week 3/15..3/21. Default
+        // WorkWeekDays (null → Mon-Fri) → 3/16..3/20 → "Mar 16 – 20, 2026".
+        var date = On(2026, 3, 18);
+        var label = SchedulerViewPrimitives.FormatRangeLabel(
+            SchedulerView.WorkWeek, date, TZ, DayOfWeek.Sunday);
+        Assert.Equal("Mar 16 – 20, 2026", label);
+    }
+
+    [Fact]
+    public void Format_WorkWeek_Honors_Explicit_WorkWeekDays()
+    {
+        var date = On(2026, 3, 18);
+        var label = SchedulerViewPrimitives.FormatRangeLabel(
+            SchedulerView.WorkWeek, date, TZ, DayOfWeek.Sunday,
+            workWeekDays: new[] { DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday });
+        Assert.Equal("Mar 17 – 19, 2026", label);
+    }
+
+    [Fact]
+    public void Format_WorkWeek_CrossMonth()
+    {
+        // Anchor Tue 2026-03-31 with FirstDayOfWeek=Sunday → week 3/29..4/4.
+        // Mon-Fri subset → 3/30..4/3 → "Mar 30 – Apr 3, 2026".
+        var date = On(2026, 3, 31);
+        var label = SchedulerViewPrimitives.FormatRangeLabel(
+            SchedulerView.WorkWeek, date, TZ, DayOfWeek.Sunday);
+        Assert.Equal("Mar 30 – Apr 3, 2026", label);
+    }
+
+    [Fact]
+    public void Format_WorkWeek_EmptySubset_SoftDegrades_To_AllSevenDays_Span()
+    {
+        // PRD §4.6 soft-degradation, mirrored silently by the pure formatter: an empty
+        // (or no-match) WorkWeekDays list falls back to spanning all seven days.
+        var date = On(2026, 3, 18);
+        var label = SchedulerViewPrimitives.FormatRangeLabel(
+            SchedulerView.WorkWeek, date, TZ, DayOfWeek.Sunday,
+            workWeekDays: Array.Empty<DayOfWeek>());
+        Assert.Equal("Mar 15 – 21, 2026", label);
+    }
+
+    [Fact]
+    public void Advance_WorkWeek_Adds_Seven_Days()
+    {
+        var date = On(2026, 3, 17);
+        var next = SchedulerViewPrimitives.AdvanceAnchor(SchedulerView.WorkWeek, date, +1, TZ);
+        var prev = SchedulerViewPrimitives.AdvanceAnchor(SchedulerView.WorkWeek, date, -1, TZ);
+        Assert.Equal(date.AddDays(7), next);
+        Assert.Equal(date.AddDays(-7), prev);
+    }
+
+    // ----- FilterVisibleDays coverage (shared with CaleeSchedulerWeekView) ---------
+
+    [Fact]
+    public void FilterVisibleDays_ReturnsOnlyRequestedWeekdays_PreservingInputOrder()
+    {
+        var allDays = SchedulerViewPrimitives.ComputeWeekDays(On(2026, 3, 18), DayOfWeek.Monday, TZ);
+        var filtered = SchedulerViewPrimitives.FilterVisibleDays(
+            allDays, new[] { DayOfWeek.Wednesday, DayOfWeek.Monday });
+
+        Assert.Equal(2, filtered.Count);
+        Assert.Equal(DayOfWeek.Monday, filtered[0].Start.DayOfWeek);
+        Assert.Equal(DayOfWeek.Wednesday, filtered[1].Start.DayOfWeek);
+    }
+
+    [Fact]
+    public void FilterVisibleDays_NoMatch_ReturnsEmpty_CallerDecidesFallback()
+    {
+        // Pure helper — it does NOT itself soft-degrade; callers (CaleeSchedulerWeekView,
+        // the root's WorkWeek ComputeRange/FormatRangeLabel) decide the fallback.
+        var allDays = SchedulerViewPrimitives.ComputeWeekDays(On(2026, 3, 18), DayOfWeek.Sunday, TZ);
+        var filtered = SchedulerViewPrimitives.FilterVisibleDays(allDays, Array.Empty<DayOfWeek>());
+        Assert.Empty(filtered);
+    }
+
     // ----- AdvanceAnchor coverage --------------------------------------------------
 
     [Fact]

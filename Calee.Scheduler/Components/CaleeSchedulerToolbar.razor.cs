@@ -142,6 +142,17 @@ public partial class CaleeSchedulerToolbar : ComponentBase
     public int AgendaDays { get; set; } = 7;
 
     /// <summary>
+    /// Day subset for WorkWeek view; drives the range-label format and the composed
+    /// child's rendered columns when <see cref="View"/> is
+    /// <see cref="SchedulerView.WorkWeek"/> in standalone mode (issue #7). In cascaded
+    /// mode this value is read from <see cref="SchedulerStateContainer.WorkWeekDays"/>.
+    /// <see langword="null"/> resolves to Monday–Friday, matching the root scheduler's
+    /// <c>WorkWeekDays</c> parameter default.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<DayOfWeek>? WorkWeekDays { get; set; }
+
+    /// <summary>
     /// Unmatched HTML attributes splatted onto the outermost toolbar element (FR-53).
     /// </summary>
     [Parameter(CaptureUnmatchedValues = true)]
@@ -223,6 +234,9 @@ public partial class CaleeSchedulerToolbar : ComponentBase
     /// <summary>The Agenda window length in effect for this render.</summary>
     private int EffectiveAgendaDays => State?.AgendaDays ?? AgendaDays;
 
+    /// <summary>The WorkWeek day subset in effect for this render (issue #7).</summary>
+    private IReadOnlyList<DayOfWeek>? EffectiveWorkWeekDays => State?.WorkWeekDays ?? WorkWeekDays;
+
     // ----- Event handlers -----------------------------------------------------------
 
     /// <summary>Today button: jump to "today" in the configured time zone.</summary>
@@ -284,6 +298,7 @@ public partial class CaleeSchedulerToolbar : ComponentBase
             "month" => "Previous month",
             "year" => "Previous year",
             "agenda" => "Previous agenda window",
+            "workweek" => "Previous work week",
             _ => "Previous",
         };
 
@@ -296,6 +311,7 @@ public partial class CaleeSchedulerToolbar : ComponentBase
             "month" => "Next month",
             "year" => "Next year",
             "agenda" => "Next agenda window",
+            "workweek" => "Next work week",
             _ => "Next",
         };
 
@@ -319,6 +335,10 @@ public partial class CaleeSchedulerToolbar : ComponentBase
             TimelineScale.Month => "month",
             _ => "day",
         },
+        // WorkWeek steps ±7 calendar days like Week (issue #7), but gets its own
+        // "work week" wording in the aria label so screen-reader users hear which
+        // view the Prev/Next buttons are stepping.
+        SchedulerView.WorkWeek => "workweek",
         _ => "day",
     };
 
@@ -331,6 +351,7 @@ public partial class CaleeSchedulerToolbar : ComponentBase
         SchedulerView.Year => "Year",
         SchedulerView.Agenda => "Agenda",
         SchedulerView.Timeline => "Timeline",
+        SchedulerView.WorkWeek => "Work Week",
         _ => view.ToString(),
     };
 }

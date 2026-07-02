@@ -38,10 +38,11 @@
         ?? DefaultAvailableViews;
     var effectiveScale = State?.TimelineScale ?? TimelineScale;
     var effectiveAgendaDays = State?.AgendaDays ?? AgendaDays;
+    var effectiveWorkWeekDays = EffectiveWorkWeekDays;
 
     var rangeLabel = SchedulerViewPrimitives.FormatRangeLabel(
         effectiveView, effectiveDate, effectiveTz, effectiveFirstDay, effectiveScale,
-        effectiveAgendaDays);
+        effectiveAgendaDays, effectiveWorkWeekDays);
 
     var toolbarClasses = "calee-scheduler-toolbar"
         + (string.IsNullOrEmpty(ToolbarClass) ? string.Empty : " " + ToolbarClass);

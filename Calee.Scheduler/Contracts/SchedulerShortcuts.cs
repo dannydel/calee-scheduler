@@ -40,42 +40,45 @@ public static class SchedulerShortcuts
     /// </summary>
     public static IReadOnlyList<ShortcutBinding> DefaultMap { get; } = new ShortcutBinding[]
     {
-        // View switches (single-digit row; ADR-0013 §"Default bindings" rows 1–6).
+        // View switches (single-digit row; ADR-0013 §"Default bindings" rows 1–7 —
+        // row 7 / "7" → view.workweek, added for issue #7; the rows documented below
+        // shift by one accordingly).
         new("1", SchedulerCommandIds.ViewDay),
         new("2", SchedulerCommandIds.ViewWeek),
         new("3", SchedulerCommandIds.ViewMonth),
         new("4", SchedulerCommandIds.ViewYear),
         new("5", SchedulerCommandIds.ViewAgenda),
         new("6", SchedulerCommandIds.ViewTimeline),
+        new("7", SchedulerCommandIds.ViewWorkWeek),
 
-        // Navigate / create (rows 7–8).
+        // Navigate / create (rows 8–9).
         new("t", SchedulerCommandIds.NavigateToday),
         new("n", SchedulerCommandIds.EditCreate),
 
-        // Delete + the Backspace alias for macOS (row 9 + the spirit-of-the-binding
+        // Delete + the Backspace alias for macOS (row 10 + the spirit-of-the-binding
         // alias documented on SchedulerCommandIds.EditDelete).
         new("Delete", SchedulerCommandIds.EditDelete),
         new("Backspace", SchedulerCommandIds.EditDelete),
 
-        // Move-mode + keyboard resize (rows 10–11). Library exposes the trigger; the
+        // Move-mode + keyboard resize (rows 11–12). Library exposes the trigger; the
         // move/resize behavior itself is not implemented in Task 14 (placeholders).
         new("m", SchedulerCommandIds.EditMove),
         new("Shift+ArrowUp", SchedulerCommandIds.EditResize),
         new("Shift+ArrowDown", SchedulerCommandIds.EditResize),
 
-        // Selection toggle + cancel (rows 12–13).
+        // Selection toggle + cancel (rows 13–14).
         new(" ", SchedulerCommandIds.SelectToggle),
         new("Escape", SchedulerCommandIds.Cancel),
 
-        // Command palette (row 14) — both Mac and Windows variants per ADR-0013.
+        // Command palette (row 15) — both Mac and Windows variants per ADR-0013.
         new("Cmd+K", SchedulerCommandIds.PaletteOpen),
         new("Ctrl+K", SchedulerCommandIds.PaletteOpen),
 
-        // Undo (row 15) — both Cmd and Ctrl variants.
+        // Undo (row 16) — both Cmd and Ctrl variants.
         new("Cmd+Z", SchedulerCommandIds.EditUndo),
         new("Ctrl+Z", SchedulerCommandIds.EditUndo),
 
-        // Redo (row 16) — Cmd+Shift+Z (macOS), Ctrl+Shift+Z (mirrors the
+        // Redo (row 17) — Cmd+Shift+Z (macOS), Ctrl+Shift+Z (mirrors the
         // Ctrl-or-Cmd discrimination from Task 13's hardcoded handler), and Ctrl+Y
         // (Windows convention). ADR-0013 intentionally omits Cmd+Y (a macOS system
         // gesture — see ADR-0013 + Task 13's commit body).
@@ -83,7 +86,7 @@ public static class SchedulerShortcuts
         new("Ctrl+Shift+Z", SchedulerCommandIds.EditRedo),
         new("Ctrl+Y", SchedulerCommandIds.EditRedo),
 
-        // Help (row 17). On a US keyboard "?" requires Shift; browsers report
+        // Help (row 18). On a US keyboard "?" requires Shift; browsers report
         // e.Key="?" with ShiftKey=true. Most other layouts also need a modifier.
         // ADR-0013 lists the canonical form as "?" — internally we list both the
         // shifted and bare variants so the binding fires from layouts that report

@@ -97,4 +97,18 @@ public class CaleeSchedulerOptionsTests
         Assert.Throws<OptionsValidationException>(() =>
             Resolve(o => o.DefaultMaxOverlapColumns = 1));
     }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // Issue #7 — SchedulerView.WorkWeek as a valid DefaultView.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AddCaleeScheduler_WithConfigure_AcceptsWorkWeek_AsDefaultView()
+    {
+        // WorkWeek must validate like any other declared view — no exception, and the
+        // resolved options carry the value through untouched.
+        var options = Resolve(o => o.DefaultView = SchedulerView.WorkWeek);
+
+        Assert.Equal(SchedulerView.WorkWeek, options.DefaultView);
+    }
 }

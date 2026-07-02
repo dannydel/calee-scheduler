@@ -1121,6 +1121,78 @@ public class CaleeSchedulerWeekViewTests
         Assert.Equal(Anchor.Day, captured.NewEnd.Day);
     }
 
+    [Fact]
+    public async Task WeekDragToResize_EventEndingAtMidnight_ZeroDelta_RoundTripsExactly()
+    {
+        // Regression (code review on commit 0cfee2f): the resize End-anchor formula must
+        // measure elapsed time since visibleStart, not ev.End.TimeOfDay — TimeOfDay is
+        // ambiguous for an event ending exactly at midnight (semantically the end of the
+        // *current* day / 24:00, but TimeOfDay reports 00:00, indistinguishable from the
+        // top of the band). A buggy TimeOfDay-based formula collapsed this down to the
+        // minimum-duration clamp on drop instead of leaving End unchanged.
+        using var ctx = NewContext();
+
+        var start = new DateTimeOffset(2026, 5, 19, 22, 0, 0, TimeSpan.FromHours(-4));
+        var end = new DateTimeOffset(2026, 5, 20, 0, 0, 0, TimeSpan.FromHours(-4)); // Midnight.
+        var ev = Timed("late-night", start, end);
+        EventResizeContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDragToResize, true)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.OnEventResized,
+                EventCallback.Factory.Create<EventResizeContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "resize-end");
+        await cut.InvokeAsync(() => cut.Instance.InvokeResizeDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(end, captured!.NewEnd);
+    }
+
+    [Fact]
+    public async Task WeekDragToResize_ChunkOfMultiDayEvent_EndPastOriginDay_ClampsToOriginDayBandEnd()
+    {
+        // Companion regression: grabbing an *early* chunk's resize handle on a multi-day
+        // event whose true End is on a later day must clamp to that chunk's own band end
+        // (existing End-of-band clamp semantics, FR-26), not mis-map ev.End's wall-clock
+        // time-of-day onto the grabbed chunk's own date the way the buggy TimeOfDay-only
+        // formula did.
+        using var ctx = NewContext();
+
+        var start = new DateTimeOffset(2026, 5, 18, 10, 0, 0, TimeSpan.FromHours(-4));  // Monday.
+        var end = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.FromHours(-4));    // Wednesday.
+        var ev = Timed("multi-day-trip", start, end);
+        EventResizeContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDragToResize, true)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.OnEventResized,
+                EventCallback.Factory.Create<EventResizeContext>(this, m => captured = m)));
+
+        // Grab the Monday chunk's resize handle — ev.Start's own day, and the *first* of
+        // the three Monday/Tuesday/Wednesday chunks this event renders.
+        var payload = new DropPayload(0, 0, 0, 0, "resize-end");
+        await cut.InvokeAsync(() => cut.Instance.InvokeResizeDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        // Clamped to Monday's own band end (midnight Tuesday) — not the wrong "Monday
+        // 14:00" a wall-clock-time-of-day-only formula would mis-map ev.End's true 14:00
+        // onto, and not the true (out-of-scope for single-axis resize) Wednesday 14:00.
+        Assert.Equal(new DateTimeOffset(2026, 5, 19, 0, 0, 0, TimeSpan.FromHours(-4)), captured!.NewEnd);
+    }
+
     // ----- Drag-to-create (Phase 2 Task 8 — FR-24) ---------------------------------
 
     [Fact]

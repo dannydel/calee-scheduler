@@ -161,6 +161,50 @@ public class BlockedDaysTests
         Assert.Equal(0, createCount);
     }
 
+    /// <summary>
+    /// The command palette's <c>edit.create</c> command must apply the same fail-closed
+    /// gate as the "n" keystroke (both dispatch to the same suppression check per issue
+    /// #8) — a consumer using the palette instead of the keystroke must see identical
+    /// behavior on a blocked focused day.
+    /// </summary>
+    [Fact]
+    public async Task Day_EditCreateCommand_NoOp_WhenFocusedDayBlocked()
+    {
+        using var ctx = NewContext();
+        var createCount = 0;
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.AllowCommandPalette, true)
+            .Add(c => c.DayModifier, BlockOn(DateOnly.FromDateTime(Anchor.Date)))
+            .Add(c => c.OnCreateAtFocusRequested,
+                EventCallback.Factory.Create(this, () => createCount++)));
+
+        var create = cut.Instance.Commands.First(c => c.Id == SchedulerCommandIds.EditCreate);
+        await cut.InvokeAsync(() => create.Invoke());
+
+        Assert.Equal(0, createCount);
+    }
+
+    [Fact]
+    public async Task Day_EditCreateCommand_Fires_OnNormalDay()
+    {
+        using var ctx = NewContext();
+        var createCount = 0;
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.AllowCommandPalette, true)
+            .Add(c => c.DayModifier, (Func<DateTimeOffset, SchedulerDayState?>)(_ => null))
+            .Add(c => c.OnCreateAtFocusRequested,
+                EventCallback.Factory.Create(this, () => createCount++)));
+
+        var create = cut.Instance.Commands.First(c => c.Id == SchedulerCommandIds.EditCreate);
+        await cut.InvokeAsync(() => create.Invoke());
+
+        Assert.Equal(1, createCount);
+    }
+
     [Fact]
     public async Task Day_OnSlotClicked_StillFires_OnBlockedDay()
     {
@@ -387,6 +431,13 @@ public class BlockedDaysTests
         foreach (var header in cut.FindAll("[data-calee-region='day-header']"))
         {
             Assert.DoesNotContain("calee-scheduler-day-blocked", header.GetAttribute("class") ?? string.Empty);
+            Assert.Null(header.GetAttribute("aria-disabled"));
+        }
+
+        foreach (var slot in cut.FindAll(".calee-scheduler-slot"))
+        {
+            Assert.DoesNotContain("calee-scheduler-day-blocked", slot.GetAttribute("class") ?? string.Empty);
+            Assert.Null(slot.GetAttribute("aria-disabled"));
         }
     }
 

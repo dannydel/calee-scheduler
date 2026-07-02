@@ -984,7 +984,15 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         // Edit group.
         builtIns.Add(new SchedulerCommand(
             SchedulerCommandIds.EditCreate, "Create event", "Edit",
-            () => _ = OnCreateAtFocusRequested.InvokeAsync()));
+            () =>
+            {
+                // Issue #8 — the palette's Invoke must match the keystroke dispatch's
+                // fail-closed gate (see the EditCreate case in the shortcut-dispatch
+                // switch below): a blocked focused grid position suppresses create
+                // here too, not just on the "n" keystroke.
+                if (IsFocusedGridDayBlocked()) return;
+                _ = OnCreateAtFocusRequested.InvokeAsync();
+            }));
 
         if (AllowDelete)
         {

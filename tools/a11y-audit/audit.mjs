@@ -1,4 +1,5 @@
-// Calee.Scheduler — automated WCAG 2.1 AA audit (NFR-06, PRD Task 14).
+// Calee.Scheduler — automated WCAG 2.2 AA audit (NFR-06, PRD Task 14; raised
+// from 2.1 to 2.2 AA per issue #12).
 //
 // Boots a headless Chromium via Playwright, visits every demo route, and runs
 // axe-core against the rendered DOM. Writes the structured findings to
@@ -35,7 +36,7 @@ const ROUTES = [
     { path: '/fleet',  waitFor: '[role="grid"]' },
 ];
 
-const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
+const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 
 async function probeServer() {
     try {

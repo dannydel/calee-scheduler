@@ -35,12 +35,14 @@
  */
 
 .calee-scheduler-month {
-    /* 6.5rem (was 5rem). Floor needs to accommodate: date number (~20 px) +
-       at most one bar-lane spacer (~22 px) + MaxEventsPerDay default 3 chips
-       (~22 px each + 2 px gap) + the "+N more" overflow pill (~20 px). The
-       prior 5 rem floor only had room for the chips on bar-free rows and
-       clipped the overflow pill on rows containing a multi-day bar. */
-    --calee-scheduler-month-cell-min-height: 6.5rem;
+    /* 7.5rem (was 6.5rem, was 5rem). Floor needs to accommodate: date number
+       (~20 px) + at most one bar-lane spacer (~22 px) + MaxEventsPerDay
+       default 3 chips (~24 px each + 2 px gap — chips and the overflow pill
+       below both grew from ~20 px to the WCAG 2.2 SC 2.5.8 24px target-size
+       floor, see .calee-scheduler-month-chip / .calee-scheduler-month-overflow-chip)
+       + the "+N more" overflow pill (~24 px). The prior 6.5rem floor only had
+       room for pre-2.5.8 ~20px chips/pill and clipped on rows containing a bar. */
+    --calee-scheduler-month-cell-min-height: 7.5rem;
     /* 0.65 brings the muted-day text from 2.5:1 to ~4.5:1 against the cell's #fafafa
        muted-cell background, satisfying WCAG 2.1 AA body-text contrast (NFR-06).
        DefaultThemeContrastTests.cs regression-checks this token. */
@@ -182,6 +184,14 @@
        min-content size). Without this the chip refuses to shrink below the
        sum of its children's intrinsic widths, defeating the title's ellipsis. */
     min-width: 0;
+    /* WCAG 2.2 SC 2.5.8 (target size, minimum) — the chip is a real click/tap
+       target (OnEventClicked) and must resolve to at least a 24x24 CSS-px
+       box; the width is already well over 24px (it stretches to the cell's
+       chip-column width), so only the height needed the floor. Paired with
+       flex-shrink: 0 below so a day dense enough to squeeze the chips column
+       can't compress an individual chip back under the floor. */
+    min-height: 1.5rem;
+    flex-shrink: 0;
     align-items: center;
     gap: 0.25rem;
     padding: 0.125rem 0.25rem;
@@ -189,9 +199,9 @@
     background: transparent;
     color: #18181b;
     font-size: 0.75rem;
-    /* Tightened from the browser default ~1.5 so three chips + a bar lane +
-       an overflow pill all fit inside a 6.5 rem cell without the cell's
-       overflow: hidden clipping the bottom row. */
+    /* Tightened from the browser default ~1.5 so three 24px-floor chips + a
+       bar lane + an overflow pill all fit inside the 7.25rem cell without the
+       cell's overflow: hidden clipping the bottom row. */
     line-height: 1.35;
     text-align: left;
     cursor: pointer;
@@ -238,6 +248,17 @@
 }
 
 .calee-scheduler-month-overflow-chip {
+    /* WCAG 2.2 SC 2.5.8 — same 24px target-size floor as .calee-scheduler-month-chip
+       above; this button opens the day's full event list (OnDayOverflowClicked),
+       so it's a real target, not decoration. display: inline-flex + align-items
+       center keeps the "+N more" label centered inside the taller box; flex-shrink:
+       0 stops the same-column .calee-scheduler-month-cell-chips flex container from
+       compressing it back under the floor on a dense day. */
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    flex-shrink: 0;
+    box-sizing: border-box;
     align-self: flex-start;
     background: #f4f4f5;
     border: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);

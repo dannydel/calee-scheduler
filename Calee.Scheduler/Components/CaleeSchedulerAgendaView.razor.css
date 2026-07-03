@@ -141,6 +141,17 @@
     box-sizing: border-box;
     /* Tail-of-row clipping for long titles — keeps the row in one line. */
     min-width: 0;
+    /* WCAG 2.2 SC 2.4.11 (focus not obscured, minimum) — .calee-scheduler-agenda-header
+       is position: sticky; top: 0; z-index: 2 above these rows. Without this, a row
+       scrolled to just below the sticky header lands partially (confirmed up to ~55%
+       of the row) underneath it when it receives focus, so the :focus-visible outline
+       renders partly hidden. scroll-margin-top reserves clearance equal to (and padded
+       past) the sticky header's rendered height so the browser's native scroll-into-
+       view-on-focus leaves the row fully clear of the header. The row's own z-index: 1
+       on :focus-visible (below) only lifts it above sibling rows — it can't out-rank
+       the header's z-index: 2, so preventing the overlapping scroll position in the
+       first place is the fix, not a stacking-order change. */
+    scroll-margin-top: 3rem;
 }
 
 .calee-scheduler-agenda-row + .calee-scheduler-agenda-row {

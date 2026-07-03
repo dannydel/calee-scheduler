@@ -323,6 +323,29 @@ public class DayHeaderTests
         Assert.Empty(module.Invocations["registerDayHeaderKeyGuard"]);
     }
 
+    [Fact]
+    public async Task Week_UnregistersJsKeyGuard_OnDispose()
+    {
+        // Mirrors Day_UnregistersJsKeyGuard_OnDispose.
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+        module.SetupVoid("unregisterDayHeaderKeyGuard", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.OnDayHeaderClicked,
+                EventCallback.Factory.Create<DateTimeOffset>(this, _ => { })));
+
+        Assert.Single(module.Invocations["registerDayHeaderKeyGuard"]);
+
+        await cut.InvokeAsync(() => cut.Instance.DisposeAsync());
+
+        var unregisterCall = Assert.Single(module.Invocations["unregisterDayHeaderKeyGuard"]);
+        Assert.Equal("guard-1", unregisterCall.Arguments[0]);
+    }
+
     // ════════════════════════════════════════════════════════════════════════════
     // Blocked-day composition (issue #8)
     // ════════════════════════════════════════════════════════════════════════════

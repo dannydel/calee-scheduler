@@ -1,10 +1,13 @@
 # Calee.Scheduler — accessibility audit.
 #
 # Runs the Playwright + axe-core audit at tools/a11y-audit/ against every demo
-# route. Fails the workflow if any WCAG 2.1 AA violation is found. The audit
-# is intentionally separate from the .NET CI workflow: the library and its
-# tests have no Node dependency, and adding the browser install to every CI
-# run would multiply runtimes for no benefit. (NFR-06.)
+# route. Fails the workflow if any WCAG 2.2 AA violation axe-core can check
+# automatically is found (raised from 2.1 to 2.2 AA per issue #12) — see
+# README.md §9.1a for the full per-criterion picture, including the
+# manual-only checks and documented exceptions this workflow doesn't cover.
+# The audit is intentionally separate from the .NET CI workflow: the library
+# and its tests have no Node dependency, and adding the browser install to
+# every CI run would multiply runtimes for no benefit. (NFR-06.)
 
 name: a11y
 

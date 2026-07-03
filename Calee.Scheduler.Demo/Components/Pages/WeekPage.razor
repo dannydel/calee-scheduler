@@ -25,6 +25,9 @@
                                 AllowDelete="true"
                                 AllowUndoRedo="true"
                                 AllowCommandPalette="true"
+                                DayModifier="GetDayState"
+                                DayHeaderTemplate="DayBadge"
+                                OnDayHeaderClicked="HandleDayHeaderClicked"
                                 OnEventMoved="HandleMoved"
                                 OnEventResized="HandleResized"
                                 OnEventCreated="HandleCreated"
@@ -39,7 +42,11 @@
                                 OnCommandPaletteRequested="HandleCommandPaletteRequested" />
     </div>
 
-    <PageFooterNote Caption="Drag events across day columns and time slots; resize via the bottom edge; drag empty space to draw a new event; double-click to open the editor dialog. Click an existing event to open Edit/Delete actions. Press Delete (or Backspace) on a focused event to remove it; multi-select via Ctrl/Cmd-click for batch delete. Press Cmd+Z / Ctrl+Z to undo, Cmd+Shift+Z or Ctrl+Y to redo. Press “?” for the full shortcut map, “n” to create at the next hour, Cmd/Ctrl+K to open the command palette. Clicking a “+N earlier/later” chip widens the visible hour band. The fixtures place a Mon–Wed “Vacation” bar in the all-day banner, a Mon-11pm → Tue-2am route that splits at midnight into two timed chunks with clip indicators, and the A/B/C overlap cluster on Thursday." />
+    <p class="mt-3 font-sans text-sm text-ink-muted" aria-live="polite" data-testid="week-day-header-status">
+        @(_lastHeaderClickedLabel ?? "Click (or Enter/Space) a day header above — it announces the day's event count and, on the weekend columns, the blocked-day reason.")
+    </p>
+
+    <PageFooterNote Caption="Drag events across day columns and time slots; resize via the bottom edge; drag empty space to draw a new event; double-click to open the editor dialog. Click an existing event to open Edit/Delete actions. Press Delete (or Backspace) on a focused event to remove it; multi-select via Ctrl/Cmd-click for batch delete. Press Cmd+Z / Ctrl+Z to undo, Cmd+Shift+Z or Ctrl+Y to redo. Press “?” for the full shortcut map, “n” to create at the next hour, Cmd/Ctrl+K to open the command palette. Clicking a “+N earlier/later” chip widens the visible hour band. The fixtures place a Mon–Wed “Vacation” bar in the all-day banner, a Mon-11pm → Tue-2am route that splits at midnight into two timed chunks with clip indicators, and the A/B/C overlap cluster on Thursday. Saturday and Sunday are marked blocked via DayModifier (no route scheduled on weekends) — create affordances no-op there, but the day is still reachable and its header still reports a badge + click. Each day header carries a DayHeaderTemplate event-count badge and reacts to OnDayHeaderClicked." />
 
 </div>
 
@@ -87,6 +94,45 @@
     {
         var now = DateTimeOffset.UtcNow;
         _events = SchedulerSeed.GetWeekSeed(now, SchedulerSeed.DefaultTimeZone).ToList();
+    }
+
+    // ── Blocked days + day-header template/click (issues #8, #9) ────────────
+    // Weekend columns are blocked (fixture is Mon-Fri only, so this never hides
+    // seeded content). DayHeaderTemplate stamps a per-day event-count badge
+    // (aria-hidden, matching the README §4.8 example) after the library's own
+    // weekday/date label; OnDayHeaderClicked reports the same count plus the
+    // blocked reason into the aria-live status line below the frame.
+    private static SchedulerDayState? GetDayState(DateTimeOffset day) =>
+        day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday
+            ? new SchedulerDayState(IsBlocked: true, Label: "Blocked — weekend, no scheduling")
+            : null;
+
+    private int CountEventsForDay(DateTimeOffset day)
+    {
+        var dayStart = day;
+        var dayEnd = day.AddDays(1);
+        return _events.Count(e => e.Start < dayEnd && e.End > dayStart);
+    }
+
+    private RenderFragment<DateTimeOffset> DayBadge => day => __builder =>
+    {
+        var count = CountEventsForDay(day);
+        if (count > 0)
+        {
+            <span class="calee-demo-day-header-badge" aria-hidden="true">@count</span>
+        }
+    };
+
+    private string? _lastHeaderClickedLabel;
+
+    private void HandleDayHeaderClicked(DateTimeOffset day)
+    {
+        var count = CountEventsForDay(day);
+        var blocked = GetDayState(day)?.IsBlocked == true;
+        var dayName = day.ToString("dddd, MMMM d", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+        _lastHeaderClickedLabel = blocked
+            ? $"{dayName}: {count} event(s) — blocked (weekend, no scheduling)."
+            : $"{dayName}: {count} event(s) — open for scheduling.";
     }
 
     private void HandleMoved(EventMoveContext ctx)

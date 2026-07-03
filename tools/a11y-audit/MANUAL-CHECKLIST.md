@@ -13,6 +13,33 @@ roving-tabindex correctness) are covered by `npm run audit` and the
 `Calee.Scheduler.Tests/Accessibility/*` xUnit files — those must already be
 passing before you start here.
 
+Raised to a **WCAG 2.2 AA** baseline (issue #12) — see §8 for the 2.2-specific
+manual checks axe cannot run itself (2.5.7 dragging movements, 2.4.11 focus
+not obscured, 2.5.8 target size spacing-exception notes).
+
+> ⚠️ **Known critical gap found while writing §8 (2026, issue #12 verification)
+> — read before testing arrow-key navigation anywhere in this document.**
+> Live-browser testing (Playwright, not bUnit — bUnit's headless DOM doesn't
+> exercise real focus) shows that **arrow-key roving-tabindex navigation
+> updates the `tabindex`/`aria-label` state correctly but never moves actual
+> browser focus** on Day, Week/WorkWeek, Month, Timeline (Fleet), *and*
+> Agenda. Concretely: focus a slot/cell, press ArrowDown/Right — the DOM's
+> `tabindex="0"` moves to the new target and its label is correct, but
+> `document.activeElement` (and the visible focus ring) stays on the
+> original element. No view calls `ElementReference.FocusAsync()` or the
+> shipped `calee-scheduler.js` `focusElement()` helper after an arrow-key
+> re-render. **Tab-based navigation is unaffected** (confirmed working —
+> Tab moves real focus using the browser's native tab order across
+> naturally-focusable elements; only the JS-driven *intra-widget* arrow-key
+> transfer is broken). This is a pre-existing, cross-cutting defect, not
+> something introduced by issue #12's target-size/CSS fixes, and it is
+> **out of scope to fix here** (a real behavior fix, not CSS/markup). Do not
+> mark any "Arrow-key navigation" row below as passing until a dedicated
+> follow-up lands; where the tables below say focus "moves," read that as
+> the *pre-existing intent*, not verified current behavior. Treat this as a
+> **P0 follow-up issue** — it undermines 2.1.1/2.4.7 as well as the 2.5.7
+> keyboard-alternative story in §8.1.
+
 ## Setup
 
 1. Start the demo: `dotnet run --project Calee.Scheduler.Demo --urls http://localhost:5092`.
@@ -100,6 +127,70 @@ For every focusable element, verify the focus outline (2px solid `#2563eb`,
 xUnit tests as a baseline — they assert the outline meets 3:1 non-text
 contrast against every background it draws on.
 
+## 8. WCAG 2.2 AA additions (issue #12)
+
+Criteria axe-core cannot check automatically (`npm run audit`'s `wcag22a`/`wcag22aa`
+tags currently only cover 2.5.8 via the `target-size` rule — see
+[`README.md`](../../README.md) "Accessibility" for the full per-criterion map).
+Each subsection below was verified against the live demo (Playwright driving
+real Chromium, not bUnit) as of this issue.
+
+### 8.1 SC 2.5.7 — Dragging Movements
+
+Every drag interaction (move, resize, create) needs a single-pointer-free
+alternative. Verified per view, per interaction:
+
+| View | Drag-to-create alternative | Verified? | Keystroke sequence |
+| --- | --- | --- | --- |
+| Day / Week / WorkWeek / Month / Fleet (Timeline) | `n` → `OnCreateAtFocusRequested` | ✅ **Works** | Tab into the grid (any cell) → press **n** → the editor dialog opens pre-filled with a default slot (the demo pages default to "now, rounded to the hour/day" — see each page's `HandleCreateAtFocus`) → Tab to Title, type → Tab to Save → **Enter**. No drag gesture required at any point. |
+| Agenda | N/A — Agenda has no drag-to-create (it's a flat list, no grid to draw on) | N/A | — |
+
+| View | Drag-to-move / drag-to-resize alternative | Verified? | Notes |
+| --- | --- | --- | --- |
+| Day / Week / WorkWeek / Fleet (Timeline) | `m` → `OnMoveModeRequested`; `Shift+ArrowUp`/`Shift+ArrowDown` → `OnResizeKeystrokeRequested` | ❌ **Not a functional alternative as shipped** | Both are documented **placeholders** (`SchedulerComponentBase` XML docs, `OnMoveModeRequested`/`OnResizeKeystrokeRequested`): the library fires the trigger callback but does not itself move or resize the event, and the callback is parameterless (no focused-event payload), so a consumer can't reliably build the behavior on top without their own focus-tracking wrapper. The demo app does **not** wire either callback (confirmed: zero references in `Calee.Scheduler.Demo/`). Pressing `m` or `Shift+ArrowUp/Down` today does nothing observable. |
+| Month | No move/resize keystrokes at all (Month doesn't wire chip-scope `m`/`Shift+Arrow` — bars/chips there aren't resizable) | ❌ N/A | Month events are all-day-shaped; drag-to-move exists (chip drag), no keyboard equivalent ships. |
+| Agenda | N/A — Agenda has no drag-to-move/resize (flat list, no positional dragging) | N/A | — |
+
+**Design-decision flag (see final report):** drag-to-move and drag-to-resize do
+**not** have a working keyboard (or other single-pointer) alternative in the
+library as shipped, for any view. This is a genuine SC 2.5.7 gap, not a
+mechanical CSS/markup fix — closing it needs either (a) widening
+`OnMoveModeRequested`/`OnResizeKeystrokeRequested` to carry the focused event
+(an API shape change, out of this issue's additive-only scope) or (b) a
+documented consumer-side wrapper pattern once the library exposes enough to
+build one. Tracked as a follow-up; do not mark this row passing.
+
+### 8.2 SC 2.4.11 — Focus Not Obscured (Minimum)
+
+Spot-check: for every focusable element, confirm no sticky/fixed chrome with
+an opaque background renders on top of the element's focus indicator at any
+scroll position.
+
+| Region | Sticky/fixed chrome present? | Spot-check | Result |
+| --- | --- | --- | --- |
+| Day / Week / WorkWeek header row + all-day row | No — the header/all-day rows sit in normal flow *outside* the grid body's own `overflow-y: auto` region (they're not `position: sticky`), so the internally-scrolling body can never carry a focused cell underneath them. | Scroll the internal grid body to the bottom via keyboard (arrow-key focus-scroll or mouse wheel), confirm header stays visible and never paints over a focused cell. | Pass — structural, not just visual. |
+| Agenda date-group headers | **Yes** — `.calee-scheduler-agenda-header` is `position: sticky; top: 0; z-index: 2`, opaque background, inside the scrollable `.calee-scheduler-agenda-list`. | Scroll the list ~1 row height, then focus the row immediately below the sticky header (e.g. via Tab, since arrow-key transfer is broken per the banner above). Confirm the row's `:focus-visible` outline is not clipped by the header. | **Found broken, now fixed:** before this issue, a row scrolled to just under the header measured ~55% of its height behind the sticky header (25px of 45.5px, live-measured). Fixed by adding `scroll-margin-top: 3rem` to `.calee-scheduler-agenda-row` so the browser's native scroll-into-view-on-focus reserves clearance past the header. Re-verified after the fix: 0px overlap. Re-spot-check on any future change to `--calee-scheduler-agenda-header` padding/font-size (the `3rem` margin is a hand-measured constant, not derived from the header's actual height token). |
+| Month "+N more" popover / event popovers, command palette, editor dialog | These are modal/anchored overlays the consumer's demo renders (`EventActionPopover`, `OverflowChooserPopover`, `EventEditorDialog`, `CommandPaletteDialog`) — check that Tab is trapped inside each while open and that no library chrome (toolbar, sticky headers) renders on top of the dialog's own focused control. | Open each dialog, Tab through its controls. | Pass (dialogs render above the scheduler via normal stacking; no sticky chrome shares their z-index layer in the demo's CSS). |
+| Toolbar (all views) | Toolbar is not sticky/fixed — it's a normal-flow row above the view body. | N/A | Pass — no overlap is structurally possible. |
+
+### 8.3 SC 2.5.8 — Target Size (Minimum) — spacing-exception notes
+
+`npm run audit`'s `target-size` rule (axe-core ≥4.10, tag `wcag22aa`) checks
+this automatically; passing the audit means every target is either ≥24×24 CSS
+px *or* has enough clearance to its nearest neighbor for the exception to
+apply. This section records **which** targets rely on which path, so a future
+CSS change doesn't silently regress a target that currently only passes via
+spacing:
+
+| Target | Rendered size (measured) | Compliance path |
+| --- | --- | --- |
+| `.calee-scheduler-month-chip` (event chips) | 24px tall (was ~20.2px) | **True size** — `min-height: 1.5rem` + `flex-shrink: 0` added by this issue. No longer depends on spacing. |
+| `.calee-scheduler-month-overflow-chip` ("+N more") | 24px tall (was ~20.5px) | **True size** — same fix, same reasoning. |
+| `.calee-scheduler-overflow-chip` (Day/Week "+N earlier/later") | 24px tall exactly | **True size** — already compliant pre-issue-#12; right at the floor, no margin for regression. |
+| `.calee-scheduler-toolbar-view-button` (Day/Week/Month/Year/Agenda/Timeline/Work Week switcher) | ~23.6px tall (font-size 0.8125rem × line-height 1.2 + 0.25rem vertical padding) | **Spacing exception** — height is ~0.4px under the 24px floor; passes because the switcher buttons sit in an isolated toolbar row with ample vertical clearance above/below (no other target closer than 24px in any direction). Width is always well over 24px. **If the toolbar's vertical padding/row height ever shrinks, re-run the audit** — this one has no size margin to fall back on. |
+| `.calee-scheduler-toolbar-button` (Today) | ~25.6px tall | True size. |
+| `.calee-scheduler-toolbar-button--chevron` (Prev/Next) | 24px tall exactly | Borderline true size — no margin. |
+
 ## Known limitations / open items
 
 - ~~The Day-view slot cells don't currently emit an `aria-label` carrying the slot's
@@ -112,6 +203,17 @@ contrast against every background it draws on.
   markup as the `Day` mode but each cell represents a whole day rather than a slot —
   the `aria-label` distinguishes them ("empty slot" for the hourly Day mode, "empty cell"
   for the daily Week/Month modes).
+- **[P0 candidate, found 2026, issue #12]** Arrow-key roving-tabindex navigation
+  does not move real browser focus in any view (Day, Week/WorkWeek, Month,
+  Timeline/Fleet, Agenda) — see the banner near the top of this document. Tab
+  navigation is unaffected. Needs a dedicated follow-up issue; not fixed as
+  part of #12 (behavior fix, not CSS/markup — outside this issue's scope).
+- **[Issue #12]** Drag-to-move and drag-to-resize have no functional keyboard
+  (or other single-pointer) alternative in the library as shipped — see §8.1.
+  `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are parameterless
+  trigger placeholders; the demo does not wire either. Needs either a richer
+  payload (API change, out of scope for #12) or a documented consumer wrapper
+  pattern.
 
 ## When this checklist passes
 

@@ -9,7 +9,7 @@ A Blazor scheduling component suite for internal .NET applications — Day, Week
 - Sweep-line overlap layout with lane reuse; events render correctly without consumer geometry math.
 - Fail-closed interaction surface: drag-to-move, drag-to-resize, drag-to-create, double-click-to-create, delete, multi-select, undo/redo triggers, shortcuts, and command-palette hooks.
 - Required per-view `TimeZone` parameter — the library never converts event times; it uses the supplied zone for "today", day boundaries, and emitted `SchedulerSlot` offsets only.
-- WCAG 2.1 AA-oriented default markup: structural ARIA, roving tabindex, screen-reader-checked, contrast-verified default theme.
+- WCAG 2.2 AA-oriented default markup (with documented exceptions — see §9.1a): structural ARIA, roving tabindex, screen-reader-checked, contrast-verified default theme (§9).
 - CSS isolation with documented theming levers: `--calee-scheduler-*` custom properties, attribute splatting, named class hooks, and `::deep` via `data-calee-region` attributes.
 - No transitive runtime dependencies beyond `Microsoft.AspNetCore.Components.*`.
 - Source-stable public API across all 1.x releases.
@@ -716,7 +716,7 @@ A consumer that wants a darker theme, a custom test hook, a class on the toolbar
 
 ## 9. Accessibility
 
-The library ships WCAG 2.1 AA-oriented default markup and a contrast-verified default theme.
+The library ships **WCAG 2.2 AA**-oriented default markup and a contrast-verified default theme (raised from 2.1 AA per issue #12 — see §9.1a for the per-criterion breakdown).
 
 ### 9.1 What's verified automatically
 
@@ -731,15 +731,27 @@ The library ships WCAG 2.1 AA-oriented default markup and a contrast-verified de
   npm run audit
   ```
 
-  The script audits the composed root plus the six dedicated view routes (`/`, `/day`, `/week`, `/month`, `/year`, `/agenda`, `/fleet`) against `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` and exits non-zero on any violation. Output is structured JSON at `tools/a11y-audit/report.json`.
+  The script audits the composed root plus the six dedicated view routes (`/`, `/day`, `/week`, `/month`, `/year`, `/agenda`, `/fleet`) against `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22a`, `wcag22aa` and exits non-zero on any violation. Output is structured JSON at `tools/a11y-audit/report.json`. Requires axe-core ≥4.10 for the 2.2 rule set; `@axe-core/playwright ^4.10.0` already resolves there.
 
-- **Default-theme contrast** is regression-tested in xUnit at `Calee.Scheduler.Tests/Accessibility/DefaultThemeContrastTests.cs`. Token changes that drop below 4.5:1 break the build.
+- **Default-theme contrast** is regression-tested in xUnit at `Calee.Scheduler.Tests/Accessibility/DefaultThemeContrastTests.cs`. Token changes that drop below 4.5:1 break the build. (Contrast is a WCAG 2.1 criterion — 1.4.3 — unchanged by 2.2; this is the same test suite before and after the 2.2 upgrade.)
 
-- **Roving-tabindex correctness** is bUnit-tested at `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs`.
+- **Roving-tabindex correctness** is bUnit-tested at `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs` — at the `tabindex`-attribute level (bUnit's headless DOM doesn't exercise real browser focus; see §9.1a's known-gaps note).
+
+### 9.1a WCAG 2.2 AA — per-criterion approach (issue #12)
+
+axe-core's `wcag22a`/`wcag22aa` tags currently add exactly one automatically-checkable rule: `target-size` (SC 2.5.8). The other two 2.2 criteria most relevant to a drag-and-drop scheduling grid — SC 2.5.7 (dragging movements) and SC 2.4.11 (focus not obscured) — have no axe rule as of axe-core 4.11 and are covered by manual spot-checks instead. Summary (full detail in `tools/a11y-audit/MANUAL-CHECKLIST.md` §8):
+
+| Criterion | Mechanism | Status |
+| --- | --- | --- |
+| 2.5.8 Target size (minimum) | Automated — `npm run audit`'s `target-size` rule, every route, on every push/PR (`.github/workflows/a11y.yml`) | **Pass.** Month view's event chips and "+N more" overflow chip were the only real violations found (~20px tall, under the 24px floor); fixed via `min-height: 1.5rem` + `flex-shrink: 0`. A few controls (the toolbar's view-switcher buttons, the Day/Week overflow chips, the toolbar chevrons) pass at or slightly under 24px via the SC 2.5.8 spacing exception rather than true size — see the checklist §8.3 table before touching their CSS. |
+| 2.4.11 Focus not obscured (minimum) | Manual spot-check, `MANUAL-CHECKLIST.md` §8.2 | **Pass**, one fix applied. Day/Week/Month header rows are structurally immune (outside the grid body's own scroll region). Agenda's sticky date-group headers *did* obscure the row immediately beneath them after a small scroll (~55% of the row's height, live-measured) — fixed with `scroll-margin-top` on `.calee-scheduler-agenda-row` so focus-triggered scrolling clears the sticky header. |
+| 2.5.7 Dragging movements | Manual verification, `MANUAL-CHECKLIST.md` §8.1 | **Partial — known gap, not fixed by #12.** Drag-to-create has a working keyboard alternative in every timed view (the `n` keystroke → `OnCreateAtFocusRequested`). Drag-to-move and drag-to-resize do **not**: `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are parameterless trigger placeholders (no focused-event payload), the demo app doesn't wire either into real behavior, and closing this gap needs either a richer callback payload (an API shape change, out of this issue's additive-only scope) or a documented consumer wrapper once one exists. Tracked as a follow-up. |
+
+**Also found, not part of SC 2.5.7/2.4.11/2.5.8 but discovered while manually verifying them:** arrow-key roving-tabindex navigation updates the `tabindex` state correctly in every view but does not move real browser focus (no view calls `FocusAsync`/the shipped `focusElement()` JS helper after an arrow-key re-render) — Tab-based navigation is unaffected. This is a pre-existing, cross-cutting defect (implicated in 2.1.1/2.4.7, not new to 2.2), out of scope for this issue's CSS/markup/demo remit, and tracked as a P0 follow-up. See `MANUAL-CHECKLIST.md`'s top-of-file banner.
 
 ### 9.2 What's verified manually
 
-Screen-reader smoke tests cannot be headless. The script in `tools/a11y-audit/MANUAL-CHECKLIST.md` walks NVDA (Windows, Edge + Firefox) and VoiceOver (macOS, Safari) across every demo route, with expected announcements for the toolbar, range label live region, grid navigation, event focus, and overflow chips. Run this once per release.
+Screen-reader smoke tests cannot be headless. The script in `tools/a11y-audit/MANUAL-CHECKLIST.md` walks NVDA (Windows, Edge + Firefox) and VoiceOver (macOS, Safari) across every demo route, with expected announcements for the toolbar, range label live region, grid navigation, event focus, and overflow chips. Run this once per release. §8 of the same document adds the WCAG 2.2 manual checks described above.
 
 ### 9.3 Keyboard navigation
 
@@ -810,7 +822,7 @@ Three GitHub Actions workflows live under `.github/workflows/`:
 | Workflow | File | Trigger | Purpose |
 | -------- | ---- | ------- | ------- |
 | `ci`      | [`.github/workflows/ci.yml`](.github/workflows/ci.yml)         | push / PR to `main` | Restore, build (`-warnaserror`), test, pack. Uploads `test-results` and `nupkg` artifacts. |
-| `a11y`    | [`.github/workflows/a11y.yml`](.github/workflows/a11y.yml)     | push / PR to `main` | Boots the demo and runs the Playwright + axe-core audit at `tools/a11y-audit/`. Fails on any WCAG 2.1 AA violation. Uploads `a11y-report`. |
+| `a11y`    | [`.github/workflows/a11y.yml`](.github/workflows/a11y.yml)     | push / PR to `main` | Boots the demo and runs the Playwright + axe-core audit at `tools/a11y-audit/`. Fails on any WCAG 2.2 AA violation. Uploads `a11y-report`. |
 | `release` | [`.github/workflows/release.yml`](.github/workflows/release.yml) | push of a `v*` tag | Mirrors `ci`, then publishes the `.nupkg` to **nuget.org** (not Tyler Tech's Artifactory) and creates a GitHub Release. |
 
 Dependabot keeps NuGet packages and GitHub Actions versions current weekly — see [`.github/dependabot.yml`](.github/dependabot.yml).

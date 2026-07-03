@@ -871,6 +871,36 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     [Parameter]
     public EventCallback OnResizeKeystrokeRequested { get; set; }
 
+    /// <summary>
+    /// Fired when the user presses the move-mode binding (<see cref="SchedulerCommandIds.EditMove"/>;
+    /// default <c>m</c>) on a focused event chip. Payload identifies the focused event so the consumer
+    /// can show a visual cue or log the action. The library implements the phantom movement logic
+    /// internally (arrow keys adjust position, Enter commits, Escape cancels); the consumer doesn't
+    /// need to track focus or implement move logic. The library fires <see cref="OnEventMoved"/> with
+    /// <see cref="EventMoveContext"/> when the user commits the move.
+    /// </summary>
+    /// <remarks>
+    /// Chip-scope binding only (see ADR-0013 row 10). Fires alongside the existing parameterless
+    /// <see cref="OnMoveModeRequested"/> for backward compatibility. Consumers can wire either or both.
+    /// </remarks>
+    [Parameter]
+    public EventCallback<KeyboardMoveRequest> OnKeyboardMoveRequested { get; set; }
+
+    /// <summary>
+    /// Fired when the user presses one of the resize keystrokes (<see cref="SchedulerCommandIds.EditResize"/>;
+    /// default <c>Shift+ArrowUp</c> / <c>Shift+ArrowDown</c>) on a focused event chip. Payload identifies
+    /// the focused event and the resize direction so the consumer can show a visual cue or log the action.
+    /// The library implements the resize logic internally (each keystroke resizes by one slot); the consumer
+    /// doesn't need to track focus or implement resize logic. The library fires <see cref="OnEventResized"/>
+    /// with <see cref="EventResizeContext"/> after each resize.
+    /// </summary>
+    /// <remarks>
+    /// Chip-scope binding only (see ADR-0013 row 11). Fires alongside the existing parameterless
+    /// <see cref="OnResizeKeystrokeRequested"/> for backward compatibility. Consumers can wire either or both.
+    /// </remarks>
+    [Parameter]
+    public EventCallback<KeyboardResizeRequest> OnKeyboardResizeRequested { get; set; }
+
     // ----- Phase 2 Task 15 — Commands API (FR-37 / ADR-0014) -------------------------
 
     /// <summary>
@@ -1876,9 +1906,12 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
                 return true;
             case SchedulerCommandIds.EditMove:
                 await OnMoveModeRequested.InvokeAsync();
+                await DispatchKeyboardMoveAsync(focusedEvent, focusedEventId);
                 return true;
             case SchedulerCommandIds.EditResize:
                 await OnResizeKeystrokeRequested.InvokeAsync();
+                var direction = e.Key == "ArrowUp" ? KeyboardResizeDirection.Extend : KeyboardResizeDirection.Shrink;
+                await DispatchKeyboardResizeAsync(focusedEvent, focusedEventId, direction);
                 return true;
             case SchedulerCommandIds.ViewDay:
                 await OnViewSwitchRequested.InvokeAsync(SchedulerView.Day);
@@ -1941,6 +1974,22 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         TEvent? focusedEvent,
         string? focusedEventId)
         => Task.FromResult(false);
+
+    /// <summary>
+    /// Per-view hook for keyboard move dispatch. The base class calls this when the user presses
+    /// the move-mode binding (default <c>m</c>) on a focused event chip. Each view overrides this
+    /// to enter keyboard move mode, track the phantom position, and handle arrow keys.
+    /// </summary>
+    private protected virtual Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Per-view hook for keyboard resize dispatch. The base class calls this when the user presses
+    /// one of the resize keystrokes (default <c>Shift+ArrowUp</c> / <c>Shift+ArrowDown</c>) on a focused
+    /// event chip. Each view overrides this to resize the event by one slot and fire <see cref="OnEventResized"/>.
+    /// </summary>
+    private protected virtual Task DispatchKeyboardResizeAsync(TEvent? focusedEvent, string? focusedEventId, KeyboardResizeDirection direction)
+        => Task.CompletedTask;
 
     /// <summary>
     /// Resolve the supplied selection's ids to consumer <typeparamref name="TEvent"/>

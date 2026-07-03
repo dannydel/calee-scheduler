@@ -173,6 +173,15 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     private int _focusedRowIndex;
     private int _focusedTimeIndex;
 
+    // Keyboard move mode state (issue #20 — SC 2.5.7)
+    private bool _keyboardMoveMode;
+    private string? _keyboardMoveEventId;
+    private int _keyboardMovePhantomTimeOffset;
+    private int _keyboardMovePhantomLaneOffset;
+    private DateTimeOffset _keyboardMoveOriginalStart;
+    private DateTimeOffset _keyboardMoveOriginalEnd;
+    private string? _keyboardMoveOriginalLaneId;
+
     // For FR-23.
     private DateTimeOffset? _lastRangeStart;
     private DateTimeOffset? _lastRangeEnd;
@@ -823,6 +832,53 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         // Phase 2 Task 14 — route through the shortcut-map dispatch (FR-36). Replaces
         // Task 13's TryDispatchUndoRedoAsync. IsDragActive precedence unchanged.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null && _rows.Length > 0)
+        {
+            var moveTimeAxisMax = TimeScale == TimelineScale.Day
+                ? Math.Max(0, SlotCount - 1)
+                : Math.Max(0, _dayBounds.Count - 1);
+
+            switch (e.Key)
+            {
+                case "ArrowRight":
+                    var origTimeIdxRight = GetKeyboardMoveOriginalTimeIndex();
+                    _keyboardMovePhantomTimeOffset = Math.Min(
+                        moveTimeAxisMax - origTimeIdxRight,
+                        _keyboardMovePhantomTimeOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    var origTimeIdxLeft = GetKeyboardMoveOriginalTimeIndex();
+                    _keyboardMovePhantomTimeOffset = Math.Max(
+                        -origTimeIdxLeft,
+                        _keyboardMovePhantomTimeOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origLaneIdxDown = GetKeyboardMoveOriginalLaneIndex();
+                    _keyboardMovePhantomLaneOffset = Math.Min(
+                        _rows.Length - 1 - origLaneIdxDown,
+                        _keyboardMovePhantomLaneOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowUp":
+                    var origLaneIdxUp = GetKeyboardMoveOriginalLaneIndex();
+                    _keyboardMovePhantomLaneOffset = Math.Max(
+                        -origLaneIdxUp,
+                        _keyboardMovePhantomLaneOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Grid)) return;
 
         var timeAxisMax = TimeScale == TimelineScale.Day
@@ -884,6 +940,53 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         // Phase 2 Task 14 — route through the shortcut-map dispatch. See Day view's
         // matching branch for the longer rationale.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null && _rows.Length > 0)
+        {
+            var moveTimeAxisMax = TimeScale == TimelineScale.Day
+                ? Math.Max(0, SlotCount - 1)
+                : Math.Max(0, _dayBounds.Count - 1);
+
+            switch (e.Key)
+            {
+                case "ArrowRight":
+                    var origTimeIdxRight = GetKeyboardMoveOriginalTimeIndex();
+                    _keyboardMovePhantomTimeOffset = Math.Min(
+                        moveTimeAxisMax - origTimeIdxRight,
+                        _keyboardMovePhantomTimeOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    var origTimeIdxLeft = GetKeyboardMoveOriginalTimeIndex();
+                    _keyboardMovePhantomTimeOffset = Math.Max(
+                        -origTimeIdxLeft,
+                        _keyboardMovePhantomTimeOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origLaneIdxDown = GetKeyboardMoveOriginalLaneIndex();
+                    _keyboardMovePhantomLaneOffset = Math.Min(
+                        _rows.Length - 1 - origLaneIdxDown,
+                        _keyboardMovePhantomLaneOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowUp":
+                    var origLaneIdxUp = GetKeyboardMoveOriginalLaneIndex();
+                    _keyboardMovePhantomLaneOffset = Math.Max(
+                        -origLaneIdxUp,
+                        _keyboardMovePhantomLaneOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         var typed = TypedFor(ev);
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Chip, typed, ev.Id)) return;
 
@@ -926,6 +1029,239 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         return false;
     }
 
+    private protected override async Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        _keyboardMoveMode = true;
+        _keyboardMoveEventId = focusedEventId;
+        _keyboardMovePhantomTimeOffset = 0;
+        _keyboardMovePhantomLaneOffset = 0;
+        _keyboardMoveOriginalStart = focusedEvent.Start;
+        _keyboardMoveOriginalEnd = focusedEvent.End;
+        _keyboardMoveOriginalLaneId = LaneKey is not null ? LaneKey(focusedEvent) : FindRowIndexFor(focusedEvent) >= 0 && FindRowIndexFor(focusedEvent) < _rows.Length ? _rows[FindRowIndexFor(focusedEvent)].LaneId : null;
+
+        var request = new KeyboardMoveRequest
+        {
+            Event = focusedEvent,
+            CurrentSlotIndex = GetKeyboardMoveOriginalTimeIndex(),
+        };
+        await OnKeyboardMoveRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, focusedEvent.End, _keyboardMoveOriginalLaneId);
+        StateHasChanged();
+    }
+
+    private protected override async Task DispatchKeyboardResizeAsync(TEvent? focusedEvent, string? focusedEventId, KeyboardResizeDirection direction)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        var currentLaneId = _keyboardMoveOriginalLaneId
+            ?? (LaneKey is not null ? LaneKey(focusedEvent) : null);
+        var rowIndex = FindRowIndexFor(focusedEvent);
+        if (rowIndex >= 0 && rowIndex < _rows.Length)
+        {
+            currentLaneId ??= _rows[rowIndex].LaneId;
+        }
+
+        DateTimeOffset newEnd;
+        if (TimeScale == TimelineScale.Day)
+        {
+            var slotMinutes = _resolvedSlotMinutes;
+            var deltaMinutes = direction == KeyboardResizeDirection.Extend ? slotMinutes : -slotMinutes;
+            newEnd = focusedEvent.End.AddMinutes(deltaMinutes);
+
+            if (newEnd <= focusedEvent.Start)
+            {
+                newEnd = focusedEvent.Start.AddMinutes(slotMinutes);
+            }
+        }
+        else
+        {
+            // Week/Month: resize by one day cell
+            var deltaDays = direction == KeyboardResizeDirection.Extend ? 1 : -1;
+            newEnd = focusedEvent.End.AddDays(deltaDays);
+            var minEnd = focusedEvent.Start.AddDays(1);
+            if (newEnd < minEnd) newEnd = minEnd;
+        }
+
+        var request = new KeyboardResizeRequest
+        {
+            Event = focusedEvent,
+            Direction = direction,
+        };
+        await OnKeyboardResizeRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, newEnd, currentLaneId);
+        ComputeLayout();
+        StateHasChanged();
+
+        var context = new EventResizeContext
+        {
+            Event = focusedEvent,
+            NewEnd = newEnd,
+        };
+        await OnEventResized.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(focusedEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+    }
+
+    private int GetKeyboardMoveOriginalTimeIndex()
+    {
+        if (TimeScale == TimelineScale.Day)
+        {
+            var minutes = (_keyboardMoveOriginalStart.TimeOfDay.TotalMinutes - _resolvedStartHour * 60);
+            return Math.Clamp((int)(minutes / _resolvedSlotMinutes), 0, Math.Max(0, SlotCount - 1));
+        }
+        else
+        {
+            for (var i = 0; i < _dayBounds.Count; i++)
+            {
+                if (_keyboardMoveOriginalStart >= _dayBounds[i].Start && _keyboardMoveOriginalStart < _dayBounds[i].End)
+                    return i;
+            }
+            return 0;
+        }
+    }
+
+    private int GetKeyboardMoveOriginalLaneIndex()
+    {
+        var laneId = _keyboardMoveOriginalLaneId;
+        for (var i = 0; i < _rows.Length; i++)
+        {
+            if (_rows[i].LaneId == laneId)
+                return i;
+        }
+        return 0;
+    }
+
+    private async Task UpdateKeyboardMovePhantomPositionAsync()
+    {
+        if (_keyboardMoveEventId is null || _rows.Length == 0) return;
+
+        var origTimeIdx = GetKeyboardMoveOriginalTimeIndex();
+        var origLaneIdx = GetKeyboardMoveOriginalLaneIndex();
+
+        var timeAxisMax = TimeScale == TimelineScale.Day
+            ? Math.Max(0, SlotCount - 1)
+            : Math.Max(0, _dayBounds.Count - 1);
+
+        var newTimeIdx = Math.Clamp(origTimeIdx + _keyboardMovePhantomTimeOffset, 0, timeAxisMax);
+        var newLaneIdx = Math.Clamp(origLaneIdx + _keyboardMovePhantomLaneOffset, 0, _rows.Length - 1);
+        var newLaneId = _rows[newLaneIdx].LaneId;
+
+        DateTimeOffset newStart;
+        if (TimeScale == TimelineScale.Day)
+        {
+            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
+            newStart = visibleStart.AddMinutes(newTimeIdx * _resolvedSlotMinutes);
+        }
+        else
+        {
+            var targetDayStart = _dayBounds[newTimeIdx].Start;
+            // Preserve the time-of-day offset from the original event
+            var origDayStart = _dayBounds[origTimeIdx].Start;
+            var timeOfDay = _keyboardMoveOriginalStart - origDayStart;
+            newStart = targetDayStart + timeOfDay;
+        }
+
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEnd = newStart + duration;
+
+        _optimisticPin[_keyboardMoveEventId] = (newStart, newEnd, newLaneId);
+        ComputeLayout();
+        StateHasChanged();
+    }
+
+    private async Task CommitKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null || _rows.Length == 0) return;
+
+        // Resolve the event by walking lane rows (mirrors TypedFor but without
+        // needing to construct a placeholder ICalendarEvent).
+        TEvent? ev = default;
+        for (var i = 0; i < _rows.Length; i++)
+        {
+            ev = _rows[i].Set.FindById(_keyboardMoveEventId);
+            if (ev is not null) break;
+        }
+        if (ev is null)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
+        var origTimeIdx = GetKeyboardMoveOriginalTimeIndex();
+        var origLaneIdx = GetKeyboardMoveOriginalLaneIndex();
+
+        var timeAxisMax = TimeScale == TimelineScale.Day
+            ? Math.Max(0, SlotCount - 1)
+            : Math.Max(0, _dayBounds.Count - 1);
+
+        var newTimeIdx = Math.Clamp(origTimeIdx + _keyboardMovePhantomTimeOffset, 0, timeAxisMax);
+        var newLaneIdx = Math.Clamp(origLaneIdx + _keyboardMovePhantomLaneOffset, 0, _rows.Length - 1);
+        var newLaneId = _rows[newLaneIdx].LaneId;
+
+        DateTimeOffset newStart;
+        if (TimeScale == TimelineScale.Day)
+        {
+            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
+            newStart = visibleStart.AddMinutes(newTimeIdx * _resolvedSlotMinutes);
+        }
+        else
+        {
+            var targetDayStart = _dayBounds[newTimeIdx].Start;
+            var origDayStart = _dayBounds[origTimeIdx].Start;
+            var timeOfDay = _keyboardMoveOriginalStart - origDayStart;
+            newStart = targetDayStart + timeOfDay;
+        }
+
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEnd = newStart + duration;
+
+        var context = new EventMoveContext
+        {
+            Event = ev,
+            NewStart = newStart,
+            NewEnd = newEnd,
+            NewLaneId = newLaneId,
+        };
+        await OnEventMoved.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(_keyboardMoveEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomTimeOffset = 0;
+        _keyboardMovePhantomLaneOffset = 0;
+        _keyboardMoveOriginalLaneId = null;
+    }
+
+    private async Task CancelKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        _optimisticPin.Remove(_keyboardMoveEventId);
+        ComputeLayout();
+        StateHasChanged();
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomTimeOffset = 0;
+        _keyboardMovePhantomLaneOffset = 0;
+        _keyboardMoveOriginalLaneId = null;
+    }
+
     /// <summary>
     /// Shared Delete behavior — mirrors the per-view helper on Day / Week / Month.
     /// Short-circuits on <see cref="SchedulerComponentBase{TEvent}.AllowDelete"/> +
@@ -958,6 +1294,12 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// </summary>
     private async Task HandleEscapeAsync()
     {
+        if (_keyboardMoveMode)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
         if (IsDragActive)
         {
             return;
@@ -1535,6 +1877,41 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// </summary>
     internal Task InvokeResizeDropForTestAsync(TEvent ev, DropPayload payload) =>
         HandleResizeDropAsync(ev, payload);
+
+    /// <summary>
+    /// Test-only entry point for keyboard move dispatch (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveForTestAsync(TEvent ev) =>
+        DispatchKeyboardMoveAsync(ev, ev.Id);
+
+    /// <summary>
+    /// Test-only entry point for keyboard resize dispatch (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardResizeForTestAsync(TEvent ev, KeyboardResizeDirection direction) =>
+        DispatchKeyboardResizeAsync(ev, ev.Id, direction);
+
+    /// <summary>
+    /// Test-only entry point for committing keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCommitForTestAsync() =>
+        CommitKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only entry point for cancelling keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCancelForTestAsync() =>
+        CancelKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only flag: whether keyboard move mode is active (issue #20).
+    /// </summary>
+    internal bool IsKeyboardMoveModeForTest => _keyboardMoveMode;
+
+    /// <summary>
+    /// Test-only access to phantom offsets (issue #20).
+    /// </summary>
+    internal (int timeOffset, int laneOffset) KeyboardMovePhantomOffsetsForTest =>
+        (_keyboardMovePhantomTimeOffset, _keyboardMovePhantomLaneOffset);
 
     // ----- Drag-to-create (Phase 2 Task 8 — FR-24) -------------------------------------
 

@@ -165,6 +165,14 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     private int _focusedColumnIndex;
     private int _focusedRowIndex;
 
+    // Keyboard move mode state (issue #20 — SC 2.5.7)
+    private bool _keyboardMoveMode;
+    private string? _keyboardMoveEventId;
+    private int _keyboardMovePhantomSlotOffset;
+    private int _keyboardMovePhantomDayOffset;
+    private DateTimeOffset _keyboardMoveOriginalStart;
+    private DateTimeOffset _keyboardMoveOriginalEnd;
+
     // For FR-23 — fire OnRangeChanged only when the visible range actually changes.
     private DateTimeOffset? _lastRangeStart;
     private DateTimeOffset? _lastRangeEnd;
@@ -791,6 +799,48 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // the rest of the resolved (DefaultMap + DisabledShortcuts + ShortcutMap) map.
         // IsDragActive precedence unchanged.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null && _weekDays.Count > 0)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomSlotOffset = Math.Max(
+                        -_focusedRowIndex,
+                        _keyboardMovePhantomSlotOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origSlotIdx = GetKeyboardMoveOriginalSlotIndex();
+                    _keyboardMovePhantomSlotOffset = Math.Min(
+                        SlotCount - 1 - origSlotIdx,
+                        _keyboardMovePhantomSlotOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowRight":
+                    var origDayIdx = GetKeyboardMoveOriginalDayIndex();
+                    _keyboardMovePhantomDayOffset = Math.Min(
+                        _weekDays.Count - 1 - origDayIdx,
+                        _keyboardMovePhantomDayOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    var leftDayIdx = GetKeyboardMoveOriginalDayIndex();
+                    _keyboardMovePhantomDayOffset = Math.Max(
+                        -leftDayIdx,
+                        _keyboardMovePhantomDayOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Grid)) return;
 
         switch (e.Key)
@@ -840,6 +890,48 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // Phase 2 Task 14 — route through the shortcut-map dispatch. See Day view's
         // matching branch for the longer rationale.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null && _weekDays.Count > 0)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomSlotOffset = Math.Max(
+                        -_focusedRowIndex,
+                        _keyboardMovePhantomSlotOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origSlotIdx = GetKeyboardMoveOriginalSlotIndex();
+                    _keyboardMovePhantomSlotOffset = Math.Min(
+                        SlotCount - 1 - origSlotIdx,
+                        _keyboardMovePhantomSlotOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowRight":
+                    var origDayIdx = GetKeyboardMoveOriginalDayIndex();
+                    _keyboardMovePhantomDayOffset = Math.Min(
+                        _weekDays.Count - 1 - origDayIdx,
+                        _keyboardMovePhantomDayOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    var leftDayIdx = GetKeyboardMoveOriginalDayIndex();
+                    _keyboardMovePhantomDayOffset = Math.Max(
+                        -leftDayIdx,
+                        _keyboardMovePhantomDayOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         var typed = _visibleEvents.FindById(ev.Id);
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Chip, typed, ev.Id)) return;
 
@@ -882,6 +974,198 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         return false;
     }
 
+    private protected override async Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        _keyboardMoveMode = true;
+        _keyboardMoveEventId = focusedEventId;
+        _keyboardMovePhantomSlotOffset = 0;
+        _keyboardMovePhantomDayOffset = 0;
+        _keyboardMoveOriginalStart = focusedEvent.Start;
+        _keyboardMoveOriginalEnd = focusedEvent.End;
+
+        // The focused chip's Start is the reference for time-of-day; its day column
+        // determines the origin column for cross-day movement. Use the chunk's Start
+        // (which is clipped to the visible day) as the reference, per the handover note.
+        var chunk = _visibleEvents.FindById(focusedEventId) as ICalendarEvent;
+        var chipSlotIndex = chunk is not null
+            ? Math.Clamp(
+                (int)((chunk.Start.TimeOfDay.TotalMinutes - _resolvedStartHour * 60) / _resolvedSlotMinutes),
+                0, SlotCount - 1)
+            : 0;
+
+        var request = new KeyboardMoveRequest
+        {
+            Event = (ICalendarEvent)focusedEvent,
+            CurrentSlotIndex = chipSlotIndex,
+        };
+        await OnKeyboardMoveRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, focusedEvent.End);
+        StateHasChanged();
+    }
+
+    private protected override async Task DispatchKeyboardResizeAsync(TEvent? focusedEvent, string? focusedEventId, KeyboardResizeDirection direction)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        var slotMinutes = _resolvedSlotMinutes;
+        var deltaMinutes = direction == KeyboardResizeDirection.Extend ? slotMinutes : -slotMinutes;
+        var newEnd = focusedEvent.End.AddMinutes(deltaMinutes);
+
+        if (newEnd <= focusedEvent.Start)
+        {
+            newEnd = focusedEvent.Start.AddMinutes(slotMinutes);
+        }
+
+        var request = new KeyboardResizeRequest
+        {
+            Event = focusedEvent,
+            Direction = direction,
+        };
+        await OnKeyboardResizeRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+
+        var context = new EventResizeContext
+        {
+            Event = focusedEvent,
+            NewEnd = newEnd,
+        };
+        await OnEventResized.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(focusedEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+    }
+
+    private int GetKeyboardMoveOriginalSlotIndex()
+    {
+        var startHour = _resolvedStartHour;
+        var slotMinutes = _resolvedSlotMinutes;
+        var minutes = _keyboardMoveOriginalStart.TimeOfDay.TotalMinutes - startHour * 60;
+        return Math.Clamp((int)(minutes / slotMinutes), 0, SlotCount - 1);
+    }
+
+    private int GetKeyboardMoveOriginalDayIndex()
+    {
+        var date = _keyboardMoveOriginalStart.Date;
+        for (var i = 0; i < _weekDays.Count; i++)
+        {
+            if (_weekDays[i].Start.Date == date)
+                return i;
+        }
+        // Multi-day event whose Start falls on a hidden/out-of-range day for the
+        // chunk the user focused — clamp to the closest visible day.
+        if (_weekDays.Count > 0)
+        {
+            var startDate = _weekDays[0].Start.Date;
+            var endDate = _weekDays[^1].Start.Date;
+            if (date < startDate) return 0;
+            if (date > endDate) return _weekDays.Count - 1;
+        }
+        return 0;
+    }
+
+    private async Task UpdateKeyboardMovePhantomPositionAsync()
+    {
+        if (_keyboardMoveEventId is null || _weekDays.Count == 0) return;
+
+        var slotMinutes = _resolvedSlotMinutes;
+        var origSlotIdx = GetKeyboardMoveOriginalSlotIndex();
+        var origDayIdx = GetKeyboardMoveOriginalDayIndex();
+        var newDayIdx = Math.Clamp(origDayIdx + _keyboardMovePhantomDayOffset, 0, _weekDays.Count - 1);
+        var newSlotIdx = Math.Clamp(origSlotIdx + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
+
+        var targetDayStart = _weekDays[newDayIdx].Start;
+        var visibleStart = targetDayStart.AddHours(_resolvedStartHour);
+        var newStart = visibleStart.AddMinutes(newSlotIdx * slotMinutes);
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEnd = newStart + duration;
+
+        _optimisticPin[_keyboardMoveEventId] = (newStart, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+    }
+
+    private async Task CommitKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null || _weekDays.Count == 0) return;
+
+        var slotMinutes = _resolvedSlotMinutes;
+        var origSlotIdx = GetKeyboardMoveOriginalSlotIndex();
+        var origDayIdx = GetKeyboardMoveOriginalDayIndex();
+        var newDayIdx = Math.Clamp(origDayIdx + _keyboardMovePhantomDayOffset, 0, _weekDays.Count - 1);
+        var newSlotIdx = Math.Clamp(origSlotIdx + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
+
+        var targetDayStart = _weekDays[newDayIdx].Start;
+        var visibleStart = targetDayStart.AddHours(_resolvedStartHour);
+        var newStartLocal = visibleStart.AddMinutes(newSlotIdx * slotMinutes);
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEndLocal = newStartLocal + duration;
+
+        // Apply date shift to the original event's Start date (honors the event's
+        // actual date, not the chunk's clipped date). The day offset is measured
+        // in visible-day steps (not calendar days), so compute the calendar-day
+        // delta between the origin and target _weekDays entries.
+        var originDayDate = _weekDays[origDayIdx].Start.Date;
+        var targetDayDate = _weekDays[newDayIdx].Start.Date;
+        var daysMoved = (targetDayDate - originDayDate).Days;
+
+        var newStartDate = _keyboardMoveOriginalStart.Date.AddDays(daysMoved);
+        var newDayBase = new DateTimeOffset(newStartDate, TimeZone.GetUtcOffset(newStartDate));
+        var snappedTimeOfDay = newStartLocal - targetDayStart;
+        var newStart = newDayBase + snappedTimeOfDay;
+        var newEnd = newStart + duration;
+
+        var ev = _visibleEvents.FindById(_keyboardMoveEventId);
+        if (ev is null)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
+        var context = new EventMoveContext
+        {
+            Event = ev,
+            NewStart = newStart,
+            NewEnd = newEnd,
+        };
+        await OnEventMoved.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(_keyboardMoveEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomSlotOffset = 0;
+        _keyboardMovePhantomDayOffset = 0;
+    }
+
+    private async Task CancelKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        _optimisticPin.Remove(_keyboardMoveEventId);
+        ComputeLayout();
+        StateHasChanged();
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomSlotOffset = 0;
+        _keyboardMovePhantomDayOffset = 0;
+    }
+
     /// <summary>
     /// Shared Delete behavior — mirrors the per-view helper on Day: short-circuits
     /// on <see cref="SchedulerComponentBase{TEvent}.AllowDelete"/> + <c>IsDragActive</c>,
@@ -913,6 +1197,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// </summary>
     private async Task HandleEscapeAsync()
     {
+        if (_keyboardMoveMode)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
         if (IsDragActive)
         {
             return;
@@ -1553,6 +1843,41 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// </summary>
     internal Task InvokeResizeDropForTestAsync(TEvent ev, int originColIndex, DropPayload payload) =>
         HandleResizeDropAsync(ev, originColIndex, payload);
+
+    /// <summary>
+    /// Test-only entry point for keyboard move dispatch (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveForTestAsync(TEvent ev) =>
+        DispatchKeyboardMoveAsync(ev, ev.Id);
+
+    /// <summary>
+    /// Test-only entry point for keyboard resize dispatch (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardResizeForTestAsync(TEvent ev, KeyboardResizeDirection direction) =>
+        DispatchKeyboardResizeAsync(ev, ev.Id, direction);
+
+    /// <summary>
+    /// Test-only entry point for committing keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCommitForTestAsync() =>
+        CommitKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only entry point for cancelling keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCancelForTestAsync() =>
+        CancelKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only flag: whether keyboard move mode is active (issue #20).
+    /// </summary>
+    internal bool IsKeyboardMoveModeForTest => _keyboardMoveMode;
+
+    /// <summary>
+    /// Test-only access to phantom offsets (issue #20).
+    /// </summary>
+    internal (int slotOffset, int dayOffset) KeyboardMovePhantomOffsetsForTest =>
+        (_keyboardMovePhantomSlotOffset, _keyboardMovePhantomDayOffset);
 
     // ----- Drag-to-create (Phase 2 Task 8 — FR-24) -------------------------------------
 

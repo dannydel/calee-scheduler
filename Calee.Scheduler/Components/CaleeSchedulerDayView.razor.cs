@@ -119,6 +119,13 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     // a single tab stop from the consumer's perspective (NFR-06).
     private int _focusedGridSlotIndex;
 
+    // Keyboard move mode state (issue #20 — SC 2.5.7)
+    private bool _keyboardMoveMode;
+    private string? _keyboardMoveEventId;
+    private int _keyboardMovePhantomSlotOffset;
+    private DateTimeOffset _keyboardMoveOriginalStart;
+    private DateTimeOffset _keyboardMoveOriginalEnd;
+
     // Day boundary in TimeZone — used by the layout engine and by slot snapping.
     private DateTimeOffset _dayStartLocal;
     private DateTimeOffset _dayEndLocal;
@@ -725,6 +732,34 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         // to the per-key switch). IsDragActive precedence unchanged — the JS pointer
         // module owns cancel keystrokes mid-drag.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomSlotOffset = Math.Max(
+                        -_focusedGridSlotIndex,
+                        _keyboardMovePhantomSlotOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origIdx = GetKeyboardMoveOriginalSlotIndex();
+                    _keyboardMovePhantomSlotOffset = Math.Min(
+                        SlotCount - 1 - origIdx,
+                        _keyboardMovePhantomSlotOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Grid)) return;
 
         switch (e.Key)
@@ -785,6 +820,34 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         // commands the base calls back into DispatchViewCommandAsync (below) with
         // the focused event passed through here. IsDragActive precedence unchanged.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (issue #20 — SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomSlotOffset = Math.Max(
+                        -_focusedGridSlotIndex,
+                        _keyboardMovePhantomSlotOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var origIdx = GetKeyboardMoveOriginalSlotIndex();
+                    _keyboardMovePhantomSlotOffset = Math.Min(
+                        SlotCount - 1 - origIdx,
+                        _keyboardMovePhantomSlotOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         var typed = _visibleEvents.FindById(ev.Id);
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Chip, typed, ev.Id)) return;
 
@@ -842,6 +905,146 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         return false;
     }
 
+    private protected override async Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        _keyboardMoveMode = true;
+        _keyboardMoveEventId = focusedEventId;
+        _keyboardMovePhantomSlotOffset = 0;
+        _keyboardMoveOriginalStart = focusedEvent.Start;
+        _keyboardMoveOriginalEnd = focusedEvent.End;
+
+        var visibleStart = _dayStartLocal.AddHours(_resolvedStartHour);
+        var slotMinutes = _resolvedSlotMinutes;
+        var currentSlotIndex = (int)((focusedEvent.Start - visibleStart).TotalMinutes / slotMinutes);
+
+        var request = new KeyboardMoveRequest
+        {
+            Event = focusedEvent,
+            CurrentSlotIndex = currentSlotIndex,
+        };
+        await OnKeyboardMoveRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, focusedEvent.End);
+        StateHasChanged();
+    }
+
+    private protected override async Task DispatchKeyboardResizeAsync(TEvent? focusedEvent, string? focusedEventId, KeyboardResizeDirection direction)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        var slotMinutes = _resolvedSlotMinutes;
+        var deltaMinutes = direction == KeyboardResizeDirection.Extend ? slotMinutes : -slotMinutes;
+        var newEnd = focusedEvent.End.AddMinutes(deltaMinutes);
+
+        if (newEnd <= focusedEvent.Start)
+        {
+            newEnd = focusedEvent.Start.AddMinutes(slotMinutes);
+        }
+
+        var request = new KeyboardResizeRequest
+        {
+            Event = focusedEvent,
+            Direction = direction,
+        };
+        await OnKeyboardResizeRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+
+        var context = new EventResizeContext
+        {
+            Event = focusedEvent,
+            NewEnd = newEnd,
+        };
+        await OnEventResized.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(focusedEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateKeyboardMovePhantomPositionAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        var visibleStart = _dayStartLocal.AddHours(_resolvedStartHour);
+        var slotMinutes = _resolvedSlotMinutes;
+        var originalSlotIndex = (int)((_keyboardMoveOriginalStart - visibleStart).TotalMinutes / slotMinutes);
+        var newSlotIndex = Math.Clamp(originalSlotIndex + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
+        var newStart = visibleStart.AddMinutes(newSlotIndex * slotMinutes);
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEnd = newStart + duration;
+
+        _optimisticPin[_keyboardMoveEventId] = (newStart, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+    }
+
+    private async Task CommitKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        var visibleStart = _dayStartLocal.AddHours(_resolvedStartHour);
+        var slotMinutes = _resolvedSlotMinutes;
+        var originalSlotIndex = (int)((_keyboardMoveOriginalStart - visibleStart).TotalMinutes / slotMinutes);
+        var newSlotIndex = Math.Clamp(originalSlotIndex + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
+        var newStart = visibleStart.AddMinutes(newSlotIndex * slotMinutes);
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+        var newEnd = newStart + duration;
+
+        var ev = _visibleEvents.FindById(_keyboardMoveEventId);
+        if (ev is null)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
+        var context = new EventMoveContext
+        {
+            Event = ev,
+            NewStart = newStart,
+            NewEnd = newEnd,
+        };
+        await OnEventMoved.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(_keyboardMoveEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomSlotOffset = 0;
+    }
+
+    private async Task CancelKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        _optimisticPin.Remove(_keyboardMoveEventId);
+        ComputeLayout();
+        StateHasChanged();
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomSlotOffset = 0;
+    }
+
+    private int GetKeyboardMoveOriginalSlotIndex()
+    {
+        var visibleStart = _dayStartLocal.AddHours(_resolvedStartHour);
+        var slotMinutes = _resolvedSlotMinutes;
+        return (int)((_keyboardMoveOriginalStart - visibleStart).TotalMinutes / slotMinutes);
+    }
+
     /// <summary>
     /// Shared Delete behavior — defers to the JS module during a drag (ADR-0006
     /// precedence: the drag layer owns cancel keys), then resolves the focused
@@ -880,6 +1083,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     /// </summary>
     private async Task HandleEscapeAsync()
     {
+        if (_keyboardMoveMode)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
         if (IsDragActive)
         {
             return;
@@ -1219,6 +1428,41 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     /// </summary>
     internal Task InvokeResizeDropForTestAsync(TEvent ev, DropPayload payload) =>
         HandleResizeDropAsync(ev, payload);
+
+    /// <summary>
+    /// Test-only entry point for keyboard move dispatch (issue #20). Lets the test
+    /// project exercise the keyboard move pipeline without driving real keystrokes.
+    /// </summary>
+    internal Task InvokeKeyboardMoveForTestAsync(TEvent ev) =>
+        DispatchKeyboardMoveAsync(ev, ev.Id);
+
+    /// <summary>
+    /// Test-only entry point for keyboard resize dispatch (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardResizeForTestAsync(TEvent ev, KeyboardResizeDirection direction) =>
+        DispatchKeyboardResizeAsync(ev, ev.Id, direction);
+
+    /// <summary>
+    /// Test-only entry point for committing keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCommitForTestAsync() =>
+        CommitKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only entry point for cancelling keyboard move (issue #20).
+    /// </summary>
+    internal Task InvokeKeyboardMoveCancelForTestAsync() =>
+        CancelKeyboardMoveAsync();
+
+    /// <summary>
+    /// Test-only flag: whether keyboard move mode is currently active (issue #20).
+    /// </summary>
+    internal bool IsKeyboardMoveModeForTest => _keyboardMoveMode;
+
+    /// <summary>
+    /// Test-only access to the phantom slot offset (issue #20).
+    /// </summary>
+    internal int KeyboardMovePhantomSlotOffsetForTest => _keyboardMovePhantomSlotOffset;
 
     // ----- Drag-to-create (Phase 2 Task 8 — FR-24) -------------------------------------
 

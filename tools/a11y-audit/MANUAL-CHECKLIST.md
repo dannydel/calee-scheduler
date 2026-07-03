@@ -136,23 +136,23 @@ alternative. Verified per view, per interaction:
 | Day / Week / WorkWeek / Month / Fleet (Timeline) | `n` → `OnCreateAtFocusRequested` | ✅ **Works** | Tab into the grid (any cell) → press **n** → the editor dialog opens pre-filled with a default slot (the demo pages default to "now, rounded to the hour/day" — see each page's `HandleCreateAtFocus`) → Tab to Title, type → Tab to Save → **Enter**. No drag gesture required at any point. |
 | Agenda | N/A — Agenda has no drag-to-create (it's a flat list, no grid to draw on) | N/A | — |
 
-| View | Drag-to-move / drag-to-resize alternative | Verified? | Notes |
+| View | Drag-to-move / drag-to-resize alternative | Verified? | Keystroke sequence |
 | --- | --- | --- | --- |
-| Day / Week / WorkWeek / Fleet (Timeline) | `m` → `OnMoveModeRequested`; `Shift+ArrowUp`/`Shift+ArrowDown` → `OnResizeKeystrokeRequested` | ❌ **Not a functional alternative as shipped** | Both are documented **placeholders** (`SchedulerComponentBase` XML docs, `OnMoveModeRequested`/`OnResizeKeystrokeRequested`): the library fires the trigger callback but does not itself move or resize the event, and the callback is parameterless (no focused-event payload), so a consumer can't reliably build the behavior on top without their own focus-tracking wrapper. The demo app does **not** wire either callback (confirmed: zero references in `Calee.Scheduler.Demo/`). Pressing `m` or `Shift+ArrowUp/Down` today does nothing observable. |
-| Month | No move/resize keystrokes at all (Month doesn't wire chip-scope `m`/`Shift+Arrow` — bars/chips there aren't resizable) | ❌ N/A | Month events are all-day-shaped; drag-to-move exists (chip drag), no keyboard equivalent ships. |
-| Agenda | N/A — Agenda has no drag-to-move/resize (flat list, no positional dragging) | N/A | — |
+| Day / Week / WorkWeek / Fleet (Timeline) | Keyboard move: `m` → arrow keys → Enter/Escape; Keyboard resize: `Shift+ArrowUp`/`Shift+ArrowDown` | ✅ **Works** | **Move:** Tab to an event chip → press **m** to enter move mode → press **ArrowUp**/**ArrowDown** (Day) or **ArrowUp**/**ArrowDown**/**ArrowLeft**/**ArrowRight** (Week/Timeline) to adjust position → press **Enter** to commit or **Escape** to cancel. The library fires `OnEventMoved` with `EventMoveContext` on commit; the consumer can cancel via the `Cancel` flag. **Resize:** Tab to an event chip → press **Shift+ArrowUp** to extend the event's End by one slot or **Shift+ArrowDown** to shrink it. The library fires `OnEventResized` with `EventResizeContext`; the consumer can cancel via the `Cancel` flag. |
+| Month | No move/resize keystrokes (Month events are all-day-shaped) | ❌ N/A | — |
+| Agenda | N/A (Agenda has no drag-to-move/resize) | N/A | — |
 
-**Design-decision flag (see final report):** drag-to-move and drag-to-resize do
-**not** have a working keyboard (or other single-pointer) alternative in the
-library as shipped, for any view. This is a genuine SC 2.5.7 gap, not a
-mechanical CSS/markup fix — closing it needs either (a) widening
-`OnMoveModeRequested`/`OnResizeKeystrokeRequested` to carry the focused event
-(an API shape change, out of this issue's additive-only scope) or (b) a
-documented consumer-side wrapper pattern once the library exposes enough to
-build one. Tracked as **issue #20** (open); do not mark this row passing.
-#20 was blocked on real roving-tabindex focus transfer (issue #19, now fixed —
-a keyboard "move mode" needs to know which event is actually focused), so #20
-is unblocked but not itself resolved by #19.
+**Design-decision flag (see final report):** drag-to-move and drag-to-resize now
+have a working keyboard alternative. The library implements phantom movement logic
+internally: `m` enters move mode, arrow keys adjust position (including cross-day
+in Week view and cross-lane in Timeline view), Enter commits via `OnEventMoved`
+with `EventMoveContext`, and Escape cancels. `Shift+ArrowUp`/`Shift+ArrowDown`
+resizes the event's End by one slot and fires `OnEventResized` immediately.
+Both paths respect the consumer's `Cancel` flag. Two new additive callbacks —
+`OnKeyboardMoveRequested` (payload `KeyboardMoveRequest`) and
+`OnKeyboardResizeRequested` (payload `KeyboardResizeRequest`) — let consumers
+show visual cues or log actions. (Issue #20 resolved; previously blocked on
+issue #19's roving-tabindex focus transfer fix.)
 
 ### 8.2 SC 2.4.11 — Focus Not Obscured (Minimum)
 

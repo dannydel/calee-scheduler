@@ -25,8 +25,10 @@
                                AllowDelete="true"
                                AllowUndoRedo="true"
                                AllowCommandPalette="true"
-                               OnEventMoved="HandleMoved"
-                               OnEventResized="HandleResized"
+                                OnEventMoved="HandleMoved"
+                                OnEventResized="HandleResized"
+                                OnKeyboardMoveRequested="HandleKeyboardMove"
+                                OnKeyboardResizeRequested="HandleKeyboardResize"
                                OnEventCreated="HandleCreated"
                                OnEventClicked="HandleEventClicked"
                                OnEventDeleted="HandleDeleted"
@@ -140,6 +142,14 @@
                 if (i >= 0) _events[i] = _events[i] with { End = before.End };
             });
         StateHasChanged();
+    }
+
+    private void HandleKeyboardMove(KeyboardMoveRequest request)
+    {
+    }
+
+    private void HandleKeyboardResize(KeyboardResizeRequest request)
+    {
     }
 
     // Event-editor dialog state. HandleCreated / HandleEventClicked populate

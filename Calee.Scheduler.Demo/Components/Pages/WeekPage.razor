@@ -30,6 +30,8 @@
                                 OnDayHeaderClicked="HandleDayHeaderClicked"
                                 OnEventMoved="HandleMoved"
                                 OnEventResized="HandleResized"
+                                OnKeyboardMoveRequested="HandleKeyboardMove"
+                                OnKeyboardResizeRequested="HandleKeyboardResize"
                                 OnEventCreated="HandleCreated"
                                 OnEventClicked="HandleEventClicked"
                                 OnEventDeleted="HandleDeleted"
@@ -182,6 +184,14 @@
                 if (i >= 0) _events[i] = _events[i] with { End = before.End };
             });
         StateHasChanged();
+    }
+
+    private void HandleKeyboardMove(KeyboardMoveRequest request)
+    {
+    }
+
+    private void HandleKeyboardResize(KeyboardResizeRequest request)
+    {
     }
 
     private bool _dialogVisible;

@@ -182,7 +182,70 @@ async function auditOnce() {
     }
 }
 
+// Keyboard interaction smoke tests for SC 2.5.7 (issue #20). Exercises the
+// keyboard move/resize alternatives against the live demo Day page.
+async function auditKeyboardInteractions() {
+    await probeServer();
+
+    const browser = await chromium.launch();
+    const context = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    let failures = [];
+
+    try {
+        // -- Day view: keyboard resize (Shift+ArrowUp) --
+        process.stdout.write('keyboard resize (Day) ... ');
+        await page.goto(BASE_URL + '/day', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[role="button"][data-calee-region="event"]', { timeout: 10000 });
+
+        // Tab to the first event chip
+        await page.keyboard.press('Tab');
+        // Shift+ArrowUp to extend the event End by one slot
+        await page.keyboard.press('Shift+ArrowUp');
+        await page.waitForTimeout(300);
+
+        // Verify no crash — the page should still render events
+        const eventsAfterResize = await page.$$eval('[role="button"][data-calee-region="event"]', els => els.length);
+        if (eventsAfterResize === 0) {
+            failures.push('Day keyboard resize: no event chips visible after resize');
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Day view: keyboard move (m → ArrowDown → Enter) --
+        process.stdout.write('keyboard move (Day) ... ');
+        await page.goto(BASE_URL + '/day', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[role="button"][data-calee-region="event"]', { timeout: 10000 });
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('m');       // enter move mode
+        await page.keyboard.press('ArrowDown'); // move down one slot
+        await page.keyboard.press('Enter');     // commit
+        await page.waitForTimeout(300);
+
+        const eventsAfterMove = await page.$$eval('[role="button"][data-calee-region="event"]', els => els.length);
+        if (eventsAfterMove === 0) {
+            failures.push('Day keyboard move: no event chips visible after move');
+            console.log('FAIL');
+        } else if (failures.length === 0) {
+            console.log('PASS');
+        }
+    } catch (err) {
+        failures.push(err.message);
+        console.log('FAIL (' + err.message + ')');
+    } finally {
+        await browser.close();
+    }
+
+    if (failures.length > 0) {
+        console.log('\nkeyboard interaction failures:');
+        for (const f of failures) console.log('  - ' + f);
+        process.exit(1);
+    }
+    console.log('\nall keyboard interaction tests passed');
+}
+
 auditOnce().catch(err => {
     console.error('\n[FATAL]', err);
     process.exit(3);
-});
+}).then(() => auditKeyboardInteractions());

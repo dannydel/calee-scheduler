@@ -267,4 +267,298 @@ public class RovingTabindexTests
         await cut.InvokeAsync(() => grid.KeyDown("Escape"));
         // Reached here without exception — pass.
     }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // Issue #19 — arrow-key roving moves must invoke the JS focus-transfer helper.
+    //
+    // bUnit's headless DOM cannot exercise real browser focus (see this class's
+    // remarks and README §9.1a), so these tests assert the C# side actually calls
+    // calee-scheduler.js's `focusActiveGridCell` helper — with the view's grid/list
+    // container — on every roving-tabindex move, and does NOT call it for non-roving
+    // keys (Enter, Escape). Live-browser verification of the resulting
+    // `document.activeElement` move lives in tools/a11y-audit.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private const string ModulePath = "./_content/Calee.Scheduler/calee-scheduler.js";
+
+    [Fact]
+    public async Task DayView_ArrowDown_Invokes_FocusActiveGridCell_WithGridContainer()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18));
+
+        var grid = cut.Find("[role='grid']");
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+        var call1 = Assert.Single(module.Invocations["focusActiveGridCell"]);
+        var container1 = Assert.IsType<ElementReference>(call1.Arguments[0]);
+        Assert.False(string.IsNullOrEmpty(container1.Id));
+
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        // Every call targets the same grid container (identical ElementReference).
+        var container2 = Assert.IsType<ElementReference>(module.Invocations["focusActiveGridCell"][1].Arguments[0]);
+        Assert.Equal(container1.Id, container2.Id);
+    }
+
+    [Fact]
+    public async Task DayView_Enter_And_Escape_Do_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+        await cut.InvokeAsync(() => grid.KeyDown("Escape"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
+    public async Task WeekView_ArrowMoves_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        foreach (var call in module.Invocations["focusActiveGridCell"])
+        {
+            var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+            Assert.False(string.IsNullOrEmpty(container.Id));
+        }
+    }
+
+    [Fact]
+    public async Task WeekView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
+    public async Task MonthView_ArrowMoves_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        foreach (var call in module.Invocations["focusActiveGridCell"])
+        {
+            var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+            Assert.False(string.IsNullOrEmpty(container.Id));
+        }
+    }
+
+    [Fact]
+    public async Task MonthView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
+    public async Task YearView_ArrowMoves_Invoke_FocusActiveGridCell()
+    {
+        // Year view's keydown handler is bound per-cell (not on the role="grid"
+        // wrapper), so the key is driven on the currently-tabbable cell itself —
+        // matches how a real browser would dispatch it (focus is on that cell).
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerYearView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("ArrowRight"));
+        cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("ArrowDown"));
+
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        foreach (var call in module.Invocations["focusActiveGridCell"])
+        {
+            var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+            Assert.False(string.IsNullOrEmpty(container.Id));
+        }
+    }
+
+    [Fact]
+    public async Task YearView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerYearView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
+    public async Task TimelineView_ArrowMoves_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Lanes, new ILane[]
+            {
+                new Lane("r1", "Alpha"),
+                new Lane("r2", "Beta"),
+            })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => null))
+            .Add(c => c.ShowUnassignedRow, false));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowRight"));
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        foreach (var call in module.Invocations["focusActiveGridCell"])
+        {
+            var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+            Assert.False(string.IsNullOrEmpty(container.Id));
+        }
+    }
+
+    [Fact]
+    public async Task TimelineView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Lanes, new ILane[]
+            {
+                new Lane("r1", "Alpha"),
+            })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => null))
+            .Add(c => c.ShowUnassignedRow, false));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
+    public async Task AgendaView_ArrowDown_Invokes_FocusActiveGridCell_WithListContainer()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var events = new[]
+        {
+            new CalendarEvent("e1", "e1",
+                new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.FromHours(-4)),
+                new DateTimeOffset(2026, 5, 19, 10, 0, 0, TimeSpan.FromHours(-4))),
+            new CalendarEvent("e2", "e2",
+                new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(-4)),
+                new DateTimeOffset(2026, 5, 20, 10, 0, 0, TimeSpan.FromHours(-4))),
+        };
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events));
+
+        var rows = cut.FindAll("[data-calee-region='agenda-row']");
+        Assert.Equal(2, rows.Count);
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+
+        await cut.InvokeAsync(() => rows[0].KeyDown("ArrowDown"));
+
+        var call = Assert.Single(module.Invocations["focusActiveGridCell"]);
+        var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+        Assert.False(string.IsNullOrEmpty(container.Id));
+    }
+
+    [Fact]
+    public async Task AgendaView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var events = new[]
+        {
+            new CalendarEvent("e1", "e1",
+                new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.FromHours(-4)),
+                new DateTimeOffset(2026, 5, 19, 10, 0, 0, TimeSpan.FromHours(-4))),
+        };
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events));
+
+        var row = cut.Find("[data-calee-region='agenda-row']");
+        await cut.InvokeAsync(() => row.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
 }

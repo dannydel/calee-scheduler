@@ -181,6 +181,11 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     private bool _scrollPending;
     private IJSObjectReference? _jsModule;
 
+    // Issue #19 — set by HandleGridKeyDownAsync when an arrow key moves the roving
+    // tabindex; consumed in OnAfterRenderAsync (after the tabindex swap has actually
+    // rendered) to move real browser focus onto the newly-active slot/day cell.
+    private bool _focusMovePending;
+
     /// <summary>
     /// Per-event element refs the drag layer uses as the ghost source (Phase 2 Task 6 — FR-25).
     /// Keyed by event id so a chip whose row position changes between renders (a drag that
@@ -555,6 +560,16 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             catch (JSException) { /* Non-fatal; no JS environment. */ }
             catch (InvalidOperationException) { /* No JS runtime in tests. */ }
         }
+
+        // Issue #19 — move real browser focus onto the newly-active slot/day cell after
+        // an arrow-key roving move. Deferred to here so the query runs after the
+        // tabindex swap has rendered to the DOM. Applies regardless of TimeScale (unlike
+        // the scroll-into-view block above, which is Day-scale only).
+        if (_focusMovePending && _jsModule is not null)
+        {
+            _focusMovePending = false;
+            await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _timeAreaScrollContainer);
+        }
     }
 
     /// <inheritdoc/>
@@ -820,19 +835,23 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
                 if (_rows.Length > 0)
                 {
                     _focusedRowIndex = Math.Min(_rows.Length - 1, _focusedRowIndex + 1);
+                    _focusMovePending = true;
                     StateHasChanged();
                 }
                 break;
             case "ArrowUp":
                 _focusedRowIndex = Math.Max(0, _focusedRowIndex - 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowRight":
                 _focusedTimeIndex = Math.Min(timeAxisMax, _focusedTimeIndex + 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowLeft":
                 _focusedTimeIndex = Math.Max(0, _focusedTimeIndex - 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "Enter":

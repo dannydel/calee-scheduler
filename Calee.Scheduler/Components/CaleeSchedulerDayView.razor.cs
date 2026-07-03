@@ -137,6 +137,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     private bool _scrollPending;
     private IJSObjectReference? _jsModule;
 
+    // Issue #19 — set by HandleGridKeyDownAsync when an arrow key moves the roving
+    // tabindex; consumed in OnAfterRenderAsync (after the tabindex swap has actually
+    // rendered) to move real browser focus onto the newly-active slot cell. Mirrors
+    // _scrollPending's set-then-consume-post-render shape.
+    private bool _focusMovePending;
+
     // Handle for the JS module's day-header Space-key guard (issue #9) — non-null
     // exactly while OnDayHeaderClicked has a delegate wired and the guard is
     // registered. Synced every render in OnAfterRenderAsync so wiring/unwiring the
@@ -343,6 +349,17 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
             {
                 // Test environment may not expose a real JS runtime.
             }
+        }
+
+        // Issue #19 — move real browser focus onto the newly-active slot cell after an
+        // arrow-key roving move. Deferred to here (rather than done inline in
+        // HandleGridKeyDownAsync) so the query in focusActiveGridCell runs after the
+        // tabindex swap has rendered to the DOM — querying before that would find the
+        // stale cell.
+        if (_focusMovePending && _jsModule is not null)
+        {
+            _focusMovePending = false;
+            await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _hourGridRef);
         }
 
         // Issue #9 — keep the JS module's day-header Space-key guard in sync with
@@ -714,10 +731,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         {
             case "ArrowDown":
                 _focusedGridSlotIndex = Math.Min(SlotCount - 1, _focusedGridSlotIndex + 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowUp":
                 _focusedGridSlotIndex = Math.Max(0, _focusedGridSlotIndex - 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "Enter":

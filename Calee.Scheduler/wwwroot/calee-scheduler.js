@@ -94,6 +94,38 @@ export function blurActive() {
 }
 
 /**
+ * Move real browser focus to a grid/list's currently-tabbable roving-tabindex cell
+ * (issue #19). Arrow-key navigation swaps which cell carries `tabindex="0"`, but
+ * before this fix no view ever called `.focus()` on the newly-active cell —
+ * `document.activeElement` stayed on the previously-focused node even though the
+ * attribute state had moved on, so keyboard/screen-reader users saw no focus move.
+ *
+ * Queries `container` for the roving cell using the two shapes the library's views
+ * emit it in: `[role="gridcell"][tabindex="0"]` (Day/Week/Month/Year/Timeline slot
+ * and day cells) or `[role="listitem"][tabindex="0"]` (Agenda's list-pattern rows).
+ * Both the role AND the tabindex attribute must land on the *same* element for the
+ * match to count — this is what excludes event chips: they are always
+ * independently focusable (`tabindex="0"` hard-coded, not roving) and sometimes sit
+ * inside a `role="gridcell"` wrapper of their own, but that wrapper carries no
+ * tabindex and the inner focusable button carries no `role="gridcell"`, so an event
+ * chip can never satisfy both conditions on one node and is never mistaken for the
+ * roving cell.
+ *
+ * No-ops (does not throw) when `container` is null or no matching cell is found —
+ * both are expected before first render and when a view has no cells yet.
+ *
+ * @param {HTMLElement | null} container the grid/list wrapper to search within
+ */
+export function focusActiveGridCell(container) {
+    if (!container) return;
+    const cell = container.querySelector(
+        '[role="gridcell"][tabindex="0"], [role="listitem"][tabindex="0"]');
+    if (cell && typeof cell.focus === 'function') {
+        cell.focus({ preventScroll: false });
+    }
+}
+
+/**
  * Remove focus from the active element ONLY when it is an event chip
  * (i.e., carries `data-calee-region="event"`). Called by slot-click
  * handlers so that clicking the empty grid drops the chip's focus ring

@@ -152,6 +152,16 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
     private IJSObjectReference? _jsModule;
 
+    // The scrollable list wrapper (role="group") — queried by focusActiveGridCell
+    // (issue #19) to find the currently-tabbable row.
+    private ElementReference _agendaListRef;
+
+    // Issue #19 — set by HandleRowKeyDownAsync when a key moves the roving tabindex
+    // (arrows, Home/End, PageUp/PageDown); consumed in OnAfterRenderAsync (after the
+    // tabindex swap has actually rendered) to move real browser focus onto the
+    // newly-active row.
+    private bool _focusMovePending;
+
     /// <inheritdoc/>
     protected override void OnParametersSet()
     {
@@ -349,6 +359,15 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         {
             _jsModule = await SchedulerViewPrimitives.TryLoadJsModuleAsync(JSRuntime);
         }
+
+        // Issue #19 — move real browser focus onto the newly-active row after a
+        // roving-tabindex move. Deferred to here so the query runs after the tabindex
+        // swap has rendered to the DOM.
+        if (_focusMovePending && _jsModule is not null)
+        {
+            _focusMovePending = false;
+            await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _agendaListRef);
+        }
     }
 
     /// <inheritdoc/>
@@ -544,85 +563,91 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         switch (e.Key)
         {
             case "ArrowDown":
-            {
-                var total = TotalRowCount();
-                if (total == 0) return;
-                _focusedRowIndex = Math.Min(total - 1, flatIndex + 1);
-                StateHasChanged();
-                break;
-            }
-            case "ArrowUp":
-            {
-                _focusedRowIndex = Math.Max(0, flatIndex - 1);
-                StateHasChanged();
-                break;
-            }
-            case "Home":
-            {
-                _focusedRowIndex = 0;
-                StateHasChanged();
-                break;
-            }
-            case "End":
-            {
-                var total = TotalRowCount();
-                if (total == 0) return;
-                _focusedRowIndex = total - 1;
-                StateHasChanged();
-                break;
-            }
-            case "PageDown":
-            {
-                // Jump to the first row of the next date group (or end of last group).
-                var (g, _) = ResolveFlatIndex(flatIndex);
-                if (g < 0) return;
-                if (g + 1 < _groups.Length)
-                {
-                    _focusedRowIndex = Flatten(g + 1, 0);
-                }
-                else
                 {
                     var total = TotalRowCount();
-                    _focusedRowIndex = total - 1;
+                    if (total == 0) return;
+                    _focusedRowIndex = Math.Min(total - 1, flatIndex + 1);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
                 }
-                StateHasChanged();
-                break;
-            }
-            case "PageUp":
-            {
-                // Jump to the first row of the previous date group (or first row).
-                var (g, _) = ResolveFlatIndex(flatIndex);
-                if (g < 0) return;
-                if (g > 0)
+            case "ArrowUp":
                 {
-                    _focusedRowIndex = Flatten(g - 1, 0);
+                    _focusedRowIndex = Math.Max(0, flatIndex - 1);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
                 }
-                else
+            case "Home":
                 {
                     _focusedRowIndex = 0;
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
                 }
-                StateHasChanged();
-                break;
-            }
+            case "End":
+                {
+                    var total = TotalRowCount();
+                    if (total == 0) return;
+                    _focusedRowIndex = total - 1;
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "PageDown":
+                {
+                    // Jump to the first row of the next date group (or end of last group).
+                    var (g, _) = ResolveFlatIndex(flatIndex);
+                    if (g < 0) return;
+                    if (g + 1 < _groups.Length)
+                    {
+                        _focusedRowIndex = Flatten(g + 1, 0);
+                    }
+                    else
+                    {
+                        var total = TotalRowCount();
+                        _focusedRowIndex = total - 1;
+                    }
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "PageUp":
+                {
+                    // Jump to the first row of the previous date group (or first row).
+                    var (g, _) = ResolveFlatIndex(flatIndex);
+                    if (g < 0) return;
+                    if (g > 0)
+                    {
+                        _focusedRowIndex = Flatten(g - 1, 0);
+                    }
+                    else
+                    {
+                        _focusedRowIndex = 0;
+                    }
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
             case "Enter":
-            {
-                await HandleRowClickAsync(row);
-                break;
-            }
-            case " ":
-            {
-                // When AllowMultiSelect is off Space is dispatched by the browser default
-                // (button activates → click → single selection); when on, the chip-scope
-                // select.toggle dispatch above already handled it. The fall-through here
-                // covers the edge case where the shortcut map disabled select.toggle —
-                // we keep Space as a row-activator so accessibility's "Space = activate
-                // button" expectation still holds.
-                if (!AllowMultiSelect)
                 {
                     await HandleRowClickAsync(row);
+                    break;
                 }
-                break;
-            }
+            case " ":
+                {
+                    // When AllowMultiSelect is off Space is dispatched by the browser default
+                    // (button activates → click → single selection); when on, the chip-scope
+                    // select.toggle dispatch above already handled it. The fall-through here
+                    // covers the edge case where the shortcut map disabled select.toggle —
+                    // we keep Space as a row-activator so accessibility's "Space = activate
+                    // button" expectation still holds.
+                    if (!AllowMultiSelect)
+                    {
+                        await HandleRowClickAsync(row);
+                    }
+                    break;
+                }
         }
     }
 

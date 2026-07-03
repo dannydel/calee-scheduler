@@ -114,6 +114,16 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
 
     private IJSObjectReference? _jsModule;
 
+    // The grid's outer wrapper (role="grid") — queried by focusActiveGridCell (issue #19)
+    // to find the currently-tabbable day cell.
+    private ElementReference _yearGridRef;
+
+    // Issue #19 — set by HandleCellKeyDownAsync when a key moves the roving tabindex
+    // (arrows, Home/End, PageUp/PageDown); consumed in OnAfterRenderAsync (after the
+    // tabindex swap has actually rendered) to move real browser focus onto the
+    // newly-active day cell.
+    private bool _focusMovePending;
+
     /// <summary>Inclusive start of the visible range (Jan 1 of the displayed year at midnight in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>).</summary>
     internal DateTimeOffset YearStart { get; private set; }
 
@@ -281,6 +291,15 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
         {
             _jsModule = await SchedulerViewPrimitives.TryLoadJsModuleAsync(JSRuntime);
         }
+
+        // Issue #19 — move real browser focus onto the newly-active day cell after a
+        // roving-tabindex move. Deferred to here so the query runs after the tabindex
+        // swap has rendered to the DOM.
+        if (_focusMovePending && _jsModule is not null)
+        {
+            _focusMovePending = false;
+            await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _yearGridRef);
+        }
     }
 
     /// <inheritdoc/>
@@ -444,72 +463,80 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
         switch (e.Key)
         {
             case "ArrowDown":
-            {
-                var next = Math.Min(cells.Length - 1, cellIndex + 7);
-                _focusedCellIndex = next;
-                StateHasChanged();
-                break;
-            }
-            case "ArrowUp":
-            {
-                var next = Math.Max(0, cellIndex - 7);
-                _focusedCellIndex = next;
-                StateHasChanged();
-                break;
-            }
-            case "ArrowRight":
-            {
-                _focusedCellIndex = Math.Min(cells.Length - 1, cellIndex + 1);
-                StateHasChanged();
-                break;
-            }
-            case "ArrowLeft":
-            {
-                _focusedCellIndex = Math.Max(0, cellIndex - 1);
-                StateHasChanged();
-                break;
-            }
-            case "Home":
-            {
-                // Jump to the first in-month cell.
-                _focusedCellIndex = FirstInMonthCellIndex(monthIndex);
-                StateHasChanged();
-                break;
-            }
-            case "End":
-            {
-                // Jump to the last in-month cell.
-                var last = FirstInMonthCellIndex(monthIndex);
-                for (var i = 0; i < cells.Length; i++)
                 {
-                    if (cells[i].InMonth) last = i;
+                    var next = Math.Min(cells.Length - 1, cellIndex + 7);
+                    _focusedCellIndex = next;
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
                 }
-                _focusedCellIndex = last;
-                StateHasChanged();
-                break;
-            }
+            case "ArrowUp":
+                {
+                    var next = Math.Max(0, cellIndex - 7);
+                    _focusedCellIndex = next;
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "ArrowRight":
+                {
+                    _focusedCellIndex = Math.Min(cells.Length - 1, cellIndex + 1);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "ArrowLeft":
+                {
+                    _focusedCellIndex = Math.Max(0, cellIndex - 1);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "Home":
+                {
+                    // Jump to the first in-month cell.
+                    _focusedCellIndex = FirstInMonthCellIndex(monthIndex);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
+            case "End":
+                {
+                    // Jump to the last in-month cell.
+                    var last = FirstInMonthCellIndex(monthIndex);
+                    for (var i = 0; i < cells.Length; i++)
+                    {
+                        if (cells[i].InMonth) last = i;
+                    }
+                    _focusedCellIndex = last;
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
             case "PageDown":
-            {
-                // Next month — wrap at the year boundary (the toolbar prev/next-year is
-                // the canonical inter-year nav).
-                _focusedMonthIndex = Math.Min(11, monthIndex + 1);
-                _focusedCellIndex = FirstInMonthCellIndex(_focusedMonthIndex);
-                StateHasChanged();
-                break;
-            }
+                {
+                    // Next month — wrap at the year boundary (the toolbar prev/next-year is
+                    // the canonical inter-year nav).
+                    _focusedMonthIndex = Math.Min(11, monthIndex + 1);
+                    _focusedCellIndex = FirstInMonthCellIndex(_focusedMonthIndex);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
             case "PageUp":
-            {
-                _focusedMonthIndex = Math.Max(0, monthIndex - 1);
-                _focusedCellIndex = FirstInMonthCellIndex(_focusedMonthIndex);
-                StateHasChanged();
-                break;
-            }
+                {
+                    _focusedMonthIndex = Math.Max(0, monthIndex - 1);
+                    _focusedCellIndex = FirstInMonthCellIndex(_focusedMonthIndex);
+                    _focusMovePending = true;
+                    StateHasChanged();
+                    break;
+                }
             case "Enter":
             case " ":
-            {
-                await HandleDayClickAsync(cells[cellIndex]);
-                break;
-            }
+                {
+                    await HandleDayClickAsync(cells[cellIndex]);
+                    break;
+                }
         }
     }
 

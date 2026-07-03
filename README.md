@@ -384,6 +384,44 @@ It does **not** suppress:
 
 **Month view has no per-date header.** Month's weekday header row (`Sun`, `Mon`, …) is generic across all six weeks, not per-date, so `DayModifier` only affects Month's day *cells* — there's no separate per-date header element to mark.
 
+### 4.8 Day-header template and click (issue #9)
+
+`DayHeaderTemplate` and `OnDayHeaderClicked` let a consumer inject per-day content into the day-header cell on Day and Week (including WorkWeek and any `VisibleDays` subset) and react to the header being activated — e.g. a per-day count badge that opens a side panel. Both are forwarded by the root `CaleeScheduler` to its Day/WorkWeek/Week arms; Month is out of scope (its header row is generic weekday names, not per-date, same reasoning as `DayModifier` in §4.7).
+
+```razor
+<CaleeSchedulerWeekView TEvent="CalendarEvent"
+                        TimeZone="@_tz"
+                        Events="@_events"
+                        DayHeaderTemplate="DayBadge"
+                        OnDayHeaderClicked="HandleDayHeaderClicked" />
+
+@code {
+    private RenderFragment<DateTimeOffset> DayBadge => day => __builder =>
+    {
+        var count = _events.Count(e => e.Start.Date == day.Date);
+        if (count > 0)
+        {
+            <span class="day-count-badge" aria-hidden="true">@count</span>
+        }
+    };
+
+    private void HandleDayHeaderClicked(DateTimeOffset day) =>
+        OpenDaySidePanel(day);
+}
+```
+
+**Template context.** `DayHeaderTemplate` receives the day's midnight `DateTimeOffset` in the grid time zone — the exact same value shape `DayModifier` receives (§4.7), so a consumer combining both hooks reasons about one date shape everywhere. The template renders *after* the library's own weekday/date label, inside the same header cell — it does not replace the label (ADR-0002 spirit: the library owns the cell container and label, the consumer owns the injected extras). A `null` template (the default) renders byte-identical markup to the read-only path.
+
+**`OnDayHeaderClicked` and the fail-closed default.** The callback receives the same midnight value and fires on pointer click or on Enter/Space while the header holds keyboard focus. A header cell is made focusable and interactive (`tabindex="0"`, `role="button"`, pointer cursor, an `aria-label` announcing the full date) **only when this callback has a delegate wired** — leaving it unset keeps the header exactly as it renders today: no tabindex, no role, no cursor change. Like every other click path in the library, activation is suppressed while a drag is in flight.
+
+**Space doesn't scroll the page.** An interactive day header is a `<div role="button">`, not a native `<button>`, so nothing stops the browser's global "Space scrolls the viewport" default automatically. Blazor's `@onkeydown:preventDefault` directive is element-wide — binding it here to swallow Space would also swallow Tab's default focus-move off the header, a keyboard trap — so the suppression instead lives in the shipped JS module (`calee-scheduler.js`'s `registerDayHeaderKeyGuard`), scoped to exactly the Space key on an interactive day-header target. The view registers the guard while `OnDayHeaderClicked` has a delegate and unregisters it on dispose; every other key, including Tab, is untouched. No wiring is required on your part — this is purely internal to the library's activation path.
+
+**⚠️ Don't nest interactive controls inside `DayHeaderTemplate` when `OnDayHeaderClicked` is wired.** The header cell itself becomes the button (`role="button"`, per the note above) — placing a `<button>`, `<a>`, or another focusable/clickable control inside it creates a nested-interactive ARIA violation (assistive tech cannot meaningfully expose a button inside a button), and a real click on the nested control still bubbles up to fire `OnDayHeaderClicked` too, double-firing both handlers. This mirrors the `EventTemplate` contract (§6.1) — the library owns the outer interactive envelope; the template owns non-interactive content inside it. The badge in the example above is `aria-hidden="true"` and inert by design — that's the endorsed pattern. If you need the badge itself to be separately clickable (e.g. a different action from the header click), don't wire `OnDayHeaderClicked` at all and instead drive both interactions from your own button placed *outside* the header, or reconsider the row you want to make clickable.
+
+**Composes with blocked days (§4.7).** A day `DayModifier` marks blocked keeps its blocked `aria-label` (the blocked text wins over the plain date name) and its blocked class — but the template still renders and the click still fires. Blocking gates *create* affordances, not header content or interaction. **`aria-disabled` is suppressed whenever the header is interactive** — an operable `role="button"` whose click and Enter/Space demonstrably work must never also announce "disabled" to a screen reader; the blocked state is still conveyed through the `", blocked"`-suffixed `aria-label`. A non-interactive blocked header (no `OnDayHeaderClicked` delegate) keeps `aria-disabled="true"` exactly as issue #8 shipped it.
+
+**Accessible names are `en-US`-formatted.** `DayHeaderAccessibleName`'s `"dddd, MMMM d, yyyy"` output (and the blocked-day label built on top of it) is always formatted with the `en-US` culture, matching every other accessible-name call site in the library — this is a deliberate 1.x consistency choice, not an oversight, and it applies even to Week's non-blocked header label, which previously formatted with the ambient `CurrentCulture`. Localizing accessible names is a roadmap item; until then, expect `en-US` date text regardless of the host's culture.
+
 ---
 
 ## 5. TimeZone semantics and footguns
@@ -620,6 +658,8 @@ Per-region class hooks (FR-54) for finer-grained styling without `::deep`:
 | `LaneLabelClass`      | `string?`                 | Lane row labels (Timeline view only).                     |
 | `EventClass`          | `Func<TEvent, string?>?`  | Per-event class — receives the event, returns a class or null. |
 | `DayModifier`         | `Func<DateTimeOffset, SchedulerDayState?>?` | Per-day state (§4.7, issue #8) — receives a day's midnight boundary, returns `null` for a normal day or a `SchedulerDayState` carrying `IsBlocked` / `Class` / `Label`. Day / Week / Month only. |
+| `DayHeaderTemplate`   | `RenderFragment<DateTimeOffset>?` | Content injected into the day-header cell, after the default label (§4.8, issue #9). Receives the day's midnight boundary. Day / Week (incl. WorkWeek / `VisibleDays`) only. |
+| `OnDayHeaderClicked`  | `EventCallback<DateTimeOffset>`   | Fires on day-header click or Enter/Space when focused (§4.8, issue #9). Header is only made focusable/interactive when this has a delegate wired. Day / Week (incl. WorkWeek / `VisibleDays`) only. |
 
 ### 8.4 `::deep` escape hatch via `data-calee-region`
 
@@ -708,8 +748,8 @@ Screen-reader smoke tests cannot be headless. The script in `tools/a11y-audit/MA
 | Tab            | Move between major regions (toolbar → grid → events). Roving tabindex inside each region.      |
 | Shift+Tab      | Reverse of Tab.                                                                                |
 | Arrow keys     | Move focus between slot cells (Day / Week / Timeline@Day) or day cells (Month / Timeline@Week/Month). |
-| Enter          | On a slot: fire `OnSlotClicked`. On an event: fire `OnEventClicked`. On a chip: fire its handler. |
-| Space          | Same as Enter on events / chips.                                                               |
+| Enter          | On a slot: fire `OnSlotClicked`. On an event: fire `OnEventClicked`. On a chip: fire its handler. On a day header with `OnDayHeaderClicked` wired: fire it. |
+| Space          | Same as Enter on events / chips / an interactive day header.                                   |
 | Escape         | Release focus to the parent container.                                                         |
 | Delete         | Fire `OnEventDeleted` on a focused event when `AllowDelete=true`.                              |
 

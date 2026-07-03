@@ -140,6 +140,79 @@ export function getElementWidth(element) {
 }
 
 // ---------------------------------------------------------------------------
+// Day-header key guard (issue #9).
+//
+// An interactive day header (role="button", tabindex="0") is a <div>, not a
+// real <button> — so unlike the library's other keyboard-activated controls,
+// nothing suppresses the browser's global "Space scrolls the viewport"
+// default for it. Blazor's `@onkeydown:preventDefault` directive is
+// element-wide (it can't distinguish Space from Tab), and blanket-preventing
+// every keydown on the header would also swallow Tab's default focus-move —
+// a keyboard trap. So the guard lives here instead, scoped to exactly one key
+// and one element shape: only Space, only when the event target is (or is
+// nested inside) a day-header cell currently rendered as an interactive
+// button. Every other key — including Tab — passes through untouched.
+//
+// Defense-in-depth: DayHeaderTemplate is documented as "don't nest interactive
+// controls" (README §4.8 / ADR-0002), but a consumer could still nest an
+// editable element (an <input>, <textarea>, a <select>, or a
+// contenteditable node) for some other reason. Space typed into one of those
+// is text entry, not button activation, so the guard bails out before the
+// closest() check whenever the event target itself is editable — regardless
+// of whether it also happens to sit inside a day-header cell.
+// ---------------------------------------------------------------------------
+
+/** Active day-header key guards keyed by handle (mirrors _activeDrags' shape). */
+const _dayHeaderKeyGuards = new Map();
+
+/**
+ * Register a window-level keydown listener that calls `preventDefault()` on
+ * the Space key ONLY when it targets an interactive day-header cell
+ * (`[data-calee-region="day-header"][role="button"]`, matched via
+ * `closest()` so a click that lands on injected `DayHeaderTemplate` content
+ * still counts) — and never when the target itself is an editable element
+ * (input/textarea/select/contenteditable), so typing a space into a nested
+ * text field is never suppressed. Each view instance that wires
+ * `OnDayHeaderClicked` calls this once (typically from its first render) and
+ * calls `unregisterDayHeaderKeyGuard` with the returned handle on dispose —
+ * mirroring `PointerDragInterop`'s register/dispose lifecycle.
+ *
+ * @returns {string} an opaque handle for `unregisterDayHeaderKeyGuard`.
+ */
+export function registerDayHeaderKeyGuard() {
+    const handler = (ev) => {
+        if (ev.code !== 'Space') return;
+        const target = ev.target;
+        if (target && typeof target.matches === 'function'
+            && target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
+            return;
+        }
+        if (target && typeof target.closest === 'function'
+            && target.closest('[data-calee-region="day-header"][role="button"]')) {
+            ev.preventDefault();
+        }
+    };
+    window.addEventListener('keydown', handler);
+    const handle = _newHandle();
+    _dayHeaderKeyGuards.set(handle, handler);
+    return handle;
+}
+
+/**
+ * Remove a listener previously registered by `registerDayHeaderKeyGuard`.
+ * No-ops silently for an unknown/already-removed handle (defensive — dispose
+ * paths may race with a component that never finished registering).
+ *
+ * @param {string} handle
+ */
+export function unregisterDayHeaderKeyGuard(handle) {
+    const handler = _dayHeaderKeyGuards.get(handle);
+    if (!handler) return;
+    window.removeEventListener('keydown', handler);
+    _dayHeaderKeyGuards.delete(handle);
+}
+
+// ---------------------------------------------------------------------------
 // Pointer-events drag module (Phase 2, Task 2 — ADR-0015).
 //
 // Design constraints captured in ADR-0015 + plan §5.1:

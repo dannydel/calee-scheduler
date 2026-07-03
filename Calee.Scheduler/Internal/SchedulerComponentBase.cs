@@ -106,6 +106,86 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     public Func<DateTimeOffset, SchedulerDayState?>? DayModifier { get; set; }
 
     /// <summary>
+    /// Optional render fragment for the *inside* of each day-header cell on time-grid
+    /// views (issue #9) — e.g. a per-day count badge. Receives the day's midnight
+    /// <see cref="DateTimeOffset"/> in <see cref="TimeZone"/>: the same value shape
+    /// <see cref="DayModifier"/> receives, for consistency across the library's
+    /// per-day hooks. The library owns the header cell container and the default
+    /// weekday/date label; this template renders *after* that label, inside the same
+    /// cell — it does not replace it (ADR-0002 spirit: the library owns the
+    /// container, the consumer owns the injected extras). A <see langword="null"/>
+    /// template (the default) renders byte-identical markup to the read-only path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Which views honor this.</strong> Day and Week (including the WorkWeek
+    /// arm and any <c>VisibleDays</c> subset — the template is only evaluated for the
+    /// visible columns; hidden days never see it). Month is out of scope for issue #9
+    /// (Month's header cells show weekday names, not dates); Year, Agenda, and
+    /// Timeline likewise inherit this parameter for a uniform generic surface but have
+    /// no effect, mirroring <see cref="DayModifier"/>'s own "which views honor this"
+    /// contract.
+    /// </para>
+    /// <para>
+    /// <strong>Composes with blocked days (issue #8).</strong> A day <see cref="DayModifier"/>
+    /// marks blocked keeps its blocked class/label and still renders this template —
+    /// blocking gates create affordances, not header content. <c>aria-disabled</c> is
+    /// suppressed on the blocked label whenever <see cref="OnDayHeaderClicked"/> is
+    /// wired (an operable control must not also announce "disabled") — see that
+    /// parameter's remarks.
+    /// </para>
+    /// <para>
+    /// <strong>⚠️ Do not nest interactive controls inside this template when
+    /// <see cref="OnDayHeaderClicked"/> is wired.</strong> The header cell itself
+    /// becomes the interactive element (<c>role="button"</c>); a <c>&lt;button&gt;</c>,
+    /// <c>&lt;a&gt;</c>, or other focusable/clickable control placed inside it is a
+    /// nested-interactive ARIA violation, and its clicks bubble up to also fire
+    /// <see cref="OnDayHeaderClicked"/> — a double-fire footgun. This mirrors the
+    /// <c>EventTemplate</c> contract (ADR-0002): the library owns the interactive
+    /// envelope, the template owns non-interactive content inside it (e.g. an
+    /// <c>aria-hidden="true"</c> count badge).
+    /// </para>
+    /// </remarks>
+    [Parameter]
+    public RenderFragment<DateTimeOffset>? DayHeaderTemplate { get; set; }
+
+    /// <summary>
+    /// Fired when the user activates a day-header cell on a time-grid view (issue #9)
+    /// — pointer click, or Enter/Space while the header holds keyboard focus. Receives
+    /// the day's midnight <see cref="DateTimeOffset"/> in <see cref="TimeZone"/>,
+    /// matching <see cref="DayHeaderTemplate"/>'s context.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Fail-closed by design.</strong> A header cell is made focusable and
+    /// interactive (<c>tabindex</c>, <c>role="button"</c>, pointer cursor) only when
+    /// this callback has a delegate wired (<see cref="EventCallback{T}.HasDelegate"/>).
+    /// An unwired header renders exactly as it did before issue #9. When wired, a
+    /// blocked day's <c>aria-disabled</c> is dropped (see <see cref="DayHeaderTemplate"/>'s
+    /// remarks) — an operable control never announces "disabled."
+    /// </para>
+    /// <para>
+    /// <strong>Drag precedence.</strong> Suppressed while a drag is active, matching
+    /// every other click handler in the library (ADR-0006).
+    /// </para>
+    /// <para>
+    /// <strong>Space doesn't scroll the page.</strong> The header is a
+    /// <c>&lt;div role="button"&gt;</c>, not a native <c>&lt;button&gt;</c>, so the
+    /// browser's default "Space scrolls the viewport" behavior isn't suppressed for
+    /// free. Rather than a Blazor <c>@onkeydown:preventDefault</c> directive (which is
+    /// element-wide and would also swallow Tab's default focus-move — a keyboard
+    /// trap), the view registers a scoped JS listener
+    /// (<c>calee-scheduler.js</c>'s <c>registerDayHeaderKeyGuard</c>) while this
+    /// callback has a delegate, and unregisters it on dispose. The listener
+    /// <c>preventDefault()</c>s only the Space key targeting an interactive day
+    /// header — every other key, including Tab, is untouched.
+    /// </para>
+    /// <para><strong>Which views honor this.</strong> Same as <see cref="DayHeaderTemplate"/>.</para>
+    /// </remarks>
+    [Parameter]
+    public EventCallback<DateTimeOffset> OnDayHeaderClicked { get; set; }
+
+    /// <summary>
     /// Unmatched HTML attributes captured from the consumer's markup and splatted onto
     /// the view's outermost rendered element. <c>class</c>, <c>style</c>, <c>data-*</c>,
     /// and <c>aria-*</c> from the consumer compose with the library's own values rather

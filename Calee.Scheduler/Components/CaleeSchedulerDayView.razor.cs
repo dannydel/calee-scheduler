@@ -137,6 +137,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     private bool _scrollPending;
     private IJSObjectReference? _jsModule;
 
+    // Handle for the JS module's day-header Space-key guard (issue #9) — non-null
+    // exactly while OnDayHeaderClicked has a delegate wired and the guard is
+    // registered. Synced every render in OnAfterRenderAsync so wiring/unwiring the
+    // callback after first render registers/unregisters the guard accordingly.
+    private string? _dayHeaderKeyGuardHandle;
+
     /// <summary>
     /// Per-event element refs the drag layer uses as the ghost source (Phase 2 Task 4 — FR-25).
     /// Keyed by event id so a chip whose position in the foreach changes between renders
@@ -338,6 +344,25 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
                 // Test environment may not expose a real JS runtime.
             }
         }
+
+        // Issue #9 — keep the JS module's day-header Space-key guard in sync with
+        // OnDayHeaderClicked's wiring. Checked every render (not just firstRender) so
+        // a consumer that wires or unwires the callback after mount still gets the
+        // guard registered/unregistered accordingly. See registerDayHeaderKeyGuard's
+        // doc comment in calee-scheduler.js for why this can't be a Blazor
+        // @onkeydown:preventDefault directive.
+        if (_jsModule is not null)
+        {
+            if (OnDayHeaderClicked.HasDelegate && _dayHeaderKeyGuardHandle is null)
+            {
+                _dayHeaderKeyGuardHandle = await SchedulerViewPrimitives.TryRegisterDayHeaderKeyGuardAsync(_jsModule);
+            }
+            else if (!OnDayHeaderClicked.HasDelegate && _dayHeaderKeyGuardHandle is not null)
+            {
+                await SchedulerViewPrimitives.TryUnregisterDayHeaderKeyGuardAsync(_jsModule, _dayHeaderKeyGuardHandle);
+                _dayHeaderKeyGuardHandle = null;
+            }
+        }
     }
 
     /// <summary>
@@ -362,6 +387,11 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     {
         if (_jsModule is not null)
         {
+            if (_dayHeaderKeyGuardHandle is not null)
+            {
+                await SchedulerViewPrimitives.TryUnregisterDayHeaderKeyGuardAsync(_jsModule, _dayHeaderKeyGuardHandle);
+                _dayHeaderKeyGuardHandle = null;
+            }
             try { await _jsModule.DisposeAsync(); }
             catch (JSDisconnectedException) { /* Circuit gone; nothing to clean up. */ }
             catch (JSException) { /* Best-effort cleanup. */ }
@@ -439,6 +469,52 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>Accessible label announced on the day header when the day is blocked.</summary>
     internal string BlockedDayHeaderLabel => SchedulerViewPrimitives.BlockedDayAccessibleLabel(_dayStartLocal, _dayState);
+
+    // ----- Day header template + click (issue #9) -------------------------------------
+
+    /// <summary>
+    /// True when <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> has a
+    /// delegate wired. Gates whether the header cell is rendered as focusable/
+    /// interactive at all — fail-closed default (see the parameter's remarks).
+    /// </summary>
+    internal bool IsDayHeaderInteractive => OnDayHeaderClicked.HasDelegate;
+
+    /// <summary>Accessible name for the day header when it is interactive and not blocked.</summary>
+    internal string DayHeaderAccessibleName => SchedulerViewPrimitives.DayHeaderAccessibleName(_dayStartLocal);
+
+    /// <summary>
+    /// Fires <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> with the
+    /// rendered day's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// No-op while a drag is active (ADR-0006 precedence — matches every other click
+    /// handler in the view).
+    /// </summary>
+    internal Task HandleDayHeaderClickAsync()
+    {
+        if (IsDragActive) return Task.CompletedTask;
+        return OnDayHeaderClicked.InvokeAsync(_dayStartLocal);
+    }
+
+    /// <summary>
+    /// Keyboard handler bound to the day header when <see cref="IsDayHeaderInteractive"/>.
+    /// Enter and Space activate the header; every other key is a no-op (the header is
+    /// not part of the roving-tabindex grid).
+    /// </summary>
+    /// <remarks>
+    /// This handler does not (and must not) carry a Blazor
+    /// <c>@onkeydown:preventDefault</c> directive — that directive is element-wide, so
+    /// binding it here to suppress Space's default "scroll the viewport" behavior
+    /// would also swallow Tab's default focus-move off the header, a keyboard trap.
+    /// The Space-scroll suppression instead lives in the JS module's
+    /// <c>registerDayHeaderKeyGuard</c> (<see cref="OnAfterRenderAsync"/> registers it
+    /// while <see cref="IsDayHeaderInteractive"/>), which is scoped to exactly the
+    /// Space key on an interactive day-header target and leaves every other key,
+    /// including Tab, untouched.
+    /// </remarks>
+    internal Task HandleDayHeaderKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" && e.Key != " ") return Task.CompletedTask;
+        return HandleDayHeaderClickAsync();
+    }
 
     /// <summary>
     /// Issue #8 — the Day view's single grid-focus concept is "this whole rendered
@@ -827,6 +903,14 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     }
 
     // ----- Drag-to-move (Phase 2 Task 4 — FR-25) --------------------------------------
+
+    /// <summary>
+    /// Test-only forwarder for the base's <c>private protected IsDragActive</c> —
+    /// lets tests confirm a real drag (started via <see cref="OnEventPointerDownAsync"/>)
+    /// is active before asserting on drag-active precedence elsewhere (e.g. the day
+    /// header's click/keydown guard, issue #9).
+    /// </summary>
+    internal bool IsDragActiveForTest => IsDragActive;
 
     /// <summary>The dictionary the .razor template binds via
     /// <c>@ref="EventRefsByEventId[eventId]"</c>. Internal so tests can inspect the

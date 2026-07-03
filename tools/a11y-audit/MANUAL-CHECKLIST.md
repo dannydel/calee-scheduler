@@ -27,13 +27,9 @@ not obscured, 2.5.8 target size spacing-exception notes).
 > `_scrollPending` idiom). Verified in a real browser via
 > `tools/a11y-audit/audit.mjs`'s focus-check step (Playwright driving Chromium,
 > not bUnit — bUnit's headless DOM cannot exercise real focus) on Day, Week,
-> Month, Fleet (Timeline), and Agenda; also covered by JS-module-invocation
+> Month, Year, Fleet (Timeline), and Agenda; also covered by JS-module-invocation
 > assertions in `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs`.
-> Tab-based navigation was never affected. **Year view has the same
-> pre-existing gap but is out of scope for issue #19** (not listed in that
-> issue's affected-view enumeration) — treat any "Arrow-key navigation" row
-> for Year below as *pre-existing intent*, not verified current behavior,
-> until a follow-up covers it.
+> Tab-based navigation was never affected.
 
 ## Setup
 
@@ -203,9 +199,9 @@ spacing:
   for the daily Week/Month modes).
 - ~~**[P0, found 2026, issue #12 verification]** Arrow-key roving-tabindex
   navigation does not move real browser focus in any view (Day, Week/WorkWeek,
-  Month, Timeline/Fleet, Agenda).~~ **Resolved (issue #19)** — see the banner
-  near the top of this document. Year view has the identical pre-existing gap
-  but was not in issue #19's affected-view enumeration; still open there.
+  Month, Year, Timeline/Fleet, Agenda).~~ **Resolved (issue #19)** — see the banner
+  near the top of this document. All six roving views, including Year, are
+  covered by the audit's focus-check step.
 - **[Issue #20, open]** Drag-to-move and drag-to-resize have no functional
   keyboard (or other single-pointer) alternative in the library as shipped —
   see §8.1. `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are

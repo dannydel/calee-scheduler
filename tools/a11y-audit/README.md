@@ -53,7 +53,7 @@ For each of the seven demo routes (`/`, `/day`, `/week`, `/month`, `/year`,
 3. Collects every violation (id, impact, helpUrl, offending selector + HTML
    snippet) into the report.
 4. **Issue #19 — roving-tabindex real-focus check.** On the routes that carry
-   a roving-tabindex grid/list (`/day`, `/week`, `/month`, `/agenda`,
+   a roving-tabindex grid/list (`/day`, `/week`, `/month`, `/year`, `/agenda`,
    `/fleet`), after axe passes: focuses the initial `tabindex="0"` cell/row,
    drives a short arrow-key sequence, and asserts `document.activeElement`
    matches the (now-different) `tabindex="0"` cell/row — i.e. that a real DOM
@@ -96,12 +96,12 @@ For each of the seven demo routes (`/`, `/day`, `/week`, `/month`, `/year`,
     { "route": "/day",    "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
     { "route": "/week",   "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
     { "route": "/month",  "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
-    { "route": "/year",   "violations": [] },
+    { "route": "/year",   "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
     { "route": "/agenda", "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
     { "route": "/fleet",  "violations": [], "focusCheck": { "pass": true, "detail": "..." } }
   ],
   "totalViolations": 0,
-  "focusChecksRun": 5,
+  "focusChecksRun": 6,
   "focusFailures": 0
 }
 ```
@@ -111,7 +111,6 @@ serious / critical), a help URL pointing to deque.com, and each offending
 node's selector + 240-char HTML snippet.
 
 `focusCheck` (issue #19) only appears on routes with a roving-tabindex
-grid/list (`/day`, `/week`, `/month`, `/agenda`, `/fleet` — `/` and `/year`
-have none, per the affected-view scope in issue #19). `pass: false` fails the
-run exactly like an axe violation does; `detail` carries a human-readable
-explanation either way.
+grid/list (`/day`, `/week`, `/month`, `/year`, `/agenda`, `/fleet` — only `/`
+has none). `pass: false` fails the run exactly like an axe violation does;
+`detail` carries a human-readable explanation either way.

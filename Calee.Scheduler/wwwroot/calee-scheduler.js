@@ -101,8 +101,8 @@ export function blurActive() {
  * attribute state had moved on, so keyboard/screen-reader users saw no focus move.
  *
  * Queries `container` for the roving cell using the two shapes the library's views
- * emit it in: `[role="gridcell"][tabindex="0"]` (Day/Week/Month/Timeline slot and
- * day cells) or `[role="listitem"][tabindex="0"]` (Agenda's list-pattern rows).
+ * emit it in: `[role="gridcell"][tabindex="0"]` (Day/Week/Month/Year/Timeline slot
+ * and day cells) or `[role="listitem"][tabindex="0"]` (Agenda's list-pattern rows).
  * Both the role AND the tabindex attribute must land on the *same* element for the
  * match to count — this is what excludes event chips: they are always
  * independently focusable (`tabindex="0"` hard-coded, not roving) and sometimes sit

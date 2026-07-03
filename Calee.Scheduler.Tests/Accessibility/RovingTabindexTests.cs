@@ -408,6 +408,50 @@ public class RovingTabindexTests
     }
 
     [Fact]
+    public async Task YearView_ArrowMoves_Invoke_FocusActiveGridCell()
+    {
+        // Year view's keydown handler is bound per-cell (not on the role="grid"
+        // wrapper), so the key is driven on the currently-tabbable cell itself —
+        // matches how a real browser would dispatch it (focus is on that cell).
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerYearView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("ArrowRight"));
+        cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("ArrowDown"));
+
+        Assert.Equal(2, module.Invocations["focusActiveGridCell"].Count);
+        foreach (var call in module.Invocations["focusActiveGridCell"])
+        {
+            var container = Assert.IsType<ElementReference>(call.Arguments[0]);
+            Assert.False(string.IsNullOrEmpty(container.Id));
+        }
+    }
+
+    [Fact]
+    public async Task YearView_Enter_Does_Not_Invoke_FocusActiveGridCell()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerYearView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        var cell = cut.Find("[role='gridcell'][tabindex='0']");
+        await cut.InvokeAsync(() => cell.KeyDown("Enter"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
+    }
+
+    [Fact]
     public async Task TimelineView_ArrowMoves_Invoke_FocusActiveGridCell()
     {
         using var ctx = NewContext();

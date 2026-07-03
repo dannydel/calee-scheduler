@@ -7,7 +7,7 @@
 //
 // Issue #19 — per-route axe checks are followed by a live-browser roving-
 // tabindex focus check on the routes that carry a roving-tabindex grid/list
-// (Day, Week, Month, Timeline/"fleet", Agenda). bUnit's headless DOM cannot
+// (Day, Week, Month, Year, Timeline/"fleet", Agenda). bUnit's headless DOM cannot
 // exercise real browser focus (see RovingTabindexTests.cs's remarks and
 // README §9.1a), so this script is the only place that verifies arrow-key
 // navigation actually moves `document.activeElement` — not just the
@@ -41,14 +41,16 @@ const ROVING_CELL_SELECTOR = '[role="gridcell"][tabindex="0"], [role="listitem"]
 // present in the DOM, indicates the scheduler has rendered. The selector list
 // covers the composed root plus one dedicated page per view. Routes that carry
 // a roving-tabindex grid/list also declare `focusCheck.keys` — the arrow-key
-// sequence driven into the grid after axe passes, to verify issue #19's fix
-// (Year is out of scope for issue #19 — see MANUAL-CHECKLIST.md).
+// sequence driven into the grid after axe passes, to verify issue #19's fix.
+// Year's arrow keys move the anchor within a month matrix (ArrowDown +7,
+// ArrowRight +1); leading with ArrowDown guarantees a real move from the
+// initial row-0 cell regardless of which weekday the 1st falls on.
 const ROUTES = [
     { path: '/',       waitFor: '[data-calee-region="scheduler"], [data-calee-region="day-header"], [role="grid"]' },
     { path: '/day',    waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowDown', 'ArrowDown', 'ArrowDown'] } },
     { path: '/week',   waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown', 'ArrowRight'] } },
     { path: '/month',  waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown'] } },
-    { path: '/year',   waitFor: '[data-calee-region="year"]' },
+    { path: '/year',   waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowDown', 'ArrowRight', 'ArrowDown'] } },
     { path: '/agenda', waitFor: '[data-calee-region="agenda"]', focusCheck: { keys: ['ArrowDown', 'ArrowDown'] } },
     { path: '/fleet',  waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown'] } },
 ];

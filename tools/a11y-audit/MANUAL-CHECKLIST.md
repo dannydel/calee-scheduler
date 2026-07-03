@@ -17,28 +17,23 @@ Raised to a **WCAG 2.2 AA** baseline (issue #12) — see §8 for the 2.2-specifi
 manual checks axe cannot run itself (2.5.7 dragging movements, 2.4.11 focus
 not obscured, 2.5.8 target size spacing-exception notes).
 
-> ⚠️ **Known critical gap found while writing §8 (2026, issue #12 verification)
-> — read before testing arrow-key navigation anywhere in this document.**
-> Live-browser testing (Playwright, not bUnit — bUnit's headless DOM doesn't
-> exercise real focus) shows that **arrow-key roving-tabindex navigation
-> updates the `tabindex`/`aria-label` state correctly but never moves actual
-> browser focus** on Day, Week/WorkWeek, Month, Timeline (Fleet), *and*
-> Agenda. Concretely: focus a slot/cell, press ArrowDown/Right — the DOM's
-> `tabindex="0"` moves to the new target and its label is correct, but
-> `document.activeElement` (and the visible focus ring) stays on the
-> original element. No view calls `ElementReference.FocusAsync()` or the
-> shipped `calee-scheduler.js` `focusElement()` helper after an arrow-key
-> re-render. **Tab-based navigation is unaffected** (confirmed working —
-> Tab moves real focus using the browser's native tab order across
-> naturally-focusable elements; only the JS-driven *intra-widget* arrow-key
-> transfer is broken). This is a pre-existing, cross-cutting defect, not
-> something introduced by issue #12's target-size/CSS fixes, and it is
-> **out of scope to fix here** (a real behavior fix, not CSS/markup). Do not
-> mark any "Arrow-key navigation" row below as passing until a dedicated
-> follow-up lands; where the tables below say focus "moves," read that as
-> the *pre-existing intent*, not verified current behavior. Treat this as a
-> **P0 follow-up issue** — it undermines 2.1.1/2.4.7 as well as the 2.5.7
-> keyboard-alternative story in §8.1.
+> ✅ **P0 gap fixed (issue #19).** Arrow-key roving-tabindex navigation
+> previously updated the `tabindex`/`aria-label` state correctly but never
+> moved actual browser focus — `document.activeElement` stayed on the
+> previously-focused node. Fixed by calling `calee-scheduler.js`'s new
+> `focusActiveGridCell(container)` helper from every view's arrow-key handler,
+> after the tabindex swap has rendered (`OnAfterRenderAsync`'s
+> set-flag-then-consume-post-render pattern, mirroring the existing
+> `_scrollPending` idiom). Verified in a real browser via
+> `tools/a11y-audit/audit.mjs`'s focus-check step (Playwright driving Chromium,
+> not bUnit — bUnit's headless DOM cannot exercise real focus) on Day, Week,
+> Month, Fleet (Timeline), and Agenda; also covered by JS-module-invocation
+> assertions in `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs`.
+> Tab-based navigation was never affected. **Year view has the same
+> pre-existing gap but is out of scope for issue #19** (not listed in that
+> issue's affected-view enumeration) — treat any "Arrow-key navigation" row
+> for Year below as *pre-existing intent*, not verified current behavior,
+> until a follow-up covers it.
 
 ## Setup
 
@@ -158,7 +153,10 @@ mechanical CSS/markup fix — closing it needs either (a) widening
 `OnMoveModeRequested`/`OnResizeKeystrokeRequested` to carry the focused event
 (an API shape change, out of this issue's additive-only scope) or (b) a
 documented consumer-side wrapper pattern once the library exposes enough to
-build one. Tracked as a follow-up; do not mark this row passing.
+build one. Tracked as **issue #20** (open); do not mark this row passing.
+#20 was blocked on real roving-tabindex focus transfer (issue #19, now fixed —
+a keyboard "move mode" needs to know which event is actually focused), so #20
+is unblocked but not itself resolved by #19.
 
 ### 8.2 SC 2.4.11 — Focus Not Obscured (Minimum)
 
@@ -169,7 +167,7 @@ scroll position.
 | Region | Sticky/fixed chrome present? | Spot-check | Result |
 | --- | --- | --- | --- |
 | Day / Week / WorkWeek header row + all-day row | No — the header/all-day rows sit in normal flow *outside* the grid body's own `overflow-y: auto` region (they're not `position: sticky`), so the internally-scrolling body can never carry a focused cell underneath them. | Scroll the internal grid body to the bottom via keyboard (arrow-key focus-scroll or mouse wheel), confirm header stays visible and never paints over a focused cell. | Pass — structural, not just visual. |
-| Agenda date-group headers | **Yes** — `.calee-scheduler-agenda-header` is `position: sticky; top: 0; z-index: 2`, opaque background, inside the scrollable `.calee-scheduler-agenda-list`. | Scroll the list ~1 row height, then focus the row immediately below the sticky header (e.g. via Tab, since arrow-key transfer is broken per the banner above). Confirm the row's `:focus-visible` outline is not clipped by the header. | **Found broken, now fixed:** before this issue, a row scrolled to just under the header measured ~55% of its height behind the sticky header (25px of 45.5px, live-measured). Fixed by adding `scroll-margin-top: 3rem` to `.calee-scheduler-agenda-row` so the browser's native scroll-into-view-on-focus reserves clearance past the header. Re-verified after the fix: 0px overlap. Re-spot-check on any future change to `--calee-scheduler-agenda-header` padding/font-size (the `3rem` margin is a hand-measured constant, not derived from the header's actual height token). |
+| Agenda date-group headers | **Yes** — `.calee-scheduler-agenda-header` is `position: sticky; top: 0; z-index: 2`, opaque background, inside the scrollable `.calee-scheduler-agenda-list`. | Scroll the list ~1 row height, then focus the row immediately below the sticky header (via Tab, or via ArrowDown now that issue #19 makes arrow-key roving transfer real focus too). Confirm the row's `:focus-visible` outline is not clipped by the header. | **Found broken, now fixed:** before this issue, a row scrolled to just under the header measured ~55% of its height behind the sticky header (25px of 45.5px, live-measured). Fixed by adding `scroll-margin-top: 3rem` to `.calee-scheduler-agenda-row` so the browser's native scroll-into-view-on-focus reserves clearance past the header. Re-verified after the fix: 0px overlap. Re-spot-check on any future change to `--calee-scheduler-agenda-header` padding/font-size (the `3rem` margin is a hand-measured constant, not derived from the header's actual height token). |
 | Month "+N more" popover / event popovers, command palette, editor dialog | These are modal/anchored overlays the consumer's demo renders (`EventActionPopover`, `OverflowChooserPopover`, `EventEditorDialog`, `CommandPaletteDialog`) — check that Tab is trapped inside each while open and that no library chrome (toolbar, sticky headers) renders on top of the dialog's own focused control. | Open each dialog, Tab through its controls. | Pass (dialogs render above the scheduler via normal stacking; no sticky chrome shares their z-index layer in the demo's CSS). |
 | Toolbar (all views) | Toolbar is not sticky/fixed — it's a normal-flow row above the view body. | N/A | Pass — no overlap is structurally possible. |
 
@@ -203,17 +201,19 @@ spacing:
   markup as the `Day` mode but each cell represents a whole day rather than a slot —
   the `aria-label` distinguishes them ("empty slot" for the hourly Day mode, "empty cell"
   for the daily Week/Month modes).
-- **[P0 candidate, found 2026, issue #12]** Arrow-key roving-tabindex navigation
-  does not move real browser focus in any view (Day, Week/WorkWeek, Month,
-  Timeline/Fleet, Agenda) — see the banner near the top of this document. Tab
-  navigation is unaffected. Needs a dedicated follow-up issue; not fixed as
-  part of #12 (behavior fix, not CSS/markup — outside this issue's scope).
-- **[Issue #12]** Drag-to-move and drag-to-resize have no functional keyboard
-  (or other single-pointer) alternative in the library as shipped — see §8.1.
-  `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are parameterless
-  trigger placeholders; the demo does not wire either. Needs either a richer
-  payload (API change, out of scope for #12) or a documented consumer wrapper
-  pattern.
+- ~~**[P0, found 2026, issue #12 verification]** Arrow-key roving-tabindex
+  navigation does not move real browser focus in any view (Day, Week/WorkWeek,
+  Month, Timeline/Fleet, Agenda).~~ **Resolved (issue #19)** — see the banner
+  near the top of this document. Year view has the identical pre-existing gap
+  but was not in issue #19's affected-view enumeration; still open there.
+- **[Issue #20, open]** Drag-to-move and drag-to-resize have no functional
+  keyboard (or other single-pointer) alternative in the library as shipped —
+  see §8.1. `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are
+  parameterless trigger placeholders; the demo does not wire either. Issue #20
+  was blocked on the roving-tabindex real-focus fix above (a keyboard "move
+  mode" needs to know which event is actually focused); that block is now
+  cleared, but #20 itself still needs either a richer payload (API change) or
+  a documented consumer wrapper pattern — not fixed by #19.
 
 ## When this checklist passes
 

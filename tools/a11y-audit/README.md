@@ -52,6 +52,16 @@ For each of the seven demo routes (`/`, `/day`, `/week`, `/month`, `/year`,
    [`MANUAL-CHECKLIST.md`](./MANUAL-CHECKLIST.md) §8.
 3. Collects every violation (id, impact, helpUrl, offending selector + HTML
    snippet) into the report.
+4. **Issue #19 — roving-tabindex real-focus check.** On the routes that carry
+   a roving-tabindex grid/list (`/day`, `/week`, `/month`, `/agenda`,
+   `/fleet`), after axe passes: focuses the initial `tabindex="0"` cell/row,
+   drives a short arrow-key sequence, and asserts `document.activeElement`
+   matches the (now-different) `tabindex="0"` cell/row — i.e. that a real DOM
+   element received focus, not just that the attribute moved. This is the
+   live-browser counterpart to the bUnit JS-invocation assertions in
+   `RovingTabindexTests.cs` (below), which can't observe real focus at all.
+   Failures are reported per-route and fail the run (exit code 1), same as an
+   axe violation.
 
 ## What it does NOT check
 
@@ -61,12 +71,13 @@ For each of the seven demo routes (`/`, `/day`, `/week`, `/month`, `/year`,
 - **Default-theme contrast ratios.** Those are regression-tested directly in
   the .NET test suite — see
   `Calee.Scheduler.Tests/Accessibility/DefaultThemeContrastTests.cs`.
-- **Roving-tabindex correctness.** Asserted in bUnit tests — see
-  `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs`. Note: those
-  tests assert the `tabindex` *attribute* transfers correctly on keydown;
-  they run against bUnit's headless DOM and cannot assert that real browser
-  focus follows — see `MANUAL-CHECKLIST.md`'s top-of-file banner for a known
-  gap this surfaced.
+- **Roving-tabindex attribute correctness** (as opposed to the real-focus
+  transfer checked by step 4 above). Asserted in bUnit tests — see
+  `Calee.Scheduler.Tests/Accessibility/RovingTabindexTests.cs`. Those tests
+  assert the `tabindex` *attribute* transfers correctly on keydown and that
+  the JS focus-transfer helper is invoked with the right container; they run
+  against bUnit's headless DOM and cannot themselves observe real browser
+  focus — that's what this script's focus-check step is for.
 - **WCAG 2.2 SC 2.5.7 (dragging movements) and SC 2.4.11 (focus not obscured).**
   Neither is mechanically checkable by axe-core as of 4.11 — both are manual
   spot-checks, see `MANUAL-CHECKLIST.md` §8.1 / §8.2.
@@ -82,17 +93,25 @@ For each of the seven demo routes (`/`, `/day`, `/week`, `/month`, `/year`,
   "wcagTags": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"],
   "routes": [
     { "route": "/",       "violations": [] },
-    { "route": "/day",    "violations": [] },
-    { "route": "/week",   "violations": [] },
-    { "route": "/month",  "violations": [] },
+    { "route": "/day",    "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
+    { "route": "/week",   "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
+    { "route": "/month",  "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
     { "route": "/year",   "violations": [] },
-    { "route": "/agenda", "violations": [] },
-    { "route": "/fleet",  "violations": [] }
+    { "route": "/agenda", "violations": [], "focusCheck": { "pass": true, "detail": "..." } },
+    { "route": "/fleet",  "violations": [], "focusCheck": { "pass": true, "detail": "..." } }
   ],
-  "totalViolations": 0
+  "totalViolations": 0,
+  "focusChecksRun": 5,
+  "focusFailures": 0
 }
 ```
 
 A violation entry includes the axe rule id, impact (minor / moderate /
 serious / critical), a help URL pointing to deque.com, and each offending
 node's selector + 240-char HTML snippet.
+
+`focusCheck` (issue #19) only appears on routes with a roving-tabindex
+grid/list (`/day`, `/week`, `/month`, `/agenda`, `/fleet` — `/` and `/year`
+have none, per the affected-view scope in issue #19). `pass: false` fails the
+run exactly like an axe violation does; `detail` carries a human-readable
+explanation either way.

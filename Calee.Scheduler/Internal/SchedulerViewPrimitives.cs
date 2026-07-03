@@ -1,6 +1,7 @@
 #nullable enable
 using System.Globalization;
 using Calee.Scheduler.Contracts;
+using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 namespace Calee.Scheduler.Internal;
@@ -165,6 +166,32 @@ internal static class SchedulerViewPrimitives
             await module.InvokeVoidAsync("unregisterDayHeaderKeyGuard", handle);
         }
         catch (JSException) { /* Best-effort cleanup. */ }
+        catch (JSDisconnectedException) { /* Circuit gone. */ }
+        catch (InvalidOperationException) { /* No JS runtime in tests. */ }
+    }
+
+    /// <summary>
+    /// Move real browser focus to the grid/list's currently-tabbable roving-tabindex
+    /// cell (issue #19) — invokes <c>calee-scheduler.js</c>'s <c>focusActiveGridCell</c>,
+    /// which queries <paramref name="container"/> for the roving cell and calls
+    /// <c>.focus()</c> on it. Callers set a "focus move pending" flag when an arrow-key
+    /// handler changes the roving index, then call this from <c>OnAfterRenderAsync</c>
+    /// so the query runs only after the tabindex swap has actually rendered to the DOM
+    /// (querying before that would find the stale cell). Best-effort — swallows the
+    /// same JS-unavailability/teardown exceptions as the rest of this module's JS calls,
+    /// so a missing JS runtime (prerendering, test environments) degrades to "tabindex
+    /// state updated, no real focus move" — the pre-fix behavior — rather than a thrown
+    /// exception.
+    /// </summary>
+    /// <param name="module">The loaded JS module (callers only invoke this when non-null).</param>
+    /// <param name="container">The grid/list wrapper element to search within.</param>
+    internal static async Task TryFocusActiveGridCellAsync(IJSObjectReference module, ElementReference container)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("focusActiveGridCell", container);
+        }
+        catch (JSException) { /* Non-fatal — see summary. */ }
         catch (JSDisconnectedException) { /* Circuit gone. */ }
         catch (InvalidOperationException) { /* No JS runtime in tests. */ }
     }

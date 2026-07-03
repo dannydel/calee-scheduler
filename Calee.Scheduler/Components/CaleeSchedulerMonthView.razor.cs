@@ -104,6 +104,15 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
 
     private IJSObjectReference? _jsModule;
 
+    // The grid's outer wrapper (role="grid") — queried by focusActiveGridCell (issue #19)
+    // to find the currently-tabbable day cell.
+    private ElementReference _monthGridRef;
+
+    // Issue #19 — set by HandleGridKeyDownAsync when an arrow key moves the roving
+    // tabindex; consumed in OnAfterRenderAsync (after the tabindex swap has actually
+    // rendered) to move real browser focus onto the newly-active day cell.
+    private bool _focusMovePending;
+
     /// <summary>Inclusive start of the visible 6-week range.</summary>
     private DateTimeOffset GridStart => _gridCells.Length > 0 ? _gridCells[0].Start : default;
 
@@ -388,6 +397,15 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         if (firstRender)
         {
             _jsModule = await SchedulerViewPrimitives.TryLoadJsModuleAsync(JSRuntime);
+        }
+
+        // Issue #19 — move real browser focus onto the newly-active day cell after an
+        // arrow-key roving move. Deferred to here so the query runs after the tabindex
+        // swap has rendered to the DOM.
+        if (_focusMovePending && _jsModule is not null)
+        {
+            _focusMovePending = false;
+            await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _monthGridRef);
         }
     }
 
@@ -711,18 +729,22 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         {
             case "ArrowDown":
                 _focusedCellIndex = Math.Min(_gridCells.Length - 1, _focusedCellIndex + 7);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowUp":
                 _focusedCellIndex = Math.Max(0, _focusedCellIndex - 7);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowRight":
                 _focusedCellIndex = Math.Min(_gridCells.Length - 1, _focusedCellIndex + 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "ArrowLeft":
                 _focusedCellIndex = Math.Max(0, _focusedCellIndex - 1);
+                _focusMovePending = true;
                 StateHasChanged();
                 break;
             case "Enter":

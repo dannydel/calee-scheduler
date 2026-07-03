@@ -200,7 +200,7 @@
     color: #18181b;
     font-size: 0.75rem;
     /* Tightened from the browser default ~1.5 so three 24px-floor chips + a
-       bar lane + an overflow pill all fit inside the 7.25rem cell without the
+       bar lane + an overflow pill all fit inside the 7.5rem cell without the
        cell's overflow: hidden clipping the bottom row. */
     line-height: 1.35;
     text-align: left;

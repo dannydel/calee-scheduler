@@ -129,7 +129,21 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <para>
     /// <strong>Composes with blocked days (issue #8).</strong> A day <see cref="DayModifier"/>
     /// marks blocked keeps its blocked class/label and still renders this template —
-    /// blocking gates create affordances, not header content.
+    /// blocking gates create affordances, not header content. <c>aria-disabled</c> is
+    /// suppressed on the blocked label whenever <see cref="OnDayHeaderClicked"/> is
+    /// wired (an operable control must not also announce "disabled") — see that
+    /// parameter's remarks.
+    /// </para>
+    /// <para>
+    /// <strong>⚠️ Do not nest interactive controls inside this template when
+    /// <see cref="OnDayHeaderClicked"/> is wired.</strong> The header cell itself
+    /// becomes the interactive element (<c>role="button"</c>); a <c>&lt;button&gt;</c>,
+    /// <c>&lt;a&gt;</c>, or other focusable/clickable control placed inside it is a
+    /// nested-interactive ARIA violation, and its clicks bubble up to also fire
+    /// <see cref="OnDayHeaderClicked"/> — a double-fire footgun. This mirrors the
+    /// <c>EventTemplate</c> contract (ADR-0002): the library owns the interactive
+    /// envelope, the template owns non-interactive content inside it (e.g. an
+    /// <c>aria-hidden="true"</c> count badge).
     /// </para>
     /// </remarks>
     [Parameter]
@@ -146,11 +160,25 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <strong>Fail-closed by design.</strong> A header cell is made focusable and
     /// interactive (<c>tabindex</c>, <c>role="button"</c>, pointer cursor) only when
     /// this callback has a delegate wired (<see cref="EventCallback{T}.HasDelegate"/>).
-    /// An unwired header renders exactly as it did before issue #9.
+    /// An unwired header renders exactly as it did before issue #9. When wired, a
+    /// blocked day's <c>aria-disabled</c> is dropped (see <see cref="DayHeaderTemplate"/>'s
+    /// remarks) — an operable control never announces "disabled."
     /// </para>
     /// <para>
     /// <strong>Drag precedence.</strong> Suppressed while a drag is active, matching
     /// every other click handler in the library (ADR-0006).
+    /// </para>
+    /// <para>
+    /// <strong>Space doesn't scroll the page.</strong> The header is a
+    /// <c>&lt;div role="button"&gt;</c>, not a native <c>&lt;button&gt;</c>, so the
+    /// browser's default "Space scrolls the viewport" behavior isn't suppressed for
+    /// free. Rather than a Blazor <c>@onkeydown:preventDefault</c> directive (which is
+    /// element-wide and would also swallow Tab's default focus-move — a keyboard
+    /// trap), the view registers a scoped JS listener
+    /// (<c>calee-scheduler.js</c>'s <c>registerDayHeaderKeyGuard</c>) while this
+    /// callback has a delegate, and unregisters it on dispose. The listener
+    /// <c>preventDefault()</c>s only the Space key targeting an interactive day
+    /// header — every other key, including Tab, is untouched.
     /// </para>
     /// <para><strong>Which views honor this.</strong> Same as <see cref="DayHeaderTemplate"/>.</para>
     /// </remarks>

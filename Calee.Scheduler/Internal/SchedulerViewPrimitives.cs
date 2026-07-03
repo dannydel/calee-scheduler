@@ -131,6 +131,45 @@ internal static class SchedulerViewPrimitives
     }
 
     /// <summary>
+    /// Register the JS module's day-header Space-key guard (issue #9) — see
+    /// <c>registerDayHeaderKeyGuard</c> in <c>calee-scheduler.js</c> for why this
+    /// lives in JS rather than a Blazor <c>@onkeydown:preventDefault</c> directive
+    /// (the directive is element-wide and would also swallow Tab). Returns
+    /// <see langword="null"/> when the JS runtime is unavailable (typical in test
+    /// environments without a JS module mock) — callers treat <see langword="null"/>
+    /// as "no guard registered, nothing to unregister later."
+    /// </summary>
+    internal static async Task<string?> TryRegisterDayHeaderKeyGuardAsync(IJSObjectReference module)
+    {
+        try
+        {
+            return await module.InvokeAsync<string>("registerDayHeaderKeyGuard");
+        }
+        catch (JSException) { return null; }
+        catch (JSDisconnectedException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    /// <summary>
+    /// Unregister a day-header key guard previously registered via
+    /// <see cref="TryRegisterDayHeaderKeyGuardAsync"/>. No-ops when
+    /// <paramref name="handle"/> is <see langword="null"/> (nothing was registered).
+    /// Best-effort — swallows the same JS-unavailability exceptions the rest of the
+    /// module's teardown paths do.
+    /// </summary>
+    internal static async Task TryUnregisterDayHeaderKeyGuardAsync(IJSObjectReference module, string? handle)
+    {
+        if (handle is null) return;
+        try
+        {
+            await module.InvokeVoidAsync("unregisterDayHeaderKeyGuard", handle);
+        }
+        catch (JSException) { /* Best-effort cleanup. */ }
+        catch (JSDisconnectedException) { /* Circuit gone. */ }
+        catch (InvalidOperationException) { /* No JS runtime in tests. */ }
+    }
+
+    /// <summary>
     /// Compute the hour-offset from the top of the visible grid for the initial scroll
     /// position (FR-09b). Pixels-per-hour is read at runtime by the JS helper from
     /// <c>--calee-scheduler-pixels-per-hour</c>.
@@ -493,6 +532,15 @@ internal static class SchedulerViewPrimitives
     /// shape regardless of view, and by <see cref="BlockedDayAccessibleLabel"/> so a
     /// blocked day's announcement uses the identical date text as its prefix.
     /// </summary>
+    /// <remarks>
+    /// Deliberately formats with <see cref="CultureInfo.GetCultureInfo(string)"/>'s
+    /// <c>"en-US"</c> culture rather than the ambient <c>CurrentCulture</c> — this
+    /// matches every other accessible-name call site in the library (e.g. every
+    /// existing announcement built via this same format string) and is a consistency
+    /// choice for 1.x, not an oversight. This applies even to Week's non-blocked
+    /// header label, which prior to issue #9 formatted with <c>CurrentCulture</c>.
+    /// Localizing accessible names is a roadmap item.
+    /// </remarks>
     /// <param name="day">The day being described (its date portion is used).</param>
     internal static string DayHeaderAccessibleName(DateTimeOffset day) =>
         day.ToString("dddd, MMMM d, yyyy", CultureInfo.GetCultureInfo("en-US"));

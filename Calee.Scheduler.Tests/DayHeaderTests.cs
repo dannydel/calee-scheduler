@@ -232,6 +232,98 @@ public class DayHeaderTests
     }
 
     // ════════════════════════════════════════════════════════════════════════════
+    // JS day-header Space-key guard (issue #9 review fix — blocking #2)
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private const string ModulePath = "./_content/Calee.Scheduler/calee-scheduler.js";
+
+    [Fact]
+    public async Task Day_RegistersJsKeyGuard_When_OnDayHeaderClicked_Wired()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.OnDayHeaderClicked,
+                EventCallback.Factory.Create<DateTimeOffset>(this, _ => { })));
+
+        // First render already ran OnAfterRenderAsync, which registers the guard
+        // exactly once because OnDayHeaderClicked has a delegate wired.
+        Assert.Single(module.Invocations["registerDayHeaderKeyGuard"]);
+        _ = cut; // keep the render alive for the assertion above; no further interaction needed.
+    }
+
+    [Fact]
+    public void Day_DoesNotRegisterJsKeyGuard_When_OnDayHeaderClicked_Unwired()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+
+        ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        Assert.Empty(module.Invocations["registerDayHeaderKeyGuard"]);
+    }
+
+    [Fact]
+    public async Task Day_UnregistersJsKeyGuard_OnDispose()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+        module.SetupVoid("unregisterDayHeaderKeyGuard", _ => true).SetVoidResult();
+
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.OnDayHeaderClicked,
+                EventCallback.Factory.Create<DateTimeOffset>(this, _ => { })));
+
+        Assert.Single(module.Invocations["registerDayHeaderKeyGuard"]);
+
+        await cut.InvokeAsync(() => cut.Instance.DisposeAsync());
+
+        var unregisterCall = Assert.Single(module.Invocations["unregisterDayHeaderKeyGuard"]);
+        Assert.Equal("guard-1", unregisterCall.Arguments[0]);
+    }
+
+    [Fact]
+    public async Task Week_RegistersJsKeyGuard_When_OnDayHeaderClicked_Wired()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.OnDayHeaderClicked,
+                EventCallback.Factory.Create<DateTimeOffset>(this, _ => { })));
+
+        Assert.Single(module.Invocations["registerDayHeaderKeyGuard"]);
+        _ = cut;
+    }
+
+    [Fact]
+    public void Week_DoesNotRegisterJsKeyGuard_When_OnDayHeaderClicked_Unwired()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.Setup<string>("registerDayHeaderKeyGuard", _ => true).SetResult("guard-1");
+
+        ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor));
+
+        Assert.Empty(module.Invocations["registerDayHeaderKeyGuard"]);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
     // Blocked-day composition (issue #8)
     // ════════════════════════════════════════════════════════════════════════════
 
@@ -257,9 +349,34 @@ public class DayHeaderTests
         Assert.Contains("Blocked — holiday", header.GetAttribute("aria-label") ?? string.Empty);
         Assert.NotNull(header.QuerySelector(".test-day-header-marker"));
 
+        // Not spec-contradicting (review fix): an interactive header (OnDayHeaderClicked
+        // wired) is an operable button, so it must NOT also carry aria-disabled="true" —
+        // a screen reader would announce "disabled" on a control that visibly activates.
+        // The blocked state is still conveyed via the ", blocked"-suffixed aria-label above.
+        Assert.False(header.HasAttribute("aria-disabled"));
+
         await cut.InvokeAsync(() => header.Click());
         var expected = new DateTimeOffset(Anchor.Date, TZ.GetUtcOffset(Anchor.Date));
         Assert.Equal(expected, fired);
+    }
+
+    [Fact]
+    public void Day_BlockedDay_NonInteractive_StillCarriesAriaDisabled()
+    {
+        // Contrast case for the fix above: with OnDayHeaderClicked unwired, the header
+        // is not an operable control, so the original aria-disabled="true" contract
+        // (issue #8) is unchanged.
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.DayModifier,
+                (Func<DateTimeOffset, SchedulerDayState?>)(day => DateOnly.FromDateTime(day.Date) == DateOnly.FromDateTime(Anchor.Date)
+                    ? new SchedulerDayState(IsBlocked: true, Label: "Blocked — holiday")
+                    : null)));
+
+        var header = cut.Find("[data-calee-region='day-header']");
+        Assert.Equal("true", header.GetAttribute("aria-disabled"));
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -399,10 +516,30 @@ public class DayHeaderTests
         Assert.Contains("calee-scheduler-day-blocked", blockedHeader.GetAttribute("class") ?? string.Empty);
         Assert.Contains("Blocked — no route", blockedHeader.GetAttribute("aria-label") ?? string.Empty);
         Assert.NotNull(blockedHeader.QuerySelector(".test-day-header-marker"));
+        // Review fix: interactive + blocked must NOT carry aria-disabled — see the Day
+        // view's equivalent assertion for the full rationale.
+        Assert.False(blockedHeader.HasAttribute("aria-disabled"));
 
         await cut.InvokeAsync(() => blockedHeader.Click());
         var expected = new DateTimeOffset(Anchor.Date, TZ.GetUtcOffset(Anchor.Date));
         Assert.Equal(expected, fired);
+    }
+
+    [Fact]
+    public void Week_BlockedColumn_NonInteractive_StillCarriesAriaDisabled()
+    {
+        using var ctx = NewContext();
+        var blockedDate = DateOnly.FromDateTime(Anchor.Date);
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.DayModifier,
+                (Func<DateTimeOffset, SchedulerDayState?>)(day => DateOnly.FromDateTime(day.Date) == blockedDate
+                    ? new SchedulerDayState(IsBlocked: true, Label: "Blocked — no route")
+                    : null)));
+
+        var headers = cut.FindAll("[data-calee-region='day-header']");
+        Assert.Equal("true", headers[2].GetAttribute("aria-disabled"));
     }
 
     // ════════════════════════════════════════════════════════════════════════════

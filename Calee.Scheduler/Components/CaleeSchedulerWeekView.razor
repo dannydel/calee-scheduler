@@ -59,14 +59,19 @@
                role="button", pointer cursor) when OnDayHeaderClicked has a delegate —
                an unwired header stays byte-identical to the pre-#9 markup. Blocked
                (issue #8) columns keep their blocked aria-label regardless; the
-               template still renders and the click still fires for a blocked day. *@
+               template still renders and the click still fires for a blocked day.
+               aria-disabled is suppressed whenever the column is interactive — an
+               operable role="button" must never also announce "disabled" (the blocked
+               state is still conveyed via the ", blocked"-suffixed aria-label); a
+               non-interactive blocked column keeps aria-disabled="true" as issue #8
+               shipped it. *@
             <div class="@headerClasses"
                  data-calee-region="day-header"
                  tabindex="@(IsDayHeaderInteractive ? 0 : (int?)null)"
                  role="@(IsDayHeaderInteractive ? "button" : null)"
                  aria-label="@(colBlocked ? BlockedDayHeaderLabel(col) : DayHeaderAccessibleName(col))"
                  aria-current="@(isToday ? "date" : null)"
-                 aria-disabled="@(colBlocked ? "true" : null)"
+                 aria-disabled="@(colBlocked && !IsDayHeaderInteractive ? "true" : null)"
                  @onclick="@(IsDayHeaderInteractive ? EventCallback.Factory.Create(this, () => HandleDayHeaderClickAsync(col)) : default)"
                  @onkeydown="@(IsDayHeaderInteractive ? EventCallback.Factory.Create<KeyboardEventArgs>(this, e => HandleDayHeaderKeyDownAsync(e, col)) : default)">
                 <div class="calee-scheduler-day-header-weekday">@WeekDays[col].Start.ToString("ddd")</div>

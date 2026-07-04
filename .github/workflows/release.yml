@@ -39,7 +39,7 @@ jobs:
     name: Build, test, pack, publish
     runs-on: ubuntu-latest
     permissions:
-      # Needed by softprops/action-gh-release@v2 to create the GitHub Release.
+      # Needed by softprops/action-gh-release@v3 to create the GitHub Release.
       contents: write
 
     steps:
@@ -95,7 +95,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}

@@ -133,6 +133,11 @@
     --calee-scheduler-pixels-per-hour: 56px;
     --calee-scheduler-selected-color: #f59e0b;
 
+    /* Drop-target highlight (issue #13) */
+    --calee-scheduler-drop-target-bg: rgba(37, 99, 235, 0.15);
+    --calee-scheduler-drop-target-border: #2563eb;
+    --calee-scheduler-drop-target-outline: rgba(37, 99, 235, 0.6);
+
     display: flex;
     flex-direction: column;
     /* Ensure children that flex to fill (e.g., the hour-grid scrollable region in
@@ -164,4 +169,37 @@
  */
 ::deep .calee-scheduler-drag-ghost {
     pointer-events: none;
+}
+
+/*
+ * Drop-target highlight (issue #13). The JS pointer-drag module creates this
+ * element during a drag and positions it at the snapped target location. The
+ * highlight uses a background tint + dashed border + outline so it does not
+ * rely on color alone (WCAG 2.2 AA 1.4.11). Default colors meet non-text
+ * contrast (3:1) against the grid background.
+ *
+ * The highlight is appended to the grid container (not <body>) so it scrolls
+ * with the grid and stays in sync with the coordinate system.
+ */
+::deep .calee-scheduler-drop-target-highlight {
+    background: var(--calee-scheduler-drop-target-bg);
+    border: 2px dashed var(--calee-scheduler-drop-target-border);
+    outline: 1px solid var(--calee-scheduler-drop-target-outline);
+    pointer-events: none;
+    z-index: 5;
+    transition: all 50ms ease-out;
+    box-sizing: border-box;
+}
+
+/*
+ * Keyboard move/resize phantom (issue #13). When the user has activated
+ * keyboard-move or keyboard-resize mode, the event chip at the phantom position
+ * carries this class so it is visually distinguished from a static event. The
+ * same background-tint + dashed-border + outline treatment as the pointer-drag
+ * drop-target highlight; both meet WCAG 2.2 AA 1.4.11 (do not rely on color alone).
+ */
+::deep .calee-scheduler-event--keyboard-phantom {
+    background: var(--calee-scheduler-drop-target-bg) !important;
+    border: 2px dashed var(--calee-scheduler-drop-target-border) !important;
+    outline: 1px solid var(--calee-scheduler-drop-target-outline) !important;
 }

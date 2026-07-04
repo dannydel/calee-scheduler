@@ -120,6 +120,35 @@ internal sealed class PointerDragInterop : IAsyncDisposable
     /// &gt; 0. Total number of equal slices along the cross axis. The ghost's cross-axis
     /// size becomes <c>elementRect.crossAxis / crossAxisDivisions</c>.
     /// </param>
+    /// <param name="highlightContainer">
+    /// The grid container the drop-target highlight element is appended to (issue #13).
+    /// Pass <see cref="ElementReference"/> of the hour-grid / time-area container.
+    /// When omitted, no highlight is created.
+    /// </param>
+    /// <param name="highlightMode">
+    /// The shape of the drop-target highlight (issue #13). <c>"slot-band"</c> for
+    /// Day/Week views, <c>"lane-row"</c> for Timeline view, <c>"day-cell"</c> for
+    /// Month view (deferred to issue #11). When <see langword="null"/>, no highlight
+    /// is created.
+    /// </param>
+    /// <param name="eventDurationPixels">
+    /// For move: the event's height (Day/Week) or width (Timeline) in pixels (issue #13).
+    /// </param>
+    /// <param name="eventDurationSlots">
+    /// For move: the event's duration in slot-count (issue #13).
+    /// </param>
+    /// <param name="eventDurationDays">
+    /// For Week/Timeline move: the event's duration in calendar days (issue #13).
+    /// </param>
+    /// <param name="columnCount">
+    /// For Week view: the number of visible day columns (issue #13). Defaults to 1.
+    /// </param>
+    /// <param name="rowCount">
+    /// For Timeline view: the number of lane rows (issue #13). Defaults to 1.
+    /// </param>
+    /// <param name="slotCount">
+    /// For Day/Week/Timeline: the number of time slots (issue #13). Defaults to 0.
+    /// </param>
     public async Task StartDragAsync(
         ElementReference elementRef,
         DragMode mode,
@@ -133,7 +162,15 @@ internal sealed class PointerDragInterop : IAsyncDisposable
         double? anchorViewportY = null,
         int thresholdPx = 5,
         int? crossAxisIndex = null,
-        int? crossAxisDivisions = null)
+        int? crossAxisDivisions = null,
+        ElementReference highlightContainer = default,
+        string? highlightMode = null,
+        double eventDurationPixels = 0,
+        int eventDurationSlots = 0,
+        int eventDurationDays = 0,
+        int columnCount = 1,
+        int rowCount = 1,
+        int slotCount = 0)
     {
         if (_disposed)
         {
@@ -190,14 +227,18 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 snapPixelsX,
                 snapPixelsY,
                 ghostClass,
+                highlightContainer,
+                highlightMode,
+                eventDurationPixels,
+                eventDurationSlots,
+                eventDurationDays,
+                columnCount,
+                rowCount,
+                slotCount,
             });
         }
         else if (mode == DragMode.CreateRegion)
         {
-            // crossAxisIndex + crossAxisDivisions are an optional pair — both null
-            // means the JS uses elementRef's full cross-axis extent (Day view);
-            // both set means it slices that extent into N parts and uses the i-th
-            // slice (Week / Timeline lane-bounded ghost).
             _activeHandle = await _module.InvokeAsync<string>("startDrag", elementRef, new
             {
                 mode = ModeToString(mode),
@@ -213,6 +254,14 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 snapPixelsX,
                 snapPixelsY,
                 ghostClass,
+                highlightContainer,
+                highlightMode,
+                eventDurationPixels,
+                eventDurationSlots,
+                eventDurationDays,
+                columnCount,
+                rowCount,
+                slotCount,
             });
         }
         else
@@ -226,6 +275,14 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 snapPixelsX,
                 snapPixelsY,
                 ghostClass,
+                highlightContainer,
+                highlightMode,
+                eventDurationPixels,
+                eventDurationSlots,
+                eventDurationDays,
+                columnCount,
+                rowCount,
+                slotCount,
             });
         }
     }

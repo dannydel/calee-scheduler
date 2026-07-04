@@ -627,6 +627,9 @@ Full surface (defaults shown):
 | `--calee-scheduler-toolbar-button-bg`              | `#f4f4f5`   | Toolbar button background (idle).                                           |
 | `--calee-scheduler-toolbar-button-hover-bg`        | `#e4e4e7`   | Toolbar button background (hover).                                          |
 | `--calee-scheduler-toolbar-active-bg`              | `#dbeafe`   | Toolbar active-view-button highlight tint.                                  |
+| `--calee-scheduler-drop-target-bg`                 | `rgba(37, 99, 235, 0.15)` | Drop-target highlight background tint (issue #13, §8.7).           |
+| `--calee-scheduler-drop-target-border`             | `#2563eb`   | Dashed border color of the drop-target highlight (issue #13, §8.7).         |
+| `--calee-scheduler-drop-target-outline`            | `rgba(37, 99, 235, 0.3)`  | Optional outline for additional highlight contrast (issue #13, §8.7).  |
 
 The default theme is WCAG 2.1 AA contrast-verified — regression tests in `Calee.Scheduler.Tests/Accessibility/DefaultThemeContrastTests.cs` lock these defaults to passing values. If you override them, re-run the contrast checks against your palette.
 
@@ -675,7 +678,7 @@ Every region carries a stable `data-calee-region` attribute (FR-55) so consumer 
 }
 ```
 
-Documented regions: `scheduler`, `toolbar`, `toolbar-today`, `toolbar-prev`, `toolbar-next`, `range-label`, `view-switcher`, `toolbar-view-button`, `day-header`, `time-gutter`, `all-day`, `hour-grid`, `event`, `overflow-chip`, `month-cell`, `lane-rows`, `lane-row`, `unassigned-row`, `lane-label`.
+Documented regions: `scheduler`, `toolbar`, `toolbar-today`, `toolbar-prev`, `toolbar-next`, `range-label`, `view-switcher`, `toolbar-view-button`, `day-header`, `time-gutter`, `all-day`, `hour-grid`, `event`, `overflow-chip`, `month-cell`, `lane-rows`, `lane-row`, `unassigned-row`, `lane-label`. JS-created elements: `.calee-scheduler-drop-target-highlight` (drop-target highlight, issue #13), `.calee-scheduler-drag-ghost` (drag ghost).
 
 ### 8.5 Putting it together
 
@@ -711,6 +714,41 @@ A consumer that wants a darker theme, a custom test hook, a class on the toolbar
 
 ::deep .evt-tentative { opacity: 0.65; border-left-style: dashed !important; }
 ```
+
+### 8.7 Drop-target highlight (issue #13)
+
+During drag operations (move, resize), the library renders a visual drop-target highlight that tracks the snapped target location — the user sees where the event will land before releasing the pointer. The highlight is JS-created and lives in the grid container (not `<body>`) so it scrolls with the view. Keyboard move/resize mirrors the same visual treatment via the `.calee-scheduler-event--keyboard-phantom` class on the phantom event chip.
+
+**CSS custom properties** (defaults, set on `.calee-scheduler`):
+
+| Variable                               | Default                  | Description |
+| -------------------------------------- | ------------------------ | ----------- |
+| `--calee-scheduler-drop-target-bg`     | `rgba(37, 99, 235, 0.15)` | Background tint. |
+| `--calee-scheduler-drop-target-border` | `#2563eb`                | Dashed border color (meets WCAG 2.2 AA 3:1 non-text contrast against the default grid background). |
+| `--calee-scheduler-drop-target-outline`| `rgba(37, 99, 235, 0.3)`  | Optional outline for additional contrast weighting. |
+
+**Class hooks:**
+
+| Class | Where | Purpose |
+| ----- | ----- | ------- |
+| `.calee-scheduler-drop-target-highlight` | JS-created element, child of the grid container during a drag. | Pointer-driven drop-target indicator. |
+| `.calee-scheduler-event--keyboard-phantom` | Event chip during keyboard-move/resize mode. | Keyboard-driven target indicator (same visual treatment). |
+
+To restyle the highlight, override the properties or use `::deep`:
+
+```css
+::deep .calee-scheduler-drop-target-highlight {
+    background: rgba(16, 185, 129, 0.15);  /* Green tint */
+    border-color: #10b981;
+}
+
+::deep .calee-scheduler-event--keyboard-phantom {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: #10b981;
+}
+```
+
+The default highlight does **not** rely on color alone (WCAG 2.2 AA 1.4.11): it uses a background tint + dashed border + outline.
 
 ---
 

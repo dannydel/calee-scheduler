@@ -249,10 +249,12 @@
                             var clipTop = ClippedTop(pe);
                             var clipBot = ClippedBottom(pe);
                             var isSelected = IsEventSelected(displayEv.Id);
+                            var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == displayEv.Id;
                             var classes = "calee-scheduler-event"
                                 + (clipTop ? " calee-scheduler-event--clip-top" : string.Empty)
                                 + (clipBot ? " calee-scheduler-event--clip-bottom" : string.Empty)
                                 + (isSelected ? " calee-scheduler-event--selected" : string.Empty)
+                                + (isInKeyboardMoveMode ? " calee-scheduler-event--keyboard-phantom" : string.Empty)
                                 + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
                             var durationMinutes = (displayEv.End - displayEv.Start).TotalMinutes;
                             var showTime = durationMinutes >= 30;

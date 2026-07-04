@@ -280,10 +280,12 @@
                             var clipLeft = ClippedLeft(pe);
                             var clipRight = ClippedRight(pe);
                             var isSelected = IsEventSelected(displayEv.Id);
+                            var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == displayEv.Id;
                             var classes = "calee-scheduler-timeline-event"
                                 + (clipLeft ? " calee-scheduler-timeline-event--clip-left" : string.Empty)
                                 + (clipRight ? " calee-scheduler-timeline-event--clip-right" : string.Empty)
                                 + (isSelected ? " calee-scheduler-timeline-event--selected" : string.Empty)
+                                + (isInKeyboardMoveMode ? " calee-scheduler-event--keyboard-phantom" : string.Empty)
                                 + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
                             var dragEnabled = AllowDragToMove;
                             var resizeEnabled = AllowDragToResize;

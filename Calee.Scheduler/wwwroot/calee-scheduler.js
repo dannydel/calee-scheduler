@@ -341,8 +341,105 @@ function _cleanup(handle) {
         state.ghost.parentNode.removeChild(state.ghost);
     }
 
+    // Remove the highlight (issue #13).
+    if (state.highlight && state.highlight.parentNode) {
+        state.highlight.parentNode.removeChild(state.highlight);
+    }
+
     // Restore the body cursor.
     document.body.style.cursor = state.priorBodyCursor ?? '';
+}
+
+/**
+ * Update the drop-target highlight for slot-band mode (Day/Week views).
+ * The highlight occupies one column and spans eventDurationPixels vertically,
+ * anchored at the snapped (column, slot) position within the grid rect.
+ * Issue #13 — no Blazor round-trip, driven from the existing pointermove path.
+ *
+ * @param {object} state The drag state.
+ * @param {number} dxSnapped Snapped horizontal delta in pixels.
+ * @param {number} dySnapped Snapped vertical delta in pixels.
+ * @param {DOMRect} originalRect The source element's bounding rect at drag start.
+ */
+function _updateSlotBandHighlight(state, dxSnapped, dySnapped, originalRect) {
+    const { highlight, eventDurationPixels, eventDurationSlots, eventDurationDays, columnCount, slotCount } = state;
+    if (!highlight) return;
+
+    // Defensive guards: bail out if geometry is invalid (prevents NaN positions).
+    if (columnCount <= 0 || slotCount <= 0) return;
+
+    // The source event chip is always one column wide (Day view = single column,
+    // Week view = one day column). Derive slot height from the already-correct
+    // event duration values rather than dividing the chip's height by slotCount
+    // (which would be wrong — the chip spans multiple slots, not the whole grid).
+    const columnWidth = originalRect.width;
+    if (columnWidth <= 0) return;
+
+    const slotHeight = eventDurationSlots > 0
+        ? eventDurationPixels / eventDurationSlots
+        : 0;
+
+    const targetColumn = Math.max(0, Math.min(columnCount - 1,
+        Math.floor(dxSnapped / columnWidth)));
+    const targetSlot = slotHeight > 0
+        ? Math.max(0, Math.min(slotCount - 1, Math.floor(dySnapped / slotHeight)))
+        : 0;
+
+    // Multi-day events span multiple columns (Week view). Single-day events
+    // (eventDurationDays <= 1 or Day view) span one column.
+    const highlightWidth = eventDurationDays > 1
+        ? columnWidth * eventDurationDays
+        : columnWidth;
+
+    highlight.style.left = (targetColumn * columnWidth) + 'px';
+    highlight.style.top = (targetSlot * slotHeight) + 'px';
+    highlight.style.width = highlightWidth + 'px';
+    highlight.style.height = eventDurationPixels + 'px';
+}
+
+/**
+ * Update the drop-target highlight for lane-row mode (Timeline view).
+ * The highlight spans eventDurationPixels horizontally at the snapped
+ * (time-position, lane-row) position within the grid rect.
+ * Issue #13 — no Blazor round-trip, driven from the existing pointermove path.
+ *
+ * @param {object} state The drag state.
+ * @param {number} dxSnapped Snapped horizontal delta in pixels.
+ * @param {number} dySnapped Snapped vertical delta in pixels.
+ * @param {DOMRect} originalRect The source element's bounding rect at drag start.
+ */
+function _updateLaneRowHighlight(state, dxSnapped, dySnapped, originalRect) {
+    const { highlight, eventDurationPixels, rowCount } = state;
+    if (!highlight) return;
+
+    // Defensive guards: bail out if geometry is invalid (prevents NaN positions).
+    if (rowCount <= 0) return;
+
+    // The source event chip is always one lane row tall in Timeline view.
+    // Derive row height directly from the chip's height (not divided by rowCount).
+    const rowHeight = originalRect.height;
+    if (rowHeight <= 0) return;
+
+    const targetRow = Math.max(0, Math.min(rowCount - 1,
+        Math.floor(dySnapped / rowHeight)));
+
+    highlight.style.left = dxSnapped + 'px';
+    highlight.style.top = (targetRow * rowHeight) + 'px';
+    highlight.style.width = eventDurationPixels + 'px';
+    highlight.style.height = rowHeight + 'px';
+}
+
+/**
+ * Update the drop-target highlight for day-cell mode (Month view).
+ * Deferred to issue #11 (Month view drag-to-move); no-ops in the meantime.
+ *
+ * @param {object} state The drag state.
+ * @param {number} dxSnapped Snapped horizontal delta in pixels.
+ * @param {number} dySnapped Snapped vertical delta in pixels.
+ * @param {DOMRect} originalRect The source element's bounding rect at drag start.
+ */
+function _updateDayCellHighlight(state, dxSnapped, dySnapped, originalRect) {
+    // Deferred to issue #11 (Month view drag-to-move).
 }
 
 /**
@@ -389,6 +486,14 @@ function _cleanup(handle) {
  * @param {number} options.snapPixelsX Horizontal snap granularity in pixels (0 = no snap).
  * @param {number} options.snapPixelsY Vertical snap granularity in pixels (0 = no snap).
  * @param {string} options.ghostClass CSS class applied to the ghost element.
+ * @param {HTMLElement} [options.highlightContainer] The grid container to append the highlight to (issue #13).
+ * @param {'slot-band'|'lane-row'|'day-cell'} [options.highlightMode] The shape of the highlight (issue #13).
+ * @param {number} [options.eventDurationPixels] For move: the event's height/width in pixels (issue #13).
+ * @param {number} [options.eventDurationSlots] For move: the event's duration in slots (issue #13).
+ * @param {number} [options.eventDurationDays] For Week/Timeline move: the event's duration in days (issue #13).
+ * @param {number} [options.columnCount] For Week view: the number of visible day columns (issue #13).
+ * @param {number} [options.rowCount] For Timeline view: the number of lane rows (issue #13).
+ * @param {number} [options.slotCount] For Day/Week/Timeline: the number of time slots (issue #13).
  * @returns {string} A handle the C# side stores to call abortDrag.
  */
 export function startDrag(elementRef, options) {
@@ -403,6 +508,14 @@ export function startDrag(elementRef, options) {
             crossAxisIndex, crossAxisDivisions,
             dotnetRef, onDropMethodName, onCancelMethodName,
             snapPixelsX, snapPixelsY, ghostClass } = options;
+    const highlightContainer = options.highlightContainer || null;
+    const highlightMode = options.highlightMode || null;
+    const eventDurationPixels = options.eventDurationPixels || 0;
+    const eventDurationSlots = options.eventDurationSlots || 0;
+    const eventDurationDays = options.eventDurationDays || 0;
+    const columnCount = options.columnCount || 1;
+    const rowCount = options.rowCount || 1;
+    const slotCount = options.slotCount || 0;
     if (mode !== 'move' && mode !== 'resize-end' && mode !== 'create-region') {
         throw new Error(`startDrag: unknown mode '${mode}'.`);
     }
@@ -513,6 +626,19 @@ export function startDrag(elementRef, options) {
     ghost.style.transition = 'none';
     document.body.appendChild(ghost);
 
+    // Build the highlight element (issue #13). The highlight is appended to the grid
+    // container (not <body>) so it scrolls with the grid and stays in the same
+    // coordinate system as the snap math. Like the ghost, the highlight is
+    // position:absolute + pointer-events:none.
+    let highlight = null;
+    if (highlightContainer && highlightMode) {
+        highlight = document.createElement('div');
+        highlight.classList.add('calee-scheduler-drop-target-highlight');
+        highlight.style.position = 'absolute';
+        highlight.style.pointerEvents = 'none';
+        highlightContainer.appendChild(highlight);
+    }
+
     // Body cursor cue. For resize-end and create-region the axis decides the
     // cursor; for move we use the standard grabbing affordance.
     const priorBodyCursor = document.body.style.cursor;
@@ -545,6 +671,15 @@ export function startDrag(elementRef, options) {
 
     const state = {
         ghost,
+        highlight,
+        highlightContainer,
+        highlightMode,
+        eventDurationPixels,
+        eventDurationSlots,
+        eventDurationDays,
+        columnCount,
+        rowCount,
+        slotCount,
         // For create-region the anchor IS the pointer-down position (supplied by C#).
         // For move/resize-end the anchor is the source element's center; the first
         // pointermove re-binds startX/Y to the real cursor position so the delta math
@@ -659,6 +794,20 @@ export function startDrag(elementRef, options) {
             }
         } else {
             ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+
+        // Update the drop-target highlight (issue #13). The snap is applied to
+        // the highlight position so it shows where the event will land on drop.
+        if (state.highlight) {
+            const dxSnapped = _snap(dx, state.snapPixelsX);
+            const dySnapped = _snap(dy, state.snapPixelsY);
+            if (state.highlightMode === 'slot-band') {
+                _updateSlotBandHighlight(state, dxSnapped, dySnapped, rect);
+            } else if (state.highlightMode === 'lane-row') {
+                _updateLaneRowHighlight(state, dxSnapped, dySnapped, rect);
+            } else if (state.highlightMode === 'day-cell') {
+                _updateDayCellHighlight(state, dxSnapped, dySnapped, rect);
+            }
         }
     };
 

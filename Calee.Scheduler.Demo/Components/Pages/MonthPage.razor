@@ -16,11 +16,13 @@
                                  Events="@_events"
                                  MaxEventsPerDay="3"
                                  AllowDoubleClickToCreate="true"
+                                 AllowDragToMove="true"
                                  AllowMultiSelect="true"
                                  AllowDelete="true"
                                  AllowUndoRedo="true"
                                  AllowCommandPalette="true"
                                  OnEventCreated="HandleCreated"
+                                 OnEventMoved="HandleEventMoved"
                                  OnEventClicked="HandleEventClicked"
                                  OnEventDeleted="HandleDeleted"
                                  OnEventsDeleted="HandleEventsDeleted"
@@ -87,6 +89,27 @@
         _dialogStart = ctx.Slot.Start;
         _dialogEnd = ctx.Slot.End;
         _dialogVisible = true;
+    }
+
+    private void HandleEventMoved(EventMoveContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        var before = _events[idx];
+        var after = before with { Start = ctx.NewStart, End = ctx.NewEnd };
+        _events[idx] = after;
+
+        _history.Push(
+            forward: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == after.Id);
+                if (i >= 0) _events[i] = after;
+            },
+            inverse: () =>
+            {
+                var i = _events.FindIndex(e => e.Id == before.Id);
+                if (i >= 0) _events[i] = before;
+            });
     }
 
     // ── Click-popover state ─────────────────────────────────────────────────

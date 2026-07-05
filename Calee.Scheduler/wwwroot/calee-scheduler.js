@@ -439,7 +439,28 @@ function _updateLaneRowHighlight(state, dxSnapped, dySnapped, originalRect) {
  * @param {DOMRect} originalRect The source element's bounding rect at drag start.
  */
 function _updateDayCellHighlight(state, dxSnapped, dySnapped, originalRect) {
-    // Deferred to issue #11 (Month view drag-to-move).
+    if (!state.highlight || !state.highlightContainer) return;
+
+    var gridRect = state.highlightContainer.getBoundingClientRect();
+    var firstWeekRow = state.highlightContainer.querySelector('.calee-scheduler-month-week-row');
+    if (!firstWeekRow) return;
+
+    var headerHeight = firstWeekRow.getBoundingClientRect().top - gridRect.top;
+    var gridContentHeight = gridRect.height - headerHeight;
+    var cellWidth = gridRect.width / state.columnCount;
+    var cellHeight = gridContentHeight / state.rowCount;
+
+    var targetLeft = (originalRect.left - gridRect.left) + dxSnapped;
+    var targetTop = (originalRect.top - gridRect.top) + dySnapped - headerHeight;
+
+    var colIndex = Math.max(0, Math.min(state.columnCount - 1, Math.round(targetLeft / cellWidth)));
+    var rowIndex = Math.max(0, Math.min(state.rowCount - 1, Math.round(targetTop / cellHeight)));
+
+    state.highlight.style.left = (colIndex * cellWidth) + 'px';
+    state.highlight.style.top = (headerHeight + rowIndex * cellHeight) + 'px';
+    state.highlight.style.width = cellWidth + 'px';
+    state.highlight.style.height = cellHeight + 'px';
+    state.highlight.style.display = '';
 }
 
 /**

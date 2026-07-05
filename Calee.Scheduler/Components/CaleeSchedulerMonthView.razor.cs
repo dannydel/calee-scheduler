@@ -12,6 +12,8 @@ namespace Calee.Scheduler.Components;
 /// grid covering the calendar month containing <c>CurrentDate</c>, with single-day events
 /// as compact chips, multi-day events as continuous bars overlaid across cells, and a
 /// "+N more" overflow chip per cell once <c>MaxEventsPerDay</c> is exceeded.
+/// Supports drag-to-move (FR-25) and keyboard move mode (WCAG 2.2 SC 2.5.7) when
+/// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -95,6 +97,29 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     // Cache the consumer's TEvent by Id so click handlers can fire with the original reference.
     private Dictionary<string, TEvent> _eventLookup = new();
 
+    /// <summary>
+    /// Per-event element refs the drag layer uses as the ghost source. Keyed by event id
+    /// so chips and bars whose position changes between renders still resolve to their
+    /// captured DOM element.
+    /// </summary>
+    private readonly Dictionary<string, ElementReference> _eventRefsByEventId = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Optimistic pins for in-flight or just-completed drag-to-move and keyboard-move
+    /// operations (ADR-0006). The rendering pipeline substitutes (Start, End) in this
+    /// dictionary for the consumer-supplied event's authoritative times so the new position
+    /// is visible before the consumer's data round-trip completes.
+    /// </summary>
+    private readonly Dictionary<string, (DateTimeOffset Start, DateTimeOffset End)> _optimisticPin =
+        new(StringComparer.Ordinal);
+
+    // Keyboard move mode state
+    private bool _keyboardMoveMode;
+    private string? _keyboardMoveEventId;
+    private int _keyboardMovePhantomCellOffset;
+    private DateTimeOffset _keyboardMoveOriginalStart;
+    private DateTimeOffset _keyboardMoveOriginalEnd;
+
     // Roving-tabindex anchor for the grid: linear index (0..41).
     private int _focusedCellIndex;
 
@@ -148,6 +173,12 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
             }
         }
 
+        // Optimistic-pin housekeeping (ADR-0006). Drop entries the consumer has caught
+        // up on — i.e., the consumer's authoritative Start/End for the event now matches
+        // the pinned values, so the pin is redundant. Performed before computing layout
+        // so the engine sees only still-relevant pins.
+        ClearAcknowledgedPins();
+
         ComputeLayout();
 
         if (_lastRangeStart != GridStart || _lastRangeEnd != GridEndExclusive)
@@ -193,6 +224,20 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         var filtered = GetFilteredEvents();
         _eventLookup = new Dictionary<string, TEvent>(filtered.Count);
 
+        // Populate event lookup from the consumer's original list so click handlers
+        // always return the consumer's reference, never a pinned wrapper.
+        foreach (var ev in filtered)
+        {
+            _eventLookup[ev.Id] = ev;
+        }
+
+        // Apply optimistic-pin overrides (ADR-0006). Pinned events are wrapped in
+        // EventChunk<TEvent> with substituted Start/End so the classification loop
+        // below sees the pinned times.
+        IReadOnlyList<ICalendarEvent> eventsForLayout = _optimisticPin.Count > 0
+            ? ApplyOptimisticPins(filtered)
+            : filtered.Select(e => (ICalendarEvent)e).ToList();
+
         // (1) Partition into single-day chips (per cell index) and multi-day bar segments
         // (per week row). "Single-day" = first/last day match in TimeZone AND the event
         // fits inside one cell's midnight–midnight bound.
@@ -202,10 +247,8 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         _barsPerWeekRow = new List<BarSegment>[6];
         for (var r = 0; r < 6; r++) _barsPerWeekRow[r] = new List<BarSegment>();
 
-        foreach (var ev in filtered)
+        foreach (var ev in eventsForLayout)
         {
-            _eventLookup[ev.Id] = ev;
-
             // Skip events entirely outside the visible 6-week window.
             if (ev.End <= GridStart || ev.Start >= GridEndExclusive) continue;
 
@@ -369,16 +412,14 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
 
         var barCount = occupiedLanes.Count;
         var chipCount = chips.Count;
-        var totalItems = barCount + chipCount;
 
         // FR-18: at most MaxEventsPerDay items visible per cell. Bars always render (they're
         // cross-cell — clipping one cell would leave a hole in a continuous bar), so bars
-        // claim slots first; chips fill the remaining budget. Anything over collapses into
-        // the "+N more" tail per the PRD: "only the first MaxEventsPerDay items render; the
-        // rest collapse into the '+N more' chip."
+        // claim slots first; chips fill the remaining budget. The "+N more" count reflects
+        // only the chips that overflow — bars are always visible and out of the overflow sum.
         var chipBudget = Math.Max(0, _resolvedMaxEventsPerDay - barCount);
         var visibleChipCount = Math.Min(chipCount, chipBudget);
-        var overflow = totalItems - Math.Min(totalItems, _resolvedMaxEventsPerDay);
+        var overflow = chipCount - visibleChipCount;
 
         var visibleChips = chipCount == visibleChipCount
             ? chips
@@ -720,9 +761,48 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// </summary>
     internal async Task HandleGridKeyDownAsync(KeyboardEventArgs e)
     {
-        // Phase 2 Task 14 — route through the shortcut-map dispatch (FR-36). Replaces
-        // Task 13's TryDispatchUndoRedoAsync. IsDragActive precedence unchanged.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomCellOffset = Math.Max(
+                        -GetKeyboardMoveOriginalCellIndex(),
+                        _keyboardMovePhantomCellOffset - 7);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var maxDown = _gridCells.Length - 1 - GetKeyboardMoveOriginalCellIndex();
+                    _keyboardMovePhantomCellOffset = Math.Min(
+                        maxDown,
+                        _keyboardMovePhantomCellOffset + 7);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowRight":
+                    var maxRight = _gridCells.Length - 1 - GetKeyboardMoveOriginalCellIndex();
+                    _keyboardMovePhantomCellOffset = Math.Min(
+                        maxRight,
+                        _keyboardMovePhantomCellOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    _keyboardMovePhantomCellOffset = Math.Max(
+                        -GetKeyboardMoveOriginalCellIndex(),
+                        _keyboardMovePhantomCellOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Grid)) return;
 
         switch (e.Key)
@@ -765,9 +845,48 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// </summary>
     internal async Task HandleEventKeyDownAsync(KeyboardEventArgs e, ICalendarEvent ev)
     {
-        // Phase 2 Task 14 — route through the shortcut-map dispatch. See Day view's
-        // matching branch for the longer rationale.
         if (IsDragActive) return;
+
+        // Handle arrow keys in keyboard move mode (SC 2.5.7)
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null)
+        {
+            switch (e.Key)
+            {
+                case "ArrowUp":
+                    _keyboardMovePhantomCellOffset = Math.Max(
+                        -GetKeyboardMoveOriginalCellIndex(),
+                        _keyboardMovePhantomCellOffset - 7);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowDown":
+                    var maxDown = _gridCells.Length - 1 - GetKeyboardMoveOriginalCellIndex();
+                    _keyboardMovePhantomCellOffset = Math.Min(
+                        maxDown,
+                        _keyboardMovePhantomCellOffset + 7);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowRight":
+                    var maxRight = _gridCells.Length - 1 - GetKeyboardMoveOriginalCellIndex();
+                    _keyboardMovePhantomCellOffset = Math.Min(
+                        maxRight,
+                        _keyboardMovePhantomCellOffset + 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowLeft":
+                    _keyboardMovePhantomCellOffset = Math.Max(
+                        -GetKeyboardMoveOriginalCellIndex(),
+                        _keyboardMovePhantomCellOffset - 1);
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+            }
+        }
+
         _eventLookup.TryGetValue(ev.Id, out var typed);
         if (await TryDispatchShortcutAsync(e, KeystrokeScope.Chip, typed, ev.Id)) return;
 
@@ -789,6 +908,10 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     {
         switch (commandId)
         {
+            case SchedulerCommandIds.EditMove:
+                if (scope != KeystrokeScope.Chip) return false;
+                await DispatchKeyboardMoveAsync(focusedEvent, focusedEventId);
+                return true;
             case SchedulerCommandIds.SelectToggle:
                 if (scope != KeystrokeScope.Chip) return false;
                 if (focusedEventId is null) return false;
@@ -839,6 +962,12 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// </summary>
     private async Task HandleEscapeAsync()
     {
+        if (_keyboardMoveMode)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
         if (IsDragActive)
         {
             return;
@@ -871,6 +1000,362 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         catch (JSDisconnectedException) { /* Circuit gone. */ }
         catch (InvalidOperationException) { /* No JS runtime in tests. */ }
     }
+
+    // ----- Optimistic pins (ADR-0006) ----------------------------------------------------
+
+    /// <summary>
+    /// Drop pin entries whose pinned (Start, End) matches the consumer-supplied
+    /// authoritative times — i.e., the consumer has accepted the move and pushed
+    /// the new times back through <see cref="SchedulerComponentBase{TEvent}.Events"/>.
+    /// </summary>
+    private void ClearAcknowledgedPins()
+    {
+        if (_optimisticPin.Count == 0) return;
+        var events = Events;
+        if (events is null) return;
+
+        List<string>? toRemove = null;
+        for (var i = 0; i < events.Count; i++)
+        {
+            var ev = events[i];
+            if (_optimisticPin.TryGetValue(ev.Id, out var pin)
+                && pin.Start == ev.Start
+                && pin.End == ev.End)
+            {
+                toRemove ??= new List<string>();
+                toRemove.Add(ev.Id);
+            }
+        }
+        if (toRemove is null) return;
+        foreach (var id in toRemove)
+        {
+            _optimisticPin.Remove(id);
+        }
+    }
+
+    /// <summary>
+    /// Return the filtered event list with pinned events wrapped in
+    /// <see cref="EventChunk{TEvent}"/> to substitute their Start/End with the pin
+    /// values. Non-pinned events pass through as-is.
+    /// </summary>
+    private IReadOnlyList<ICalendarEvent> ApplyOptimisticPins(IReadOnlyList<TEvent> filtered)
+    {
+        var result = new List<ICalendarEvent>(filtered.Count);
+        for (var i = 0; i < filtered.Count; i++)
+        {
+            var ev = filtered[i];
+            if (_optimisticPin.TryGetValue(ev.Id, out var pinned))
+            {
+                result.Add(new EventChunk<TEvent>(ev, pinned.Start, pinned.End, ClippedAtTimeStart: false, ClippedAtTimeEnd: false));
+            }
+            else
+            {
+                result.Add(ev);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Return the optimistic-pin (Start, End) for the supplied event id if set.</summary>
+    internal (DateTimeOffset Start, DateTimeOffset End)? GetOptimisticPin(string id) =>
+        _optimisticPin.TryGetValue(id, out var pin) ? pin : null;
+
+    /// <summary>The dictionary the .razor template binds for element refs.</summary>
+    internal Dictionary<string, ElementReference> EventRefsByEventId => _eventRefsByEventId;
+
+    // ----- Drag-to-move ------------------------------------------------------------------
+
+    /// <summary>
+    /// Pointer-down handler attached to each single-day chip when
+    /// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true.
+    /// </summary>
+    internal async Task OnEventPointerDownAsync(PointerEventArgs e, ICalendarEvent ev)
+    {
+        if (!AllowDragToMove) return;
+        if (e.Button != 0) return;
+
+        if (!_eventLookup.TryGetValue(ev.Id, out var typed)) return;
+        if (!_eventRefsByEventId.TryGetValue(typed.Id, out var sourceRef)) return;
+
+        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
+        var snapPixelsX = cellWidth > 0 ? cellWidth : 0;
+        var snapPixelsY = cellHeight > 0 ? cellHeight : 0;
+
+        await BeginDragOnPointerAsync(
+            e,
+            sourceRef,
+            DragMode.Move,
+            snapPixelsX: snapPixelsX,
+            snapPixelsY: snapPixelsY,
+            ghostClass: "calee-scheduler-event--ghost",
+            onDrop: payload => HandleMoveDropAsync(typed, payload),
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _monthGridRef,
+            highlightMode: "day-cell",
+            eventDurationDays: 1,
+            columnCount: ColumnCount,
+            rowCount: WeekRowCount);
+    }
+
+    /// <summary>
+    /// Pointer-down handler attached to each multi-day bar when
+    /// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true.
+    /// </summary>
+    internal async Task OnBarPointerDownAsync(PointerEventArgs e, BarSegment bar)
+    {
+        if (!AllowDragToMove) return;
+        if (e.Button != 0) return;
+
+        var ev = bar.Event;
+        if (!_eventLookup.TryGetValue(ev.Id, out var typed)) return;
+        if (!_eventRefsByEventId.TryGetValue(typed.Id, out var sourceRef)) return;
+
+        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
+        var snapPixelsX = cellWidth > 0 ? cellWidth : 0;
+        var snapPixelsY = cellHeight > 0 ? cellHeight : 0;
+        var eventDurationDays = bar.RightColIndex - bar.LeftColIndex + 1;
+
+        await BeginDragOnPointerAsync(
+            e,
+            sourceRef,
+            DragMode.Move,
+            snapPixelsX: snapPixelsX,
+            snapPixelsY: snapPixelsY,
+            ghostClass: "calee-scheduler-event--ghost",
+            onDrop: payload => HandleMoveDropAsync(typed, payload),
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _monthGridRef,
+            highlightMode: "day-cell",
+            eventDurationDays: eventDurationDays,
+            columnCount: ColumnCount,
+            rowCount: WeekRowCount);
+    }
+
+    /// <summary>
+    /// Drop handler. Converts the JS drop delta (X for column shift, Y for row shift)
+    /// into a new (Start, End) preserving the event's duration, optimistically pins the
+    /// new position, fires <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/>, and
+    /// rolls the pin back if the consumer set <see cref="EventMoveContext.Cancel"/>.
+    /// </summary>
+    private async Task HandleMoveDropAsync(TEvent ev, DropPayload payload)
+    {
+        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
+        if (cellWidth <= 0) cellWidth = 100.0;
+        if (cellHeight <= 0) cellHeight = 100.0;
+
+        var originalCellIndex = FindCellIndexForEvent(ev);
+        if (originalCellIndex < 0) return;
+
+        var colShift = cellWidth > 0
+            ? (int)Math.Round(payload.DeltaXPx / cellWidth, MidpointRounding.AwayFromZero)
+            : 0;
+        var rowShift = cellHeight > 0
+            ? (int)Math.Round(payload.DeltaYPx / cellHeight, MidpointRounding.AwayFromZero)
+            : 0;
+
+        if (colShift == 0 && rowShift == 0) return;
+
+        var rawTarget = originalCellIndex + colShift + rowShift * 7;
+        var newCellIndex = Math.Clamp(rawTarget, 0, _gridCells.Length - 1);
+
+        var originalCellStart = _gridCells[originalCellIndex].Start;
+        var timeOfDayOffset = ev.Start - originalCellStart;
+        var duration = ev.End - ev.Start;
+
+        var newStart = _gridCells[newCellIndex].Start + timeOfDayOffset;
+        var newEnd = newStart + duration;
+
+        _optimisticPin[ev.Id] = (newStart, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+
+        var context = new EventMoveContext
+        {
+            Event = ev,
+            NewStart = newStart,
+            NewEnd = newEnd,
+        };
+        await OnEventMoved.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(ev.Id);
+            ComputeLayout();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Query the month grid container's real on-screen dimensions via the JS helper.
+    /// Returns zeros in test environments without a real DOM; callers supply fallbacks.
+    /// </summary>
+    private async Task<(double width, double height)> GetMonthGridCellSizePxAsync()
+    {
+        if (_jsModule is null) return (0, 0);
+        try
+        {
+            var width = await _jsModule.InvokeAsync<double>("getElementWidth", _monthGridRef);
+            var height = await _jsModule.InvokeAsync<double>("getElementHeight", _monthGridRef);
+            var cellWidth = width > 0 ? width / ColumnCount : 0;
+            var cellHeight = height > 0 ? height / WeekRowCount : 0;
+            return (cellWidth, cellHeight);
+        }
+        catch (JSException) { return (0, 0); }
+        catch (JSDisconnectedException) { return (0, 0); }
+        catch (InvalidOperationException) { return (0, 0); }
+    }
+
+    /// <summary>
+    /// Locate the grid cell index whose [midnight, midnight+1d) bounds contain the
+    /// event's Start. Returns -1 when no cell contains it.
+    /// </summary>
+    internal int FindCellIndexForEvent(ICalendarEvent ev)
+    {
+        for (var i = 0; i < _gridCells.Length; i++)
+        {
+            var (cs, ce) = _gridCells[i];
+            if (ev.Start >= cs && ev.Start < ce) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Test-only entry point for the drop-handling pipeline.
+    /// </summary>
+    internal Task InvokeMoveDropForTestAsync(TEvent ev, DropPayload payload) =>
+        HandleMoveDropAsync(ev, payload);
+
+    // ----- Keyboard move -----------------------------------------------------------------
+
+    /// <inheritdoc/>
+    private protected override async Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+    {
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        _keyboardMoveMode = true;
+        _keyboardMoveEventId = focusedEventId;
+        _keyboardMovePhantomCellOffset = 0;
+        _keyboardMoveOriginalStart = focusedEvent.Start;
+        _keyboardMoveOriginalEnd = focusedEvent.End;
+
+        var currentCellIndex = FindCellIndexForEvent(focusedEvent);
+        if (currentCellIndex < 0) currentCellIndex = 0;
+
+        var request = new KeyboardMoveRequest
+        {
+            Event = (ICalendarEvent)focusedEvent,
+            CurrentSlotIndex = currentCellIndex,
+        };
+        await OnKeyboardMoveRequested.InvokeAsync(request);
+
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, focusedEvent.End);
+        StateHasChanged();
+    }
+
+    private int GetKeyboardMoveOriginalCellIndex()
+    {
+        return FindCellForDate(_keyboardMoveOriginalStart);
+    }
+
+    private int FindCellForDate(DateTimeOffset value)
+    {
+        for (var i = 0; i < _gridCells.Length; i++)
+        {
+            if (value >= _gridCells[i].Start && value < _gridCells[i].End) return i;
+        }
+        return 0;
+    }
+
+    private Task UpdateKeyboardMovePhantomPositionAsync()
+    {
+        if (_keyboardMoveEventId is null) return Task.CompletedTask;
+
+        var origCellIndex = GetKeyboardMoveOriginalCellIndex();
+        var newCellIndex = Math.Clamp(origCellIndex + _keyboardMovePhantomCellOffset, 0, _gridCells.Length - 1);
+
+        var origCellStart = _gridCells[origCellIndex].Start;
+        var timeOfDayOffset = _keyboardMoveOriginalStart - origCellStart;
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+
+        var newStart = _gridCells[newCellIndex].Start + timeOfDayOffset;
+        var newEnd = newStart + duration;
+
+        _optimisticPin[_keyboardMoveEventId] = (newStart, newEnd);
+        ComputeLayout();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task CommitKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        var origCellIndex = GetKeyboardMoveOriginalCellIndex();
+        var newCellIndex = Math.Clamp(origCellIndex + _keyboardMovePhantomCellOffset, 0, _gridCells.Length - 1);
+
+        var origCellStart = _gridCells[origCellIndex].Start;
+        var timeOfDayOffset = _keyboardMoveOriginalStart - origCellStart;
+        var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
+
+        var newStart = _gridCells[newCellIndex].Start + timeOfDayOffset;
+        var newEnd = newStart + duration;
+
+        if (!_eventLookup.TryGetValue(_keyboardMoveEventId, out var ev))
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
+        var context = new EventMoveContext
+        {
+            Event = ev,
+            NewStart = newStart,
+            NewEnd = newEnd,
+        };
+        await OnEventMoved.InvokeAsync(context);
+
+        if (context.Cancel)
+        {
+            _optimisticPin.Remove(_keyboardMoveEventId);
+            ComputeLayout();
+            StateHasChanged();
+        }
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomCellOffset = 0;
+    }
+
+    private async Task CancelKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        _optimisticPin.Remove(_keyboardMoveEventId);
+        ComputeLayout();
+        StateHasChanged();
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+        _keyboardMovePhantomCellOffset = 0;
+    }
+
+    /// <summary>Test-only entry point for keyboard move dispatch.</summary>
+    internal Task InvokeKeyboardMoveForTestAsync(TEvent ev) =>
+        DispatchKeyboardMoveAsync(ev, ev.Id);
+
+    /// <summary>Test-only entry point for committing keyboard move.</summary>
+    internal Task InvokeKeyboardMoveCommitForTestAsync() =>
+        CommitKeyboardMoveAsync();
+
+    /// <summary>Test-only entry point for cancelling keyboard move.</summary>
+    internal Task InvokeKeyboardMoveCancelForTestAsync() =>
+        CancelKeyboardMoveAsync();
+
+    /// <summary>Test-only flag: whether keyboard move mode is active.</summary>
+    internal bool IsKeyboardMoveModeForTest => _keyboardMoveMode;
+
+    /// <summary>Test-only access to the phantom cell offset.</summary>
+    internal int KeyboardMovePhantomCellOffsetForTest => _keyboardMovePhantomCellOffset;
 
     /// <summary>
     /// A multi-day event's bar segment within a single week row of the visible grid.

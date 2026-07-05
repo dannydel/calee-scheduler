@@ -1416,6 +1416,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
         var snapPixelsX = (gridWidthPx > 0 && ColumnCount > 0) ? gridWidthPx / ColumnCount : 0;
 
+        var durationMinutes = (ev.End - ev.Start).TotalMinutes;
+        var eventDurationSlots = (int)Math.Ceiling(durationMinutes / _resolvedSlotMinutes);
+        var slotHeightPx = gridHeightPx > 0 ? gridHeightPx / Math.Max(1, SlotCount) : 0;
+        var eventDurationPixels = eventDurationSlots * slotHeightPx;
+        var eventDurationDays = (ev.End.Date - ev.Start.Date).Days + 1;
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1424,7 +1430,14 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             snapPixelsY: snapPixelsY,
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleMoveDropAsync(typed, colIndex, payload),
-            onCancel: static () => Task.CompletedTask);
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _hourGridRef,
+            highlightMode: "slot-band",
+            eventDurationPixels: eventDurationPixels,
+            eventDurationSlots: eventDurationSlots,
+            eventDurationDays: eventDurationDays,
+            columnCount: ColumnCount,
+            slotCount: SlotCount);
     }
 
     /// <summary>
@@ -1683,6 +1696,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
 
+        var slotHeightPx = gridHeightPx > 0 ? gridHeightPx / Math.Max(1, SlotCount) : 0;
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1692,7 +1707,13 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleResizeDropAsync(typed, colIndex, payload),
             onCancel: static () => Task.CompletedTask,
-            resizeAxis: ResizeAxis.Y);
+            resizeAxis: ResizeAxis.Y,
+            highlightContainer: _hourGridRef,
+            highlightMode: "slot-band",
+            eventDurationPixels: slotHeightPx,
+            eventDurationSlots: 1,
+            columnCount: ColumnCount,
+            slotCount: SlotCount);
     }
 
     /// <summary>

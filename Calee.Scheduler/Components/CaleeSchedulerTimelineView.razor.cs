@@ -1481,6 +1481,27 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             }
         }
 
+        // Compute event duration in pixels for the drop-target highlight (issue #13).
+        double eventDurationPixels;
+        if (gridWidthPx <= 0)
+        {
+            gridWidthPx = TimeScale == TimelineScale.Day
+                ? 56.0 * (_resolvedEndHour - _resolvedStartHour)
+                : Math.Max(1, _dayBounds.Count) * 100.0;
+        }
+        if (TimeScale == TimelineScale.Day)
+        {
+            var durationMinutes = (typed.End - typed.Start).TotalMinutes;
+            var totalVisibleMinutes = (_resolvedEndHour - _resolvedStartHour) * 60.0;
+            eventDurationPixels = totalVisibleMinutes > 0 ? durationMinutes / totalVisibleMinutes * gridWidthPx : 0;
+        }
+        else
+        {
+            var dayWidth = gridWidthPx / Math.Max(1, _dayBounds.Count);
+            var durationDays = (typed.End - typed.Start).TotalDays;
+            eventDurationPixels = Math.Max(dayWidth, durationDays * dayWidth);
+        }
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1489,7 +1510,11 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             snapPixelsY: snapPixelsY,
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleMoveDropAsync(typed, payload),
-            onCancel: static () => Task.CompletedTask);
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _timeAreaScrollContainer,
+            highlightMode: "lane-row",
+            eventDurationPixels: eventDurationPixels,
+            rowCount: TotalRowCount);
     }
 
     /// <summary>
@@ -1724,6 +1749,22 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             }
         }
 
+        // For resize, highlight the affected edge (1 slot width for Day scale,
+        // one day-cell width for Week/Month scale).
+        double slotWidthPx;
+        if (gridWidthPx <= 0)
+        {
+            slotWidthPx = TimeScale == TimelineScale.Day
+                ? 56.0 * (_resolvedEndHour - _resolvedStartHour) / Math.Max(1, SlotCount)
+                : 100.0;
+        }
+        else
+        {
+            slotWidthPx = TimeScale == TimelineScale.Day && SlotCount > 0
+                ? gridWidthPx / SlotCount
+                : gridWidthPx / Math.Max(1, _dayBounds.Count);
+        }
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1733,7 +1774,11 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleResizeDropAsync(typed, payload),
             onCancel: static () => Task.CompletedTask,
-            resizeAxis: ResizeAxis.X);
+            resizeAxis: ResizeAxis.X,
+            highlightContainer: _timeAreaScrollContainer,
+            highlightMode: "lane-row",
+            eventDurationPixels: slotWidthPx,
+            rowCount: TotalRowCount);
     }
 
     /// <summary>

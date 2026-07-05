@@ -1187,6 +1187,11 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
 
+        var durationMinutes = (ev.End - ev.Start).TotalMinutes;
+        var eventDurationSlots = (int)Math.Ceiling(durationMinutes / _resolvedSlotMinutes);
+        var slotHeightPx = gridHeightPx / Math.Max(1, SlotCount);
+        var eventDurationPixels = eventDurationSlots * slotHeightPx;
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1195,7 +1200,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
             snapPixelsY: snapPixelsY,
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleMoveDropAsync(typed, payload),
-            onCancel: static () => Task.CompletedTask);
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _hourGridRef,
+            highlightMode: "slot-band",
+            eventDurationPixels: eventDurationPixels,
+            eventDurationSlots: eventDurationSlots,
+            slotCount: SlotCount);
     }
 
     /// <summary>
@@ -1324,6 +1334,8 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         var gridHeightPx = await GetHourGridHeightPxAsync();
         var snapPixelsY = (gridHeightPx > 0 && SlotCount > 0) ? gridHeightPx / SlotCount : 0;
 
+        var slotHeightPx = gridHeightPx / Math.Max(1, SlotCount);
+
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
@@ -1333,7 +1345,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleResizeDropAsync(typed, payload),
             onCancel: static () => Task.CompletedTask,
-            resizeAxis: ResizeAxis.Y);
+            resizeAxis: ResizeAxis.Y,
+            highlightContainer: _hourGridRef,
+            highlightMode: "slot-band",
+            eventDurationPixels: slotHeightPx,
+            eventDurationSlots: 1,
+            slotCount: SlotCount);
     }
 
     /// <summary>

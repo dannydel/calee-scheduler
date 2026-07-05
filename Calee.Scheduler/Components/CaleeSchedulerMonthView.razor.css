@@ -373,3 +373,28 @@
         transparent 8px
     );
 }
+
+/* Drag-to-move ghost state. Applied to the cloned element during drag. */
+.calee-scheduler-month-chip--ghost,
+.calee-scheduler-month-bar--ghost,
+.calee-scheduler-event--ghost {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Keyboard-move phantom state. The chip or bar at the phantom position carries
+ * this class so it is visually distinguished from a static event — same
+ * background-tint + dashed-border + outline treatment as the pointer-drag
+ * drop-target highlight. */
+.calee-scheduler-month-chip--keyboard-phantom {
+    background: var(--calee-scheduler-drop-target-bg, #eef4ff) !important;
+    border: 2px dashed var(--calee-scheduler-drop-target-border, #2563eb) !important;
+    outline: 1px solid var(--calee-scheduler-drop-target-outline, #3b82f6) !important;
+}
+
+.calee-scheduler-month-bar--keyboard-phantom {
+    background: var(--calee-scheduler-drop-target-bg, #eef4ff) !important;
+    border: 2px dashed var(--calee-scheduler-drop-target-border, #2563eb) !important;
+    outline: 1px solid var(--calee-scheduler-drop-target-outline, #3b82f6) !important;
+}
+}

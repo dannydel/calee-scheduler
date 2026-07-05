@@ -3,6 +3,7 @@ using Bunit;
 using Calee.Scheduler.Components;
 using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Extensions;
+using Calee.Scheduler.Internal;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -662,5 +663,262 @@ public class CaleeSchedulerMonthViewTests
         Assert.Equal(4, captured.Slot.Start.Month);
         Assert.Equal(26, captured.Slot.Start.Day);
         Assert.Equal(TimeSpan.FromHours(-4), captured.Slot.Start.Offset);
+    }
+
+    // ----- Drag-to-move (issue #11) ----------------------------------------------------
+
+    [Fact]
+    public async Task DragToMove_DropFiresOnEventMoved_WithDayGranularity()
+    {
+        // Anchor May 15 (Fri). Event on Fri May 15. Drop with 2-cell horizontal delta
+        // should shift event by 2 days to Sun May 17.
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        // Simulate drop with 200px horizontal delta (2 cells at 100px each)
+        var payload = new DropPayload(0, 0, 200, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start.AddDays(2), captured!.NewStart);
+        Assert.Equal(ev.End.AddDays(2), captured.NewEnd);
+    }
+
+    [Fact]
+    public async Task DragToMove_2DDelta_CalculatesDayDeltaFromBothAxes()
+    {
+        // Event on Fri May 15 (cell index 19). Drop with 100px right (1 col) + 100px down
+        // (1 row = 7 days) should shift by 8 days total to Sat May 23.
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        // 100px right = 1 col, 100px down = 1 row = 7 days → total 8 days
+        var payload = new DropPayload(0, 0, 100, 100, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start.AddDays(8), captured!.NewStart);
+        Assert.Equal(ev.End.AddDays(8), captured.NewEnd);
+    }
+
+    [Fact]
+    public async Task DragToMove_CancelRevertsOptimisticPin()
+    {
+        // Consumer sets Cancel=true → optimistic pin should be cleared
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => m.Cancel = true)));
+
+        var payload = new DropPayload(0, 0, 100, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        // Optimistic pin should be cleared after cancel
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+    }
+
+    [Fact]
+    public async Task DragToMove_PreservesTimeOfDay()
+    {
+        // Event at 14:30 should remain at 14:30 after move
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 14, 30);
+        var ev = Timed("meeting", fri15, fri15.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 100, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(14, captured!.NewStart.Hour);
+        Assert.Equal(30, captured.NewStart.Minute);
+        Assert.Equal(15, captured.NewEnd.Hour);
+        Assert.Equal(30, captured.NewEnd.Minute);
+    }
+
+    [Fact]
+    public async Task DragToMove_MultiDayEvent_MovesByAnchorDay()
+    {
+        // 3-day event (all-day bar). Drag 2 days right → entire bar shifts by 2 days
+        using var ctx = NewContext();
+        var ev = AllDay("conf", Edt(2026, 5, 13), Edt(2026, 5, 16));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 200, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start.AddDays(2), captured!.NewStart);
+        Assert.Equal(ev.End.AddDays(2), captured.NewEnd);
+        Assert.Equal(3, (captured.NewEnd - captured.NewStart).TotalDays);
+    }
+
+    [Fact]
+    public async Task KeyboardMove_ArrowKeysMovePhantom()
+    {
+        // Enter keyboard move mode, press ArrowRight → phantom offset should be 1
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        Assert.True(cut.Instance.IsKeyboardMoveModeForTest);
+
+        await cut.InvokeAsync(() => cut.Instance.HandleGridKeyDownAsync(new KeyboardEventArgs { Key = "ArrowRight" }));
+        Assert.Equal(1, cut.Instance.KeyboardMovePhantomCellOffsetForTest);
+
+        await cut.InvokeAsync(() => cut.Instance.HandleGridKeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" }));
+        Assert.Equal(8, cut.Instance.KeyboardMovePhantomCellOffsetForTest); // 1 + 7
+    }
+
+    [Fact]
+    public async Task KeyboardMove_EnterCommitsMove()
+    {
+        // Enter keyboard move mode, move right, press Enter → should fire OnEventMoved
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        await cut.InvokeAsync(() => cut.Instance.HandleGridKeyDownAsync(new KeyboardEventArgs { Key = "ArrowRight" }));
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start.AddDays(1), captured!.NewStart);
+    }
+
+    [Fact]
+    public async Task KeyboardMove_EscapeCancelsMove()
+    {
+        // Enter keyboard move mode, press Escape → should cancel and clear pin
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        Assert.True(cut.Instance.IsKeyboardMoveModeForTest);
+
+        await cut.InvokeAsync(() => cut.Instance.HandleGridKeyDownAsync(new KeyboardEventArgs { Key = "Escape" }));
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+    }
+
+    [Fact]
+    public async Task DragToMove_ZeroDelta_NoMoveFires()
+    {
+        // Drop with zero delta should not fire OnEventMoved
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public async Task DragToMove_BlockedDay_ConsumerMayCancel()
+    {
+        // Move onto a blocked day → consumer can cancel
+        using var ctx = NewContext();
+        var fri15 = Edt(2026, 5, 15, 9, 0);
+        var ev = Timed("standup", fri15, fri15.AddHours(1));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.DayModifier, date => date.Day == 17 ? new SchedulerDayState(IsBlocked: true, Class: null, Label: null) : null)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m =>
+                {
+                    captured = m;
+                    if (m.NewStart.Day == 17) m.Cancel = true;
+                })));
+
+        // Move 2 days right → lands on Sun May 17 (blocked)
+        var payload = new DropPayload(0, 0, 200, 0, "move");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.True(captured!.Cancel);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id)); // Pin cleared after cancel
     }
 }

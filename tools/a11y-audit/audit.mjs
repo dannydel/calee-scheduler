@@ -230,6 +230,74 @@ async function auditKeyboardInteractions() {
         } else if (failures.length === 0) {
             console.log('PASS');
         }
+
+        // -- Month view: keyboard move (m → ArrowRight → Enter) --
+        process.stdout.write('keyboard move (Month) ... ');
+        await page.goto(BASE_URL + '/month', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[role="button"][data-calee-region="event"]', { timeout: 10000 });
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('m');         // enter move mode
+        await page.keyboard.press('ArrowRight'); // move right one cell
+        await page.keyboard.press('Enter');      // commit
+        await page.waitForTimeout(300);
+
+        const eventsAfterMonthMove = await page.$$eval('[role="button"][data-calee-region="event"]', els => els.length);
+        if (eventsAfterMonthMove === 0) {
+            failures.push('Month keyboard move: no event chips visible after move');
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Month view: keyboard move cancel (m → ArrowRight → Escape) --
+        process.stdout.write('keyboard move cancel (Month) ... ');
+        await page.goto(BASE_URL + '/month', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[role="button"][data-calee-region="event"]', { timeout: 10000 });
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('m');         // enter move mode
+        await page.keyboard.press('ArrowRight'); // move right one cell
+        await page.keyboard.press('Escape');     // cancel
+        await page.waitForTimeout(300);
+
+        const eventsAfterCancel = await page.$$eval('[role="button"][data-calee-region="event"]', els => els.length);
+        if (eventsAfterCancel === 0) {
+            failures.push('Month keyboard move cancel: no event chips visible after cancel');
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Month view: pointer drag-to-move --
+        process.stdout.write('pointer drag (Month) ... ');
+        await page.goto(BASE_URL + '/month', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-drag-handle="move"]', { timeout: 10000 });
+        
+        const chip = await page.$('[data-calee-drag-handle="move"]');
+        if (chip) {
+            const box = await chip.boundingBox();
+            if (box) {
+                // Drag 100px to the right (1 cell)
+                await chip.hover();
+                await page.mouse.down();
+                await page.mouse.move(box.x + box.width + 100, box.y, { steps: 10 });
+                await page.mouse.up();
+                await page.waitForTimeout(300);
+
+                const eventsAfterDrag = await page.$$eval('[role="button"][data-calee-region="event"]', els => els.length);
+                if (eventsAfterDrag === 0) {
+                    failures.push('Month pointer drag: no event chips visible after drag');
+                    console.log('FAIL');
+                } else {
+                    console.log('PASS');
+                }
+            } else {
+                failures.push('Month pointer drag: could not get chip bounding box');
+                console.log('FAIL');
+            }
+        } else {
+            failures.push('Month pointer drag: no draggable chip found');
+            console.log('FAIL');
+        }
     } catch (err) {
         failures.push(err.message);
         console.log('FAIL (' + err.message + ')');

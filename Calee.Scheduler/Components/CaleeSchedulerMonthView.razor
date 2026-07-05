@@ -101,6 +101,9 @@
                         }
 
                         <div class="calee-scheduler-month-cell-chips">
+                            @{
+                                var moveDragEnabled = AllowDragToMove;
+                            }
                             @foreach (var chip in layout.VisibleChips)
                             {
                                 var typed = TypedForId(chip.Id);
@@ -112,25 +115,32 @@
                                 }
                                 var style = styleParts.Count == 0 ? null : string.Join("; ", styleParts) + ";";
                                 var chipIsSelected = IsEventSelected(chip.Id);
+                                var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == chip.Id;
                                 var chipClasses = "calee-scheduler-month-chip"
                                     + (chipIsSelected ? " calee-scheduler-month-chip--selected" : string.Empty)
+                                    + (isInKeyboardMoveMode ? " calee-scheduler-month-chip--keyboard-phantom" : string.Empty)
                                     + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
                                 var clickTarget = chip;
+                                var dragEnabled = AllowDragToMove;
 
                                 <button type="button"
                                         class="@chipClasses"
                                         style="@style"
                                         data-calee-region="event"
+                                        data-calee-drag-handle="@(dragEnabled ? "move" : null)"
                                         role="button"
+                                        aria-roledescription="@(AllowDragToMove ? "draggable event" : null)"
                                         aria-label="@ChipAccessibleName(chip)"
                                         aria-selected="@(chipIsSelected ? "true" : null)"
                                         @key="@($"chip:{cellIndex}:{chip.Id}")"
+                                        @ref="_eventRefsByEventId[chip.Id]"
                                         @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
                                         @onclick:stopPropagation="true"
                                         @ondblclick:stopPropagation="true"
                                         @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
                                         @onkeydown:preventDefault="@IsShortcutMapActive"
-                                        @onkeydown:stopPropagation="@IsShortcutMapActive">
+                                        @onkeydown:stopPropagation="@IsShortcutMapActive"
+                                        @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnEventPointerDownAsync(e, clickTarget)) : default)">
                                     @if (EventChipTemplate is not null && typed is not null)
                                     {
                                         @EventChipTemplate(typed)
@@ -191,26 +201,33 @@
                             }
                             var style = string.Join("; ", styleParts) + ";";
                             var barIsSelected = IsEventSelected(bar.Event.Id);
+                            var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == bar.Event.Id;
                             var barClasses = "calee-scheduler-month-bar"
                                 + (bar.ClipLeft ? " calee-scheduler-month-bar--clip-left" : string.Empty)
                                 + (bar.ClipRight ? " calee-scheduler-month-bar--clip-right" : string.Empty)
                                 + (barIsSelected ? " calee-scheduler-month-bar--selected" : string.Empty)
+                                + (isInKeyboardMoveMode ? " calee-scheduler-month-bar--keyboard-phantom" : string.Empty)
                                 + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
                             var clickTarget = bar.Event;
+                            var dragEnabled = AllowDragToMove;
 
                             <div role="gridcell" class="calee-scheduler-month-bar-cell" @key="@($"bar:{row}:{bar.Event.Id}:{bar.LeftColIndex}")">
                                 <button type="button"
                                         class="@barClasses"
                                         style="@style"
                                         data-calee-region="event"
+                                        data-calee-drag-handle="@(dragEnabled ? "move" : null)"
+                                        aria-roledescription="@(AllowDragToMove ? "draggable event" : null)"
                                         aria-label="@BarAccessibleName(bar)"
                                         aria-selected="@(barIsSelected ? "true" : null)"
                                         tabindex="0"
+                                        @ref="_eventRefsByEventId[bar.Event.Id]"
                                         @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
                                         @onclick:stopPropagation="true"
                                         @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"
                                         @onkeydown:preventDefault="@IsShortcutMapActive"
-                                        @onkeydown:stopPropagation="@IsShortcutMapActive">
+                                        @onkeydown:stopPropagation="@IsShortcutMapActive"
+                                        @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnBarPointerDownAsync(e, bar)) : default)">
                                     @if (bar.ClipLeft)
                                     {
                                         <span class="calee-scheduler-month-bar-clip" aria-hidden="true">&larr;</span>

@@ -127,3 +127,42 @@
     background: var(--calee-scheduler-toolbar-active-bg);
     font-weight: 600;
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ * Media queries cannot read CSS custom properties, so the 640px value is a
+ * documented literal rather than a themable token.
+ *
+ * At mobile widths the toolbar wraps instead of clipping: the nav group and
+ * view switcher share the first row and the aria-live range label drops to its
+ * own full-width row below (order: 3 + flex-basis: 100%). All interactive
+ * controls are held to the WCAG 2.2 SC 2.5.8 24px minimum target size — the
+ * default vertical padding leaves them borderline, so a min-height/min-width
+ * floor guarantees it once axe samples the mobile viewport.
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-toolbar {
+        flex-wrap: wrap;
+        row-gap: 0.5rem;
+    }
+
+    .calee-scheduler-toolbar-left {
+        order: 1;
+    }
+
+    .calee-scheduler-toolbar-view-switcher {
+        order: 2;
+        flex-wrap: wrap;
+    }
+
+    .calee-scheduler-toolbar-label {
+        order: 3;
+        flex-basis: 100%;
+    }
+
+    .calee-scheduler-toolbar-button,
+    .calee-scheduler-toolbar-view-button {
+        min-height: 24px;
+        min-width: 24px;
+    }
+}

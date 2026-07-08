@@ -406,3 +406,26 @@
         transparent 8px
     );
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ * Narrow-width time-gutter format: the gutter narrows from 4rem to 2.75rem and
+ * the hour labels drop to 0.6875rem so they stay legible without stealing width
+ * from the event grid. The overflow chip is held to the 24px minimum target
+ * size (SC 2.5.8) at mobile. The single-column Day grid is already fluid, so no
+ * structural change is needed beyond this compression.
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-time-gutter {
+        width: 2.75rem;
+    }
+
+    .calee-scheduler-time-gutter-label {
+        font-size: 0.6875rem;
+        padding-right: 0.125rem;
+    }
+
+    .calee-scheduler-overflow-chip {
+        min-height: 24px;
+    }
+}

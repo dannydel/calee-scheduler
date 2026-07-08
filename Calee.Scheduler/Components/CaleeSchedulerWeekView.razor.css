@@ -473,3 +473,48 @@
         transparent 8px
     );
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ *
+ * Week is the tight case: 7 day columns at the 80px default min-width plus the
+ * 4rem gutter need ~624px and would overflow a 390px page. Rather than
+ * introducing a horizontal-scroll container (which would desync the header row
+ * from the absolutely-positioned hour-grid columns and fight the JS initial-
+ * scroll offset), the day-column min-width floor is lowered to 40px at mobile.
+ * 7 × 40px + a compressed 2.75rem gutter ≈ 324px, which fits 390px with room to
+ * spare, and the columns stay proportionally fluid via their `flex: 1 1 0`.
+ * The weekday label ("MON") and date number remain legible at that width.
+ *
+ * All four 4rem gutters (header, all-day, overflow, hour-grid) compress to
+ * 2.75rem in lockstep so the columns line up. Hour labels drop to 0.6875rem.
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-week {
+        --calee-scheduler-day-column-min-width: 40px;
+    }
+
+    .calee-scheduler-week-header-gutter,
+    .calee-scheduler-week-allday-gutter,
+    .calee-scheduler-week-overflow-gutter,
+    .calee-scheduler-time-gutter {
+        width: 2.75rem;
+    }
+
+    .calee-scheduler-day-header {
+        padding: 0.375rem 0.125rem;
+    }
+
+    .calee-scheduler-day-header-date {
+        font-size: 1.125rem;
+    }
+
+    .calee-scheduler-time-gutter-label {
+        font-size: 0.6875rem;
+        padding-right: 0.125rem;
+    }
+
+    .calee-scheduler-overflow-chip {
+        min-height: 24px;
+    }
+}

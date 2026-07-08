@@ -223,3 +223,22 @@
 .calee-scheduler-agenda-row--all-day .calee-scheduler-agenda-row-time {
     font-style: italic;
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ *
+ * Agenda is already a single fluid column and its title cell carries
+ * `min-width: 0` + ellipsis, so it never overflows the page. The only mobile
+ * tweak is reclaiming width from the fixed 9rem time cell (dropped to 6.5rem)
+ * and tightening row padding so more of a 390px row goes to the event title.
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-agenda-row {
+        --calee-scheduler-agenda-row-padding: 0.625rem 0.75rem;
+        gap: 0.5rem;
+    }
+
+    .calee-scheduler-agenda-row-time {
+        min-width: 6.5rem;
+    }
+}

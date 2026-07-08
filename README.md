@@ -633,6 +633,27 @@ Full surface (defaults shown):
 
 The default theme is WCAG 2.1 AA contrast-verified — regression tests in `Calee.Scheduler.Tests/Accessibility/DefaultThemeContrastTests.cs` lock these defaults to passing values. If you override them, re-run the contrast checks against your palette.
 
+#### Responsive breakpoint (issue #10)
+
+The library is mobile-friendly down to a **390px** viewport. All views and the toolbar carry a single mobile breakpoint at **`max-width: 640px`**. CSS media queries cannot read custom properties, so 640px is a documented literal in each view's `.razor.css`, not a themable token — override it by shipping your own media query via a global stylesheet or the `::deep` escape hatch (§8.4) if your product needs a different threshold.
+
+At mobile widths:
+
+- **Toolbar** wraps instead of clipping — the nav group and view switcher share the first row and the `aria-live` range label drops to its own full-width row. Every control is held to the WCAG 2.2 SC 2.5.8 24px minimum target size.
+- **Day / Week** compress the time gutter (`4rem → 2.75rem`) and hour labels. Week additionally lowers its per-column floor so all seven day columns fit the page without horizontal scroll:
+
+  | Variable | Desktop default | Mobile (≤640px) |
+  | --- | --- | --- |
+  | `--calee-scheduler-day-column-min-width` (Week) | `80px` | `40px` |
+  | `--calee-scheduler-timeline-label-width` (Timeline) | `12rem` | `7rem` |
+
+  These are the same public tokens listed above — the mobile values are set inside each view's breakpoint. Override the desktop token as usual; if you need a different *mobile* value, restate it inside your own `max-width: 640px` rule.
+- **Month** keeps its fluid 7-column grid (cells narrow to ~1/7 of the viewport) and tightens chip/header padding + font; the "+N more" overflow pill continues to absorb entries that no longer fit.
+- **Year** collapses every multi-column layout variant (`Grid4x3`/`Grid3x4`/`Grid2x6`/`Grid6x2`) to **2 columns** so each mini-month's day cells stay legible; the single-column layout is unchanged.
+- **Agenda** narrows the fixed time cell and tightens row padding. **Timeline** shrinks the lane-label gutter and contains its (intrinsically wide) time axis to an internal horizontal scroll region so the page never overflows.
+
+The narrow-width formats are layout-only (CSS): no interop or C# behavior changes, and touch drag-to-move / drag-to-create continue to flow through the same pointer events at mobile width. The `tools/a11y-audit` script runs every route at **both** 1280×720 and 390×844, asserting zero WCAG 2.2 AA violations and no horizontal page overflow at the mobile viewport.
+
 ### 8.2 Attribute splatting
 
 Every public component captures unmatched attributes and splats them onto its outermost element:

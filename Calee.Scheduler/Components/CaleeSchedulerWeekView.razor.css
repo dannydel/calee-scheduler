@@ -100,7 +100,12 @@
     display: flex;
     align-items: stretch;
     border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #d4d4d8);
-    min-height: 1.75rem;
+    /* Lane height governs the absolutely-positioned chip below: the chip is
+       inset 0.25rem top + bottom, so a 2rem lane yields a 1.5rem-tall chip —
+       24px at the browser-default 16px root font size, the WCAG 2.2 SC 2.5.8
+       minimum target size. Do not drop below 2rem without shrinking the chip
+       insets to keep the chip at or above that floor. */
+    min-height: 2rem;
     background: #fdfdfd;
 }
 
@@ -113,7 +118,10 @@
 .calee-scheduler-week-allday-grid {
     position: relative;
     flex: 1 1 auto;
-    min-height: 1.75rem;
+    /* Positioning context for the all-day chips; matches the row's 2rem lane so
+       the inset chip resolves to 1.5rem — 24px at the default 16px root font
+       size (SC 2.5.8). */
+    min-height: 2rem;
 }
 
 .calee-scheduler-week-allday-cell {

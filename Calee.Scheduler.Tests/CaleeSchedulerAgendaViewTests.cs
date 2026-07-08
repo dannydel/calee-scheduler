@@ -1,4 +1,5 @@
 using AngleSharp.Dom;
+using System.Linq;
 using Bunit;
 using Calee.Scheduler.Components;
 using Calee.Scheduler.Contracts;
@@ -833,5 +834,99 @@ public class CaleeSchedulerAgendaViewTests
         Assert.NotNull(captured);
         Assert.Equal(Edt(2026, 5, 18), captured!.Start);
         Assert.Equal(Edt(2026, 5, 25), captured.End);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Issue #30 — drag-to-move: Task 1 root forwarding + markup gating
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AllowDragToMove_False_RendersByteIdenticalMarkup()
+    {
+        // AllowDragToMove=false (whether omitted or set explicitly) must render
+        // byte-identical markup to the pre-issue-30 shape — no data-calee-drag-handle,
+        // no @onpointerdown, no phantom class, aria-roledescription untouched.
+        using var ctxA = NewContext();
+        using var ctxB = NewContext();
+        var events = new[]
+        {
+            Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10)),
+            Timed("e2", Edt(2026, 5, 19, 9), Edt(2026, 5, 19, 10)),
+        };
+
+        var cutA = ctxA.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events));
+
+        var cutB = ctxB.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events)
+            .Add(c => c.AllowDragToMove, false));
+
+        // bUnit's static renderer serializes each @ref capture as a
+        // `blazor:elementReference="<random guid>"` marker in its Markup snapshot —
+        // an artifact of bUnit's test-rendering pipeline, not something real Blazor
+        // ever puts in the browser DOM (@ref is pure renderer bookkeeping there).
+        // Normalize those two per-instance-random GUIDs out before the string
+        // equality check so the assertion targets the drag-related markup drift it's
+        // meant to catch, not incidental ref-capture-id randomness.
+        var normalizedA = System.Text.RegularExpressions.Regex.Replace(
+            cutA.Markup, "blazor:elementReference=\"[^\"]*\"", "blazor:elementReference=\"X\"");
+        var normalizedB = System.Text.RegularExpressions.Regex.Replace(
+            cutB.Markup, "blazor:elementReference=\"[^\"]*\"", "blazor:elementReference=\"X\"");
+        Assert.Equal(normalizedA, normalizedB);
+
+        var rows = cutA.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        foreach (var row in rows)
+        {
+            Assert.Null(row.GetAttribute("data-calee-drag-handle"));
+            Assert.Null(row.GetAttribute("aria-roledescription"));
+        }
+    }
+
+    [Fact]
+    public void AllowDragToMove_True_AddsDragHandleAndRoledescription()
+    {
+        using var ctx = NewContext();
+        var events = new[]
+        {
+            Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10)),
+            Timed("e2", Edt(2026, 5, 19, 9), Edt(2026, 5, 19, 10)),
+        };
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events)
+            .Add(c => c.AllowDragToMove, true));
+
+        var rows = cut.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        foreach (var row in rows)
+        {
+            Assert.Equal("move", row.GetAttribute("data-calee-drag-handle"));
+            Assert.Equal("draggable event", row.GetAttribute("aria-roledescription"));
+        }
+    }
+
+    [Fact]
+    public void Root_ForwardsAllowDragToMoveAndOnEventMoved_ToAgendaArm()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Agenda)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        var rows = cut.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        Assert.All(rows, r => Assert.Equal("move", r.GetAttribute("data-calee-drag-handle")));
     }
 }

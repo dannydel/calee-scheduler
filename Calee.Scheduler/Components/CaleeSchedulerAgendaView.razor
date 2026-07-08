@@ -115,6 +115,8 @@
                             + (row.IsPinnedFromBefore
                                 ? " calee-scheduler-agenda-row--pinned-earlier"
                                 : string.Empty)
+                            + (_keyboardMoveMode && _keyboardMoveEventId == row.Id
+                                ? " calee-scheduler-agenda-row--keyboard-phantom" : string.Empty)
                             + (string.IsNullOrEmpty(consumerClass) ? string.Empty : " " + consumerClass);
 
                         var styleParts = new List<string>();
@@ -125,6 +127,7 @@
                         var style = styleParts.Count == 0 ? null : string.Join("; ", styleParts) + ";";
 
                         var clickTarget = row;
+                        var dragEnabled = AllowDragToMove;
 
                         <button type="button"
                                 class="@rowClasses"
@@ -133,6 +136,9 @@
                                 data-calee-region="agenda-row"
                                 data-calee-region-event="event"
                                 data-calee-event-id="@row.Id"
+                                @ref="_rowRefsByEventId[row.Id]"
+                                data-calee-drag-handle="@(dragEnabled ? "move" : null)"
+                                @onpointerdown="@(dragEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnRowPointerDownAsync(e, clickTarget)) : default)"
                                 tabindex="@(IsRowTabbable(currentFlatIndex) ? 0 : -1)"
                                 aria-selected="@(isSelected ? "true" : null)"
                                 aria-roledescription="@GetEventChipAriaRoleDescription()"

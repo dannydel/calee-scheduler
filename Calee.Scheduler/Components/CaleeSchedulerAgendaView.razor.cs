@@ -536,11 +536,78 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
     /// <summary>
     /// Pointer-down handler attached to each row when
-    /// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true. See
-    /// Task 3 for the full drag-start wiring; this placeholder keeps the Task 1
-    /// markup gating buildable ahead of that work.
+    /// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true. Starts a
+    /// JS-owned drag with <c>highlightMode: "agenda-group"</c> — snap is deliberately
+    /// 0 (Agenda's list has no uniform pixel divisor; targeting is by <c>clientY</c>
+    /// hit-test at drop, not pixel snap).
     /// </summary>
-    internal Task OnRowPointerDownAsync(PointerEventArgs e, EventRow row) => Task.CompletedTask;
+    internal async Task OnRowPointerDownAsync(PointerEventArgs e, EventRow row)
+    {
+        if (!AllowDragToMove) return;
+        if (e.Button != 0) return;
+
+        if (!_eventLookup.TryGetValue(row.Id, out var typed)) return;
+        if (!_rowRefsByEventId.TryGetValue(row.Id, out var sourceRef)) return;
+
+        await BeginDragOnPointerAsync(
+            e,
+            sourceRef,
+            DragMode.Move,
+            snapPixelsX: 0,
+            snapPixelsY: 0,
+            ghostClass: "calee-scheduler-event--ghost",
+            onDrop: payload => HandleRowMoveDropAsync(typed, payload),
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _agendaListRef,
+            highlightMode: "agenda-group",
+            eventDurationDays: 1,
+            columnCount: 1,
+            rowCount: 1);
+    }
+
+    /// <summary>
+    /// Drop handler for pointer drag-to-move. Resolves the JS hit-tested
+    /// <see cref="DropPayload.TargetKey"/> to a target date, computes the new
+    /// (Start, End) against the event's real start date via <see cref="MoveToDate"/>,
+    /// optimistically pins the new position, fires
+    /// <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/>, and rolls the pin
+    /// back if the consumer sets <see cref="EventMoveContext.Cancel"/>.
+    /// </summary>
+    private async Task HandleRowMoveDropAsync(TEvent ev, DropPayload payload)
+    {
+        // Dropped outside any date group — no-op, no fire.
+        if (payload.TargetKey is null) return;
+        if (!DateOnly.TryParseExact(
+                payload.TargetKey, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var targetDate))
+        {
+            return;
+        }
+
+        var realStartDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ev.Start, TimeZone).Date);
+        // No-op guard (matches Month's pointer semantics): dropping back onto the
+        // event's own real start date does not fire OnEventMoved.
+        if (targetDate == realStartDate) return;
+
+        var (newStart, newEnd) = MoveToDate(ev.Start, ev.End, targetDate);
+
+        _optimisticPin[ev.Id] = (newStart, newEnd);
+        ComputeGroups();
+        StateHasChanged();
+
+        var ctx = new EventMoveContext { Event = ev, NewStart = newStart, NewEnd = newEnd };
+        await OnEventMoved.InvokeAsync(ctx);
+
+        if (ctx.Cancel)
+        {
+            _optimisticPin.Remove(ev.Id);
+            ComputeGroups();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Test-only entry point for the pointer-drop-handling pipeline.</summary>
+    internal Task InvokeRowMoveDropForTestAsync(TEvent ev, DropPayload payload) =>
+        HandleRowMoveDropAsync(ev, payload);
 
     // ----- Event handlers ----------------------------------------------------------
 

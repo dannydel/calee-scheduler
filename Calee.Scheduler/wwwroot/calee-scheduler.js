@@ -464,6 +464,49 @@ function _updateDayCellHighlight(state, dxSnapped, dySnapped, originalRect) {
 }
 
 /**
+ * Update the drop-target highlight for agenda-group mode (Agenda view, issue #30).
+ * Agenda is a variable-height flat list, so — unlike the fixed-cell grid views —
+ * targeting is by hit-testing the pointer's live viewport Y position against each
+ * visible date group's rect, not by snapping a delta. When the pointer is above the
+ * first group or below the last, the highlight snaps to that nearest edge group so
+ * the user always sees a valid drop target while dragging.
+ *
+ * @param {object} state The drag state. Reads `state.lastPointerY` (set on every
+ *     pointermove) and `state.highlightContainer` (the scoped agenda-list element).
+ */
+function _updateAgendaGroupHighlight(state) {
+    if (!state.highlight || !state.highlightContainer) return;
+
+    const groups = state.highlightContainer.querySelectorAll('[data-calee-region="agenda-group"]');
+    if (groups.length === 0) {
+        state.highlight.style.display = 'none';
+        return;
+    }
+
+    const containerRect = state.highlightContainer.getBoundingClientRect();
+    const y = state.lastPointerY;
+
+    let matched = null;
+    for (const g of groups) {
+        const r = g.getBoundingClientRect();
+        if (y >= r.top && y <= r.bottom) { matched = g; break; }
+    }
+    if (!matched) {
+        const first = groups[0];
+        const last = groups[groups.length - 1];
+        matched = (y < first.getBoundingClientRect().top) ? first : last;
+    }
+
+    const groupRect = matched.getBoundingClientRect();
+    state.highlight.style.left = '0px';
+    state.highlight.style.top = (groupRect.top - containerRect.top + state.highlightContainer.scrollTop) + 'px';
+    state.highlight.style.width = containerRect.width + 'px';
+    state.highlight.style.height = groupRect.height + 'px';
+    state.highlight.style.display = '';
+    state.lastHighlightGroup = matched;
+}
+
+/**
  * Begin a drag operation. Owns the visual feedback locally (ghost element
  * positioning, cursor cues). Calls C# only at drop or cancel — never mid-drag.
  *
@@ -740,6 +783,14 @@ export function startDrag(elementRef, options) {
         // Track the latest delta so up/key handlers see the final movement.
         lastDeltaX: 0,
         lastDeltaY: 0,
+        // Issue #30 — live pointer viewport position, updated on every pointermove.
+        // Agenda's agenda-group highlight mode hit-tests against this (a variable-
+        // height list has no uniform pixel divisor, so delta-snapping can't target
+        // it); initialized to the anchor so a drop with no move still has a
+        // coordinate. Harmless for every other highlight mode, which ignores it.
+        lastPointerX: mode === 'create-region' ? anchorX : (rect.left + rect.width / 2),
+        lastPointerY: mode === 'create-region' ? anchorY : (rect.top + rect.height / 2),
+        lastHighlightGroup: null,
         // Track whether startX/Y has been initialized from the first move event.
         // For create-region we treat the anchor as already-initialized (the
         // pointerdown position was passed in directly); other modes use the
@@ -777,6 +828,9 @@ export function startDrag(elementRef, options) {
         const dy = ev.clientY - state.startY;
         state.lastDeltaX = dx;
         state.lastDeltaY = dy;
+        // Issue #30 — record the live pointer position for agenda-group hit-testing.
+        state.lastPointerX = ev.clientX;
+        state.lastPointerY = ev.clientY;
         // Mid-drag: ghost follows the cursor 1:1 (no snap preview — plan §5.1 #4).
         // - move: translate the whole ghost.
         // - resize-end + axis='y': anchor top, grow/shrink height by dy. (Min 1 px
@@ -828,6 +882,11 @@ export function startDrag(elementRef, options) {
                 _updateLaneRowHighlight(state, dxSnapped, dySnapped, rect);
             } else if (state.highlightMode === 'day-cell') {
                 _updateDayCellHighlight(state, dxSnapped, dySnapped, rect);
+            } else if (state.highlightMode === 'agenda-group') {
+                // Issue #30 — Agenda's variable-height list has no uniform pixel
+                // divisor to snap against; the highlight reads the live pointer
+                // position (state.lastPointerY, set above), not the snapped deltas.
+                _updateAgendaGroupHighlight(state);
             }
         }
     };
@@ -865,6 +924,22 @@ export function startDrag(elementRef, options) {
             deltaYPx: dySnapped,
             mode: state.mode,
         };
+
+        // Issue #30 — Agenda drop-target resolution. Hit-test the live pointer
+        // clientY (NOT finalTopPx, which is meaningless for a variable-height list)
+        // against each visible date group's rect; carry the matched group's
+        // data-calee-date back to C# as targetKey. null when the drop landed outside
+        // every group.
+        if (state.highlightMode === 'agenda-group') {
+            let key = null;
+            const groups = state.highlightContainer
+                ? state.highlightContainer.querySelectorAll('[data-calee-region="agenda-group"]') : [];
+            for (const g of groups) {
+                const r = g.getBoundingClientRect();
+                if (ev.clientY >= r.top && ev.clientY <= r.bottom) { key = g.getAttribute('data-calee-date'); break; }
+            }
+            payload.targetKey = key;
+        }
 
         const ref = state.dotnetRef;
         const method = state.onDropMethodName;

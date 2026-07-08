@@ -1265,4 +1265,124 @@ public class CaleeSchedulerAgendaViewTests
         // NewEnd legitimately exceeds the window's exclusive end.
         Assert.True(captured.NewEnd > cut.Instance.WindowEndExclusive);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Issue #30 — drag-to-move: Task 3 pointer drag drop resolution
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PointerDrop_WithTargetKey_FiresOnEventMoved_ToTargetDate()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9, 30), Edt(2026, 5, 18, 10, 15));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-20");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(new DateOnly(2026, 5, 20), DateOnly.FromDateTime(captured!.NewStart.Date));
+        Assert.Equal(9, captured.NewStart.Hour);
+        Assert.Equal(30, captured.NewStart.Minute);
+        Assert.Equal(ev.End - ev.Start, captured.NewEnd - captured.NewStart);
+    }
+
+    [Fact]
+    public async Task PointerDrop_NullTargetKey_NoOp()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: null);
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.False(fired);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+    }
+
+    [Fact]
+    public async Task PointerDrop_TargetEqualsSourceDate_NoOp()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-18");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public async Task PointerDrop_ConsumerCancel_RevertsPin()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => m.Cancel = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-20");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+        var group = cut.Find("[data-calee-region='agenda-group'][data-calee-date='2026-05-18']");
+        Assert.NotNull(group.QuerySelector($"[data-calee-event-id='{ev.Id}']"));
+    }
+
+    [Fact]
+    public async Task PointerDrop_PinnedFromBeforeRow_MovesAgainstRealStart()
+    {
+        using var ctx = NewContext();
+        // Started Sat May 16 (before window) → ends Wed May 20. Pinned to window's
+        // first day (May 18).
+        var ev = AllDay("rollover", Edt(2026, 5, 16), Edt(2026, 5, 21));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        // Drop target = windowFirstDate (May 18) — this is a forward move relative to
+        // the event's real start (May 16), not a same-date no-op.
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-18");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(new DateOnly(2026, 5, 18), DateOnly.FromDateTime(captured!.NewStart.Date));
+    }
 }

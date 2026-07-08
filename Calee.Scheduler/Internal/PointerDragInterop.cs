@@ -466,9 +466,20 @@ internal enum ResizeAxis
 /// <param name="DeltaXPx">Total horizontal movement from drag start, snap-applied.</param>
 /// <param name="DeltaYPx">Total vertical movement from drag start, snap-applied.</param>
 /// <param name="Mode">Echoes the <see cref="DragMode"/> the drag was started with.</param>
+/// <param name="TargetKey">
+/// Issue #30 — the <c>data-calee-date</c> ("yyyy-MM-dd") of the Agenda date-group
+/// hit-tested under the pointer's live <c>clientY</c> at release; <see langword="null"/>
+/// when the drop landed outside any group or for non-Agenda drag modes. A variable-
+/// height list has no uniform pixel divisor, so this is the only reliable target
+/// signal — JS is the only side that holds the live release coordinate (C# never sees
+/// <c>pointermove</c>). Trailing + defaulted so existing positional
+/// <c>new DropPayload(...)</c> call sites keep compiling and JSON payloads that omit
+/// the field deserialize it to <see langword="null"/>.
+/// </param>
 internal sealed record DropPayload(
     double FinalLeftPx,
     double FinalTopPx,
     double DeltaXPx,
     double DeltaYPx,
-    string Mode);
+    string Mode,
+    string? TargetKey = null);

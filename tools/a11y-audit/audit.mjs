@@ -351,6 +351,155 @@ async function auditKeyboardInteractions() {
             failures.push('Month pointer drag: no draggable chip found');
             console.log('FAIL');
         }
+
+        // -- Agenda view: keyboard move (m → ArrowDown → Enter), issue #30 --
+        process.stdout.write('keyboard move (Agenda) ... ');
+        await page.goto(BASE_URL + '/agenda', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-region="agenda-row"]', { timeout: 10000 });
+
+        // Focus the first row directly rather than pressing Tab — unlike Day/Month
+        // (no page furniture before the grid), the Agenda page has a toolbar + window-
+        // length radios ahead of the list, so a single Tab lands on those, not a row.
+        await page.locator('[data-calee-region="agenda-row"]').first().focus();
+        const movedEventId = await page.evaluate(() =>
+            document.activeElement?.getAttribute('data-calee-event-id') ?? null);
+        const agendaGroupDateOf = async (id) => page.evaluate((eventId) => {
+            const row = document.querySelector(`[data-calee-event-id="${eventId}"]`);
+            return row?.closest('[data-calee-region="agenda-group"]')?.getAttribute('data-calee-date') ?? null;
+        }, id);
+        const groupDateBeforeMove = await agendaGroupDateOf(movedEventId);
+
+        await page.keyboard.press('m');         // enter move mode
+        await page.keyboard.press('ArrowDown'); // retarget the date cursor one day forward
+        await page.keyboard.press('Enter');     // commit
+        await page.waitForTimeout(300);
+
+        const rowsAfterAgendaMove = await page.$$('[data-calee-region="agenda-row"]');
+        const groupDateAfterMove = await agendaGroupDateOf(movedEventId);
+        if (rowsAfterAgendaMove.length === 0) {
+            failures.push('Agenda keyboard move: no rows visible after move');
+            console.log('FAIL');
+        } else if (!movedEventId || groupDateAfterMove === groupDateBeforeMove) {
+            failures.push(`Agenda keyboard move: moved row's date group unchanged (${groupDateBeforeMove} -> ${groupDateAfterMove})`);
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Agenda view: keyboard move focus retention (issue #19-class check
+        //    bUnit cannot do — see README §9.1a / AGENTS.md testing quirks) --
+        process.stdout.write('keyboard move focus retention (Agenda) ... ');
+        await page.goto(BASE_URL + '/agenda', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-region="agenda-row"]', { timeout: 10000 });
+
+        await page.locator('[data-calee-region="agenda-row"]').first().focus();
+        const focusedEventId = await page.evaluate(() =>
+            document.activeElement?.getAttribute('data-calee-event-id') ?? null);
+
+        await page.keyboard.press('m');
+        await page.keyboard.press('ArrowDown');
+        await page.waitForTimeout(200);
+
+        const activeElementMatches = (id) => page.evaluate((eventId) => {
+            const active = document.activeElement;
+            return !!active
+                && active.getAttribute('role') === 'listitem'
+                && active.getAttribute('tabindex') === '0'
+                && active.getAttribute('data-calee-event-id') === eventId;
+        }, id);
+
+        if (!focusedEventId) {
+            failures.push('Agenda keyboard move focus retention: could not resolve the initially-focused row id');
+            console.log('FAIL');
+        } else if (!(await activeElementMatches(focusedEventId))) {
+            failures.push('Agenda keyboard move focus retention: document.activeElement did not follow the moving row across its re-bucket (issue #19-class regression)');
+            console.log('FAIL');
+        } else {
+            await page.keyboard.press('Escape'); // cancel
+            await page.waitForTimeout(200);
+            if (!(await activeElementMatches(focusedEventId))) {
+                failures.push('Agenda keyboard move focus retention: focus did not stay on the row after Escape-cancel');
+                console.log('FAIL');
+            } else {
+                console.log('PASS');
+            }
+        }
+
+        // -- Agenda view: keyboard move cancel (m → ArrowDown → Escape) --
+        process.stdout.write('keyboard move cancel (Agenda) ... ');
+        await page.goto(BASE_URL + '/agenda', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-region="agenda-row"]', { timeout: 10000 });
+
+        await page.locator('[data-calee-region="agenda-row"]').first().focus();
+        const cancelEventId = await page.evaluate(() =>
+            document.activeElement?.getAttribute('data-calee-event-id') ?? null);
+        const cancelGroupBefore = await agendaGroupDateOf(cancelEventId);
+
+        await page.keyboard.press('m');
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+
+        const rowsAfterAgendaCancel = await page.$$('[data-calee-region="agenda-row"]');
+        const cancelGroupAfter = await agendaGroupDateOf(cancelEventId);
+        if (rowsAfterAgendaCancel.length === 0) {
+            failures.push('Agenda keyboard move cancel: no rows visible after cancel');
+            console.log('FAIL');
+        } else if (cancelGroupAfter !== cancelGroupBefore) {
+            failures.push(`Agenda keyboard move cancel: row did not return to its original group (${cancelGroupBefore} -> ${cancelGroupAfter})`);
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Agenda view: pointer drag-to-move onto a later date group --
+        process.stdout.write('pointer drag (Agenda) ... ');
+        await page.goto(BASE_URL + '/agenda', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-drag-handle="move"]', { timeout: 10000 });
+
+        const agendaDragRows = await page.$$('[data-calee-drag-handle="move"]');
+        const agendaGroupEls = await page.$$('[data-calee-region="agenda-group"]');
+        if (agendaDragRows.length > 0 && agendaGroupEls.length > 1) {
+            const sourceRow = agendaDragRows[0];
+            const targetGroup = agendaGroupEls[agendaGroupEls.length - 1];
+            const sourceBox = await sourceRow.boundingBox();
+            const targetBox = await targetGroup.boundingBox();
+            if (sourceBox && targetBox) {
+                const targetX = targetBox.x + targetBox.width / 2;
+                const targetY = targetBox.y + targetBox.height / 2;
+
+                await sourceRow.hover();
+                await page.mouse.down();
+                await page.mouse.move(targetX, targetY, { steps: 10 });
+                await page.waitForTimeout(100);
+
+                const highlightVisible = await page.evaluate(() => {
+                    const el = document.querySelector('.calee-scheduler-drop-target-highlight');
+                    if (!el) return false;
+                    return window.getComputedStyle(el).display !== 'none';
+                });
+
+                await page.mouse.up();
+                await page.waitForTimeout(300);
+
+                const rowsAfterAgendaDrag = await page.$$('[data-calee-region="agenda-row"]');
+                if (!highlightVisible) {
+                    failures.push('Agenda pointer drag: no drop-target highlight appeared mid-drag');
+                    console.log('FAIL');
+                } else if (rowsAfterAgendaDrag.length === 0) {
+                    failures.push('Agenda pointer drag: no rows visible after drag');
+                    console.log('FAIL');
+                } else {
+                    console.log('PASS');
+                }
+            } else {
+                failures.push('Agenda pointer drag: could not get bounding boxes for source row / target group');
+                console.log('FAIL');
+            }
+        } else {
+            failures.push('Agenda pointer drag: not enough rows/groups visible to exercise a cross-group drag');
+            console.log('FAIL');
+        }
     } catch (err) {
         failures.push(err.message);
         console.log('FAIL (' + err.message + ')');

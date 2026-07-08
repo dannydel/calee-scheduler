@@ -242,3 +242,24 @@
         min-width: 6.5rem;
     }
 }
+
+/* Issue #30 — drag-to-move. Literal token fallbacks because the standalone view is
+   outside the root CaleeScheduler.razor's ::deep scope. */
+
+/* Keyboard-move phantom row — matches Month's phantom treatment. */
+.calee-scheduler-agenda-row--keyboard-phantom {
+    background: var(--calee-scheduler-drop-target-bg, #eef4ff) !important;
+    border: 2px dashed var(--calee-scheduler-drop-target-border, #2563eb) !important;
+    outline: 1px solid var(--calee-scheduler-drop-target-outline, #3b82f6) !important;
+}
+
+/* Pointer drop-target highlight. ::deep because the element is JS-injected into
+   the scoped agenda-list and carries no scope attribute of its own. Standalone
+   Agenda has no root ancestor to supply this rule (the root's ::deep at
+   CaleeScheduler.razor.css:184 only covers the composed case), so this is a
+   net-new addition for the standalone view. */
+::deep .calee-scheduler-drop-target-highlight {
+    background: var(--calee-scheduler-drop-target-bg, #eef4ff);
+    border: 2px dashed var(--calee-scheduler-drop-target-border, #2563eb);
+    outline: 1px solid var(--calee-scheduler-drop-target-outline, #3b82f6);
+}

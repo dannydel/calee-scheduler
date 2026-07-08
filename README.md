@@ -7,7 +7,7 @@ A Blazor scheduling component suite for internal .NET applications — Day, Week
 - Generic-typed components (`<CaleeScheduler TEvent="MyEvent" ... />`); ships a default `CalendarEvent` record for consumers who do not need a custom type.
 - Standalone views or a composed root scheduler with a shared toolbar and view switcher.
 - Sweep-line overlap layout with lane reuse; events render correctly without consumer geometry math.
-- Fail-closed interaction surface: drag-to-move (Day, Week, Month, Timeline views), drag-to-resize, drag-to-create, double-click-to-create, delete, multi-select, undo/redo triggers, shortcuts, and command-palette hooks.
+- Fail-closed interaction surface: drag-to-move (Day, Week, Month, Agenda, Timeline views), drag-to-resize, drag-to-create, double-click-to-create, delete, multi-select, undo/redo triggers, shortcuts, and command-palette hooks.
 - Required per-view `TimeZone` parameter — the library never converts event times; it uses the supplied zone for "today", day boundaries, and emitted `SchedulerSlot` offsets only.
 - WCAG 2.2 AA-oriented default markup (with documented exceptions — see §9.1a): structural ARIA, roving tabindex, screen-reader-checked, contrast-verified default theme (§9). Keyboard alternatives to all drag interactions: `n` for drag-to-create, `m` + arrow keys + Enter/Escape for drag-to-move, `Shift+ArrowUp`/`Shift+ArrowDown` for drag-to-resize.
 - CSS isolation with documented theming levers: `--calee-scheduler-*` custom properties, attribute splatting, named class hooks, and `::deep` via `data-calee-region` attributes.
@@ -267,6 +267,8 @@ With typical parameters:
 
 A date-grouped list view for narrow layouts, screen-reader-heavy workflows, and "what's next" scans. It renders a rolling `AgendaDays` window from the anchor date, hides empty days, and supports an `EventRowTemplate` for row content.
 
+Set `AllowDragToMove` + `OnEventMoved` (issue #30) to make rows draggable onto another visible date group — pointer drag or keyboard (`m` to enter move mode, `ArrowUp`/`ArrowDown` to retarget the date, `Enter` to commit, `Escape` to cancel). Agenda moves are **day-granularity**: the event's time-of-day and duration are preserved, only the calendar date changes, and — because Agenda has no per-day blocking hook — moves honor no `DayModifier` (every in-window day accepts a move).
+
 Minimal:
 
 ```razor
@@ -284,6 +286,8 @@ With typical parameters:
                           @bind-Date="_anchor"
                           AgendaDays="14"
                           EventRowTemplate="AgendaRow"
+                          AllowDragToMove="true"
+                          OnEventMoved="HandleEventMoved"
                           OnEventClicked="HandleEventClicked"
                           OnDateClicked="HandleDateClicked" />
 ```

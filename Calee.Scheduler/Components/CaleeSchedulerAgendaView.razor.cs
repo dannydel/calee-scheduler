@@ -196,6 +196,21 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         else _agendaDays = AgendaDays;
 
         ComputeWindow();
+
+        // A disruptive parameter change (Date navigation, AgendaDays change, a new
+        // Events list) can arrive mid keyboard-move — its target date may now sit
+        // outside the recomputed window, leaving a modal mode swallowing keys against
+        // a stale cursor. Cancel it silently: drop the phantom pin and reset the mode
+        // so the ComputeGroups() below rebuilds the read-only layout. (OnParametersSet
+        // only fires on external parameter changes, never on the in-handler
+        // StateHasChanged that drives an active move, so this won't fire spuriously.)
+        if (_keyboardMoveMode)
+        {
+            if (_keyboardMoveEventId is not null) _optimisticPin.Remove(_keyboardMoveEventId);
+            _keyboardMoveMode = false;
+            _keyboardMoveEventId = null;
+        }
+
         ClearAcknowledgedPins();
         ComputeGroups();
         ClampFocus();
@@ -265,6 +280,15 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         // sees a stale dictionary from a prior render.
         _eventLookup = new Dictionary<string, TEvent>(filtered.Count, StringComparer.Ordinal);
         foreach (var e in filtered) _eventLookup[e.Id] = e;
+
+        // Drop ref-capture entries for events no longer in the filtered set so the
+        // dictionary can't grow unbounded across the component's lifetime. Rows about
+        // to render re-populate their own entries via @ref.
+        if (_rowRefsByEventId.Count > 0)
+        {
+            var stale = _rowRefsByEventId.Keys.Where(id => !_eventLookup.ContainsKey(id)).ToList();
+            foreach (var id in stale) _rowRefsByEventId.Remove(id);
+        }
 
         if (filtered.Count == 0)
         {
@@ -545,6 +569,9 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     {
         if (!AllowDragToMove) return;
         if (e.Button != 0) return;
+        // A keyboard move already owns the phantom/pin; don't start a concurrent
+        // pointer drag on top of it.
+        if (_keyboardMoveMode) return;
 
         if (!_eventLookup.TryGetValue(row.Id, out var typed)) return;
         if (!_rowRefsByEventId.TryGetValue(row.Id, out var sourceRef)) return;

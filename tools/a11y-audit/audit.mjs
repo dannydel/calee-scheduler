@@ -473,18 +473,33 @@ async function auditKeyboardInteractions() {
                 await page.mouse.move(targetX, targetY, { steps: 10 });
                 await page.waitForTimeout(100);
 
-                const highlightVisible = await page.evaluate(() => {
+                // Assert the highlight is not only visible but geometrically tracks
+                // the target group's box (issue #30 fix: the list needs
+                // position:relative or the +scrollTop term drifts the highlight off
+                // the target). Require meaningful vertical overlap between the two.
+                const highlightState = await page.evaluate(() => {
                     const el = document.querySelector('.calee-scheduler-drop-target-highlight');
-                    if (!el) return false;
-                    return window.getComputedStyle(el).display !== 'none';
+                    if (!el) return { visible: false, overlap: 0 };
+                    const visible = window.getComputedStyle(el).display !== 'none';
+                    const hr = el.getBoundingClientRect();
+                    const groups = [...document.querySelectorAll('[data-calee-region="agenda-group"]')];
+                    const target = groups[groups.length - 1];
+                    if (!target) return { visible, overlap: 0 };
+                    const tr = target.getBoundingClientRect();
+                    const overlap = Math.max(0, Math.min(hr.bottom, tr.bottom) - Math.max(hr.top, tr.top));
+                    const ratio = tr.height > 0 ? overlap / tr.height : 0;
+                    return { visible, overlap: ratio };
                 });
 
                 await page.mouse.up();
                 await page.waitForTimeout(300);
 
                 const rowsAfterAgendaDrag = await page.$$('[data-calee-region="agenda-row"]');
-                if (!highlightVisible) {
+                if (!highlightState.visible) {
                     failures.push('Agenda pointer drag: no drop-target highlight appeared mid-drag');
+                    console.log('FAIL');
+                } else if (highlightState.overlap < 0.5) {
+                    failures.push('Agenda pointer drag: highlight did not track the target group box (overlap ratio ' + highlightState.overlap.toFixed(2) + ' < 0.5 — position:relative regression?)');
                     console.log('FAIL');
                 } else if (rowsAfterAgendaDrag.length === 0) {
                     failures.push('Agenda pointer drag: no rows visible after drag');

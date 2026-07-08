@@ -551,7 +551,7 @@ function _updateAgendaGroupHighlight(state) {
  * @param {number} options.snapPixelsY Vertical snap granularity in pixels (0 = no snap).
  * @param {string} options.ghostClass CSS class applied to the ghost element.
  * @param {HTMLElement} [options.highlightContainer] The grid container to append the highlight to (issue #13).
- * @param {'slot-band'|'lane-row'|'day-cell'} [options.highlightMode] The shape of the highlight (issue #13).
+ * @param {'slot-band'|'lane-row'|'day-cell'|'agenda-group'} [options.highlightMode] The shape of the highlight (issue #13; 'agenda-group' added in issue #30).
  * @param {number} [options.eventDurationPixels] For move: the event's height/width in pixels (issue #13).
  * @param {number} [options.eventDurationSlots] For move: the event's duration in slots (issue #13).
  * @param {number} [options.eventDurationDays] For Week/Timeline move: the event's duration in days (issue #13).
@@ -928,17 +928,21 @@ export function startDrag(elementRef, options) {
         // Issue #30 — Agenda drop-target resolution. Hit-test the live pointer
         // clientY (NOT finalTopPx, which is meaningless for a variable-height list)
         // against each visible date group's rect; carry the matched group's
-        // data-calee-date back to C# as targetKey. null when the drop landed outside
-        // every group.
+        // data-calee-date back to C# as targetKey. When the pointer is outside every
+        // group (above the first / below the last), fall back to the same edge group
+        // the highlight snapped to (state.lastHighlightGroup) so the drop lands where
+        // the highlight promised — the two must never disagree. null only when there
+        // are no groups at all.
         if (state.highlightMode === 'agenda-group') {
-            let key = null;
+            let matched = null;
             const groups = state.highlightContainer
                 ? state.highlightContainer.querySelectorAll('[data-calee-region="agenda-group"]') : [];
             for (const g of groups) {
                 const r = g.getBoundingClientRect();
-                if (ev.clientY >= r.top && ev.clientY <= r.bottom) { key = g.getAttribute('data-calee-date'); break; }
+                if (ev.clientY >= r.top && ev.clientY <= r.bottom) { matched = g; break; }
             }
-            payload.targetKey = key;
+            matched = matched || state.lastHighlightGroup || null;
+            payload.targetKey = matched ? matched.getAttribute('data-calee-date') : null;
         }
 
         const ref = state.dotnetRef;

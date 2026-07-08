@@ -47,6 +47,12 @@
    role="list" is on this element in the markup. */
 .calee-scheduler-agenda-list {
     flex: 1 1 auto;
+    /* Containing block for the JS-injected .calee-scheduler-drop-target-highlight
+       (issue #30). The highlight is position:absolute and positioned with a
+       + scrollTop term, which is only correct when this scroll container is the
+       highlight's abs-positioning containing block. Does not affect the sticky
+       group headers. */
+    position: relative;
     max-height: var(--calee-scheduler-agenda-max-height);
     overflow-y: auto;
     overflow-x: hidden;

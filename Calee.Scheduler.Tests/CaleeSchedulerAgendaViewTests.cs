@@ -1184,6 +1184,38 @@ public class CaleeSchedulerAgendaViewTests
     }
 
     [Fact]
+    public async Task Keyboard_Move_CancelledOnDisruptiveParameterChange()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        Assert.True(cut.Instance.IsKeyboardMoveModeForTest);
+
+        // A Date navigation arrives mid-move: the target date may now fall outside
+        // the recomputed window. The modal mode must reset silently — no commit, no
+        // stuck phantom pin.
+        cut.Render(p => p.Add(c => c.Date, Anchor.AddDays(30)));
+
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+        Assert.False(fired);
+    }
+
+    [Fact]
     public async Task Keyboard_PinnedFromBeforeRow_MovesAgainstRealStart()
     {
         using var ctx = NewContext();

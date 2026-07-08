@@ -49,6 +49,8 @@
                                   @bind-Date="_anchor"
                                   AgendaDays="@_agendaDays"
                                   Events="@_events"
+                                  AllowDragToMove="true"
+                                  OnEventMoved="HandleEventMoved"
                                   AllowCommandPalette="true"
                                   OnEventClicked="HandleEventClicked"
                                   OnDateClicked="HandleDateClicked"
@@ -57,7 +59,7 @@
                                   OnViewSwitchRequested="HandleViewSwitchRequested" />
     </div>
 
-    <PageFooterNote Caption="Click an event row to log an OnEventClicked drill-down and open Edit/Delete actions; click a date header to log an OnDateClicked. The seed includes: two events on “today,” one all-day customer demo on day +2, a design review on day +3, a four-day Industry conference starting on day +5 that crosses the trailing edge of the 7-day window (renders once with a date-range label), and a rolling release window that started three days BEFORE the anchor and ends on day +1 (pins to the first day of the visible window with the original range label and a ← clip indicator). Day +1 has no events and the seed deliberately leaves day +4 empty so the hidden-empty-days rule reads on the page (you should not see headers for those dates). Toggle the Window radios above to step through 3 / 7 / 14 / 30 day windows; prev/next moves by the active window length. Press Cmd/Ctrl+K to open the palette; “?” opens the shortcut help dialog." />
+    <PageFooterNote Caption="Click an event row to log an OnEventClicked drill-down and open Edit/Delete actions; click a date header to log an OnDateClicked. Drag a row onto another visible date group to reschedule it (day-granularity — time-of-day and duration are preserved), or focus a row and press “m” to enter keyboard move mode, ArrowUp/ArrowDown to retarget the date, Enter to commit, Escape to cancel. The seed includes: two events on “today,” one all-day customer demo on day +2, a design review on day +3, a four-day Industry conference starting on day +5 that crosses the trailing edge of the 7-day window (renders once with a date-range label), and a rolling release window that started three days BEFORE the anchor and ends on day +1 (pins to the first day of the visible window with the original range label and a ← clip indicator). Day +1 has no events and the seed deliberately leaves day +4 empty so both the hidden-empty-days rule and “move to an empty day” are demonstrable. Toggle the Window radios above to step through 3 / 7 / 14 / 30 day windows; prev/next moves by the active window length. Press Cmd/Ctrl+K to open the palette; “?” opens the shortcut help dialog." />
 
     @if (_lastDrillMessage is not null)
     {
@@ -217,6 +219,19 @@
     }
 
     private void HandleDialogCancel() => _dialogVisible = false;
+
+    /// <summary>
+    /// Issue #30 — drag-to-move. Mirrors <c>MonthPage.HandleEventMoved</c>'s minimal
+    /// shape (no undo/redo wired on this standalone page): apply the library's
+    /// optimistic (NewStart, NewEnd) back into the consumer's event list so the next
+    /// render reflects the accepted move.
+    /// </summary>
+    private void HandleEventMoved(EventMoveContext ctx)
+    {
+        var idx = _events.FindIndex(e => e.Id == ctx.Event.Id);
+        if (idx < 0) return;
+        _events[idx] = _events[idx] with { Start = ctx.NewStart, End = ctx.NewEnd };
+    }
 
     private void HandleDateClicked(DateOnly date)
     {

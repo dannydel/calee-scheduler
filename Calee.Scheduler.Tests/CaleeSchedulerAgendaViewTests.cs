@@ -1,4 +1,5 @@
 using AngleSharp.Dom;
+using System.Linq;
 using Bunit;
 using Calee.Scheduler.Components;
 using Calee.Scheduler.Contracts;
@@ -833,5 +834,587 @@ public class CaleeSchedulerAgendaViewTests
         Assert.NotNull(captured);
         Assert.Equal(Edt(2026, 5, 18), captured!.Start);
         Assert.Equal(Edt(2026, 5, 25), captured.End);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Issue #30 — drag-to-move: Task 1 root forwarding + markup gating
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AllowDragToMove_False_RendersByteIdenticalMarkup()
+    {
+        // AllowDragToMove=false (whether omitted or set explicitly) must render
+        // byte-identical markup to the pre-issue-30 shape — no data-calee-drag-handle,
+        // no @onpointerdown, no phantom class, aria-roledescription untouched.
+        using var ctxA = NewContext();
+        using var ctxB = NewContext();
+        var events = new[]
+        {
+            Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10)),
+            Timed("e2", Edt(2026, 5, 19, 9), Edt(2026, 5, 19, 10)),
+        };
+
+        var cutA = ctxA.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events));
+
+        var cutB = ctxB.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events)
+            .Add(c => c.AllowDragToMove, false));
+
+        // bUnit's static renderer serializes each @ref capture as a
+        // `blazor:elementReference="<random guid>"` marker in its Markup snapshot —
+        // an artifact of bUnit's test-rendering pipeline, not something real Blazor
+        // ever puts in the browser DOM (@ref is pure renderer bookkeeping there).
+        // Normalize those two per-instance-random GUIDs out before the string
+        // equality check so the assertion targets the drag-related markup drift it's
+        // meant to catch, not incidental ref-capture-id randomness.
+        var normalizedA = System.Text.RegularExpressions.Regex.Replace(
+            cutA.Markup, "blazor:elementReference=\"[^\"]*\"", "blazor:elementReference=\"X\"");
+        var normalizedB = System.Text.RegularExpressions.Regex.Replace(
+            cutB.Markup, "blazor:elementReference=\"[^\"]*\"", "blazor:elementReference=\"X\"");
+        Assert.Equal(normalizedA, normalizedB);
+
+        var rows = cutA.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        foreach (var row in rows)
+        {
+            Assert.Null(row.GetAttribute("data-calee-drag-handle"));
+            Assert.Null(row.GetAttribute("aria-roledescription"));
+        }
+    }
+
+    [Fact]
+    public void AllowDragToMove_True_AddsDragHandleAndRoledescription()
+    {
+        using var ctx = NewContext();
+        var events = new[]
+        {
+            Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10)),
+            Timed("e2", Edt(2026, 5, 19, 9), Edt(2026, 5, 19, 10)),
+        };
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events)
+            .Add(c => c.AllowDragToMove, true));
+
+        var rows = cut.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        foreach (var row in rows)
+        {
+            Assert.Equal("move", row.GetAttribute("data-calee-drag-handle"));
+            Assert.Equal("draggable event", row.GetAttribute("aria-roledescription"));
+        }
+    }
+
+    [Fact]
+    public void Root_ForwardsAllowDragToMoveAndOnEventMoved_ToAgendaArm()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Agenda)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        var rows = cut.FindAll("[data-calee-region='agenda-row']");
+        Assert.NotEmpty(rows);
+        Assert.All(rows, r => Assert.Equal("move", r.GetAttribute("data-calee-drag-handle")));
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Issue #30 — drag-to-move: Task 2 keyboard move mode (date-cursor model)
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Keyboard_M_EntersMoveMode_WhenAllowDragToMove()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+
+        Assert.True(cut.Instance.IsKeyboardMoveModeForTest);
+        var row = cut.Find($"[data-calee-event-id='{ev.Id}']");
+        Assert.Contains("calee-scheduler-agenda-row--keyboard-phantom", row.GetAttribute("class") ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Keyboard_M_IsNoOp_WhenAllowDragToMoveFalse()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev }));
+        // AllowDragToMove omitted → false, fail-closed gate.
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        var row = cut.Find($"[data-calee-event-id='{ev.Id}']");
+        Assert.DoesNotContain("calee-scheduler-agenda-row--keyboard-phantom", row.GetAttribute("class") ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Keyboard_ArrowDown_AdvancesTargetDateCursor()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var originalDate = cut.Instance.KeyboardMoveTargetDateForTest;
+
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+
+        Assert.Equal(originalDate.AddDays(1), cut.Instance.KeyboardMoveTargetDateForTest);
+
+        // The phantom row now sits under the next date group's role="list".
+        var nextGroup = cut.Find($"[data-calee-date='{originalDate.AddDays(1):yyyy-MM-dd}']");
+        var phantomRow = nextGroup.QuerySelector($"[data-calee-event-id='{ev.Id}']");
+        Assert.NotNull(phantomRow);
+    }
+
+    [Fact]
+    public async Task Keyboard_ArrowDown_ClampsAtWindowLastDay()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 24, 9), Edt(2026, 5, 24, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        // Default window is May 18..24 inclusive (AgendaDays=7). e1 starts on the last
+        // window day already.
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        Assert.Equal(new DateOnly(2026, 5, 24), cut.Instance.KeyboardMoveTargetDateForTest);
+
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+
+        // Cursor stays pinned at the window's last day.
+        Assert.Equal(new DateOnly(2026, 5, 24), cut.Instance.KeyboardMoveTargetDateForTest);
+    }
+
+    [Fact]
+    public async Task Keyboard_ArrowUp_ClampsAtWindowFirstDay()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        Assert.Equal(new DateOnly(2026, 5, 18), cut.Instance.KeyboardMoveTargetDateForTest);
+
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowUp" }, row, 0));
+
+        // Cursor stays pinned at the window's first day.
+        Assert.Equal(new DateOnly(2026, 5, 18), cut.Instance.KeyboardMoveTargetDateForTest);
+    }
+
+    [Fact]
+    public async Task Keyboard_MovesToEmptyDay_MaterializesGroup()
+    {
+        using var ctx = NewContext();
+        // May 19 is a gap day inside the window (no events) — moving the row there
+        // must materialize a brand-new date group.
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true));
+
+        Assert.Empty(cut.FindAll("[data-calee-date='2026-05-19']"));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+
+        var newGroup = cut.Find("[data-calee-region='agenda-group'][data-calee-date='2026-05-19']");
+        Assert.NotNull(newGroup);
+        Assert.NotNull(newGroup.QuerySelector($"[data-calee-event-id='{ev.Id}']"));
+    }
+
+    [Fact]
+    public async Task Keyboard_Enter_FiresOnEventMoved_PreservingTimeAndDuration()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9, 30), Edt(2026, 5, 18, 10, 45));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start.AddDays(1), captured!.NewStart);
+        Assert.Equal(ev.End.AddDays(1), captured.NewEnd);
+        Assert.Equal(ev.End - ev.Start, captured.NewEnd - captured.NewStart);
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+    }
+
+    [Fact]
+    public async Task Keyboard_Enter_OnSameDate_StillFires_WithUnchangedStart()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        // No arrow presses — commit immediately at the original position.
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        Assert.NotNull(captured);
+        Assert.Equal(ev.Start, captured!.NewStart);
+        Assert.Equal(ev.End, captured.NewEnd);
+    }
+
+    [Fact]
+    public async Task Keyboard_Enter_ConsumerCancel_RevertsPin()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => m.Cancel = true)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+        var group = cut.Find("[data-calee-region='agenda-group'][data-calee-date='2026-05-18']");
+        Assert.NotNull(group.QuerySelector($"[data-calee-event-id='{ev.Id}']"));
+    }
+
+    [Fact]
+    public async Task Keyboard_Escape_CancelsWithoutFiring()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCancelForTestAsync());
+
+        Assert.False(fired);
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+    }
+
+    [Fact]
+    public async Task Keyboard_Move_CancelledOnDisruptiveParameterChange()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        Assert.True(cut.Instance.IsKeyboardMoveModeForTest);
+
+        // A Date navigation arrives mid-move: the target date may now fall outside
+        // the recomputed window. The modal mode must reset silently — no commit, no
+        // stuck phantom pin.
+        cut.Render(p => p.Add(c => c.Date, Anchor.AddDays(30)));
+
+        Assert.False(cut.Instance.IsKeyboardMoveModeForTest);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public async Task Keyboard_PinnedFromBeforeRow_MovesAgainstRealStart()
+    {
+        using var ctx = NewContext();
+        // Started Sat May 16 (before window) → ends Wed May 20. Pinned to window's
+        // first day (May 18).
+        var ev = AllDay("rollover", Edt(2026, 5, 16), Edt(2026, 5, 21));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        // Cursor starts at the displayed anchor (windowFirstDate), not the real start.
+        Assert.Equal(new DateOnly(2026, 5, 18), cut.Instance.KeyboardMoveTargetDateForTest);
+
+        // While moving, the phantom must NOT show the "←" earlier clip.
+        var phantomRow = cut.Find($"[data-calee-event-id='{ev.Id}']");
+        Assert.DoesNotContain("calee-scheduler-agenda-row--pinned-earlier", phantomRow.GetAttribute("class") ?? string.Empty);
+
+        var row = cut.Instance.Groups[0].Rows[0];
+        await cut.InvokeAsync(() =>
+            cut.Instance.InvokeRowKeyDownForTestAsync(
+                new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        // The date cursor is seeded at the displayed anchor (windowFirstDate = May 18,
+        // clamped from the real May 16 start per DispatchKeyboardMoveAsync) and moves
+        // as an absolute calendar date — one ArrowDown lands the cursor on May 19.
+        // MoveToDate targets that cursor date directly (only the time-of-day component
+        // is taken from the REAL start, to survive DST correctly); the destination
+        // date itself is the cursor's, not realStartDate+steps. So the commit lands on
+        // May 19, not May 17 — this is what "against the real start" buys here: the
+        // event's original 00:00 time-of-day is preserved, not a real-start-relative
+        // day offset.
+        Assert.NotNull(captured);
+        Assert.Equal(new DateOnly(2026, 5, 19), DateOnly.FromDateTime(captured!.NewStart.Date));
+    }
+
+    [Fact]
+    public async Task Keyboard_MoveToLastDay_LongDuration_EndExceedsWindow()
+    {
+        using var ctx = NewContext();
+        // 5-day multi-day event starting on the window's first day.
+        var ev = AllDay("conf", Edt(2026, 5, 18), Edt(2026, 5, 23));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveForTestAsync(ev));
+        // Move to the window's last day (May 24, AgendaDays=7 default → May 18..24).
+        for (var i = 0; i < 10; i++)
+        {
+            var row = cut.Instance.Groups.Select(g => g.Rows.FirstOrDefault(r => r.Id == ev.Id))
+                .FirstOrDefault(r => r is not null)!;
+            await cut.InvokeAsync(() =>
+                cut.Instance.InvokeRowKeyDownForTestAsync(
+                    new KeyboardEventArgs { Key = "ArrowDown" }, row, 0));
+        }
+
+        Assert.Equal(new DateOnly(2026, 5, 24), cut.Instance.KeyboardMoveTargetDateForTest);
+
+        await cut.InvokeAsync(() => cut.Instance.InvokeKeyboardMoveCommitForTestAsync());
+
+        Assert.NotNull(captured);
+        var duration = ev.End - ev.Start;
+        Assert.Equal(duration, captured!.NewEnd - captured.NewStart);
+        // NewEnd legitimately exceeds the window's exclusive end.
+        Assert.True(captured.NewEnd > cut.Instance.WindowEndExclusive);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Issue #30 — drag-to-move: Task 3 pointer drag drop resolution
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PointerDrop_WithTargetKey_FiresOnEventMoved_ToTargetDate()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9, 30), Edt(2026, 5, 18, 10, 15));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-20");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(new DateOnly(2026, 5, 20), DateOnly.FromDateTime(captured!.NewStart.Date));
+        Assert.Equal(9, captured.NewStart.Hour);
+        Assert.Equal(30, captured.NewStart.Minute);
+        Assert.Equal(ev.End - ev.Start, captured.NewEnd - captured.NewStart);
+    }
+
+    [Fact]
+    public async Task PointerDrop_NullTargetKey_NoOp()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: null);
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.False(fired);
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+    }
+
+    [Fact]
+    public async Task PointerDrop_TargetEqualsSourceDate_NoOp()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+        var fired = false;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, _ => fired = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-18");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public async Task PointerDrop_ConsumerCancel_RevertsPin()
+    {
+        using var ctx = NewContext();
+        var ev = Timed("e1", Edt(2026, 5, 18, 9), Edt(2026, 5, 18, 10));
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => m.Cancel = true)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-20");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.Null(cut.Instance.GetOptimisticPin(ev.Id));
+        var group = cut.Find("[data-calee-region='agenda-group'][data-calee-date='2026-05-18']");
+        Assert.NotNull(group.QuerySelector($"[data-calee-event-id='{ev.Id}']"));
+    }
+
+    [Fact]
+    public async Task PointerDrop_PinnedFromBeforeRow_MovesAgainstRealStart()
+    {
+        using var ctx = NewContext();
+        // Started Sat May 16 (before window) → ends Wed May 20. Pinned to window's
+        // first day (May 18).
+        var ev = AllDay("rollover", Edt(2026, 5, 16), Edt(2026, 5, 21));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerAgendaView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, m => captured = m)));
+
+        // Drop target = windowFirstDate (May 18) — this is a forward move relative to
+        // the event's real start (May 16), not a same-date no-op.
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-18");
+        await cut.InvokeAsync(() => cut.Instance.InvokeRowMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(new DateOnly(2026, 5, 18), DateOnly.FromDateTime(captured!.NewStart.Date));
     }
 }

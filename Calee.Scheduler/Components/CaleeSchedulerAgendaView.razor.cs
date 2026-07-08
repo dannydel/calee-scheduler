@@ -156,6 +156,26 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     // (issue #19) to find the currently-tabbable row.
     private ElementReference _agendaListRef;
 
+    // Element references for each rendered row, keyed by event id — used as the
+    // pointer-drag source element (mirrors Month's _eventRefsByEventId). @ref is a
+    // Blazor ref capture, not an HTML attribute, so it never affects byte-identity.
+    private readonly Dictionary<string, ElementReference> _rowRefsByEventId = new(StringComparer.Ordinal);
+
+    // Issue #30 — keyboard move + pointer drag (date-cursor model), mirroring Month's
+    // optimistic-pin + phantom-row pattern (ADR-0006) adapted for a flat variable-
+    // height list: the "position" being moved is a calendar date, not a grid cell.
+    //
+    // Unlike Month, the pin is read inline in ComputeGroups (not wrapped via
+    // EventChunk<TEvent>) so EventRow.EventRef stays the original TEvent — see the
+    // Orientation section of the issue-30 implementation plan.
+    private readonly Dictionary<string, (DateTimeOffset Start, DateTimeOffset End)> _optimisticPin = new(StringComparer.Ordinal);
+    private Dictionary<string, TEvent> _eventLookup = new(StringComparer.Ordinal);
+    private bool _keyboardMoveMode;
+    private string? _keyboardMoveEventId;
+    private DateOnly _keyboardMoveTargetDate;
+    private DateTimeOffset _keyboardMoveOriginalStart;
+    private DateTimeOffset _keyboardMoveOriginalEnd;
+
     // Issue #19 — set by HandleRowKeyDownAsync when a key moves the roving tabindex
     // (arrows, Home/End, PageUp/PageDown); consumed in OnAfterRenderAsync (after the
     // tabindex swap has actually rendered) to move real browser focus onto the
@@ -176,6 +196,22 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         else _agendaDays = AgendaDays;
 
         ComputeWindow();
+
+        // A disruptive parameter change (Date navigation, AgendaDays change, a new
+        // Events list) can arrive mid keyboard-move — its target date may now sit
+        // outside the recomputed window, leaving a modal mode swallowing keys against
+        // a stale cursor. Cancel it silently: drop the phantom pin and reset the mode
+        // so the ComputeGroups() below rebuilds the read-only layout. (OnParametersSet
+        // only fires on external parameter changes, never on the in-handler
+        // StateHasChanged that drives an active move, so this won't fire spuriously.)
+        if (_keyboardMoveMode)
+        {
+            if (_keyboardMoveEventId is not null) _optimisticPin.Remove(_keyboardMoveEventId);
+            _keyboardMoveMode = false;
+            _keyboardMoveEventId = null;
+        }
+
+        ClearAcknowledgedPins();
         ComputeGroups();
         ClampFocus();
 
@@ -238,6 +274,22 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private void ComputeGroups()
     {
         var filtered = GetFilteredEvents();
+
+        // Issue #30 — typed lookup for keyboard/pointer move commit + cancel
+        // resolution. Populated even on the empty path below so TypedForId never
+        // sees a stale dictionary from a prior render.
+        _eventLookup = new Dictionary<string, TEvent>(filtered.Count, StringComparer.Ordinal);
+        foreach (var e in filtered) _eventLookup[e.Id] = e;
+
+        // Drop ref-capture entries for events no longer in the filtered set so the
+        // dictionary can't grow unbounded across the component's lifetime. Rows about
+        // to render re-populate their own entries via @ref.
+        if (_rowRefsByEventId.Count > 0)
+        {
+            var stale = _rowRefsByEventId.Keys.Where(id => !_eventLookup.ContainsKey(id)).ToList();
+            foreach (var id in stale) _rowRefsByEventId.Remove(id);
+        }
+
         if (filtered.Count == 0)
         {
             _groups = Array.Empty<DateGroup>();
@@ -257,18 +309,33 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         {
             var ev = filtered[i];
 
-            // Out-of-window guards. Use the half-open [Start, End) overlap check — same
-            // shape as Year view's density bucketing (CONTEXT.md says all-day events
-            // run to next-midnight, so an all-day event ending on the window's first
-            // date at midnight does not touch the window).
-            if (ev.End <= windowStart) continue;
-            if (ev.Start >= windowEnd) continue;
+            // Issue #30 — optimistic re-bucket. When a move is in flight (keyboard or
+            // pointer), read the pinned (Start, End) inline rather than wrapping the
+            // event in EventChunk<TEvent> (Month's approach) — this keeps EventRef a
+            // TEvent so EventRowTemplate/ClassFor/click resolution stay unchanged.
+            var pinned = _optimisticPin.TryGetValue(ev.Id, out var pin);
+            var effStart = pinned ? pin.Start : ev.Start;
+            var effEnd = pinned ? pin.End : ev.End;
 
-            // Anchor date: usually Start.Date in TimeZone; pinned to the window's first
-            // day when the event began before the window.
-            var startInZone = TimeZoneInfo.ConvertTime(ev.Start, TimeZone);
-            var startDate = DateOnly.FromDateTime(startInZone.Date);
-            var anchorDate = startDate < windowFirstDate ? windowFirstDate : startDate;
+            // Out-of-window guards against the *effective* range. Use the half-open
+            // [Start, End) overlap check — same shape as Year view's density bucketing
+            // (CONTEXT.md says all-day events run to next-midnight, so an all-day
+            // event ending on the window's first date at midnight does not touch the
+            // window).
+            if (effEnd <= windowStart) continue;
+            if (effStart >= windowEnd) continue;
+
+            // Anchor date: usually the effective Start.Date in TimeZone; pinned to the
+            // window's first day when the effective start began before the window.
+            // The *real* (unpinned) start date is kept separately so the leading-edge
+            // "pinned from before" clip only shows when there is no active move pin —
+            // a moved phantom whose target != real start date should not render the
+            // misleading ← indicator.
+            var realStartInZone = TimeZoneInfo.ConvertTime(ev.Start, TimeZone);
+            var realStartDate = DateOnly.FromDateTime(realStartInZone.Date);
+            var effStartInZone = TimeZoneInfo.ConvertTime(effStart, TimeZone);
+            var effStartDate = DateOnly.FromDateTime(effStartInZone.Date);
+            var anchorDate = effStartDate < windowFirstDate ? windowFirstDate : effStartDate;
             // If the calculated anchor falls outside the visible window (can happen
             // when the start date itself is after window-end but End hasn't crossed),
             // skip — defensive, the half-open check above already covered it but the
@@ -276,9 +343,10 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             if (anchorDate > windowLastDateInclusive) continue;
 
             // Order key inside a group: all-day events first (sort key 0), then timed
-            // events keyed by their start instant. Within the same key, input order is
-            // preserved by carrying the iteration index as a secondary key.
-            var sortKey = ev.IsAllDay ? long.MinValue : ev.Start.UtcTicks;
+            // events keyed by their effective start instant. Within the same key,
+            // input order is preserved by carrying the iteration index as a secondary
+            // key.
+            var sortKey = ev.IsAllDay ? long.MinValue : effStart.UtcTicks;
             rows.Add(new EventRow(
                 EventRef: ev,
                 Id: ev.Id,
@@ -286,7 +354,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                 SortKey: sortKey,
                 InputOrder: i,
                 IsAllDay: ev.IsAllDay,
-                IsPinnedFromBefore: anchorDate != startDate));
+                IsPinnedFromBefore: !pinned && anchorDate != realStartDate));
         }
 
         if (rows.Count == 0)
@@ -490,6 +558,84 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     /// <summary>Consumer-supplied CSS class for an event (via base helper).</summary>
     internal string? ClassFor(TEvent ev) => GetEventClass(ev);
 
+    /// <summary>
+    /// Pointer-down handler attached to each row when
+    /// <see cref="SchedulerComponentBase{TEvent}.AllowDragToMove"/> is true. Starts a
+    /// JS-owned drag with <c>highlightMode: "agenda-group"</c> — snap is deliberately
+    /// 0 (Agenda's list has no uniform pixel divisor; targeting is by <c>clientY</c>
+    /// hit-test at drop, not pixel snap).
+    /// </summary>
+    internal async Task OnRowPointerDownAsync(PointerEventArgs e, EventRow row)
+    {
+        if (!AllowDragToMove) return;
+        if (e.Button != 0) return;
+        // A keyboard move already owns the phantom/pin; don't start a concurrent
+        // pointer drag on top of it.
+        if (_keyboardMoveMode) return;
+
+        if (!_eventLookup.TryGetValue(row.Id, out var typed)) return;
+        if (!_rowRefsByEventId.TryGetValue(row.Id, out var sourceRef)) return;
+
+        await BeginDragOnPointerAsync(
+            e,
+            sourceRef,
+            DragMode.Move,
+            snapPixelsX: 0,
+            snapPixelsY: 0,
+            ghostClass: "calee-scheduler-event--ghost",
+            onDrop: payload => HandleRowMoveDropAsync(typed, payload),
+            onCancel: static () => Task.CompletedTask,
+            highlightContainer: _agendaListRef,
+            highlightMode: "agenda-group",
+            eventDurationDays: 1,
+            columnCount: 1,
+            rowCount: 1);
+    }
+
+    /// <summary>
+    /// Drop handler for pointer drag-to-move. Resolves the JS hit-tested
+    /// <see cref="DropPayload.TargetKey"/> to a target date, computes the new
+    /// (Start, End) against the event's real start date via <see cref="MoveToDate"/>,
+    /// optimistically pins the new position, fires
+    /// <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/>, and rolls the pin
+    /// back if the consumer sets <see cref="EventMoveContext.Cancel"/>.
+    /// </summary>
+    private async Task HandleRowMoveDropAsync(TEvent ev, DropPayload payload)
+    {
+        // Dropped outside any date group — no-op, no fire.
+        if (payload.TargetKey is null) return;
+        if (!DateOnly.TryParseExact(
+                payload.TargetKey, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var targetDate))
+        {
+            return;
+        }
+
+        var realStartDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ev.Start, TimeZone).Date);
+        // No-op guard (matches Month's pointer semantics): dropping back onto the
+        // event's own real start date does not fire OnEventMoved.
+        if (targetDate == realStartDate) return;
+
+        var (newStart, newEnd) = MoveToDate(ev.Start, ev.End, targetDate);
+
+        _optimisticPin[ev.Id] = (newStart, newEnd);
+        ComputeGroups();
+        StateHasChanged();
+
+        var ctx = new EventMoveContext { Event = ev, NewStart = newStart, NewEnd = newEnd };
+        await OnEventMoved.InvokeAsync(ctx);
+
+        if (ctx.Cancel)
+        {
+            _optimisticPin.Remove(ev.Id);
+            ComputeGroups();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Test-only entry point for the pointer-drop-handling pipeline.</summary>
+    internal Task InvokeRowMoveDropForTestAsync(TEvent ev, DropPayload payload) =>
+        HandleRowMoveDropAsync(ev, payload);
+
     // ----- Event handlers ----------------------------------------------------------
 
     /// <summary>Drill-down to a specific date.</summary>
@@ -555,6 +701,35 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     {
         // Drag precedence — same shape as the other views; Esc-mid-drag belongs to JS.
         if (IsDragActive) return;
+
+        // Issue #30 — keyboard move mode (date-cursor model). Modal: every key not
+        // explicitly handled below is swallowed (no roving-nav, no re-`m`) while a
+        // move is in flight. Same ordering as Month (IsDragActive guard, then move
+        // mode, then the shared shortcut-map dispatch).
+        if (_keyboardMoveMode && _keyboardMoveEventId is not null)
+        {
+            var windowFirstDate = WindowFirstDate;
+            var windowLastDateInclusive = WindowLastDateInclusive;
+            switch (e.Key)
+            {
+                case "ArrowDown":
+                    _keyboardMoveTargetDate = MinDate(windowLastDateInclusive, _keyboardMoveTargetDate.AddDays(1));
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "ArrowUp":
+                    _keyboardMoveTargetDate = MaxDate(windowFirstDate, _keyboardMoveTargetDate.AddDays(-1));
+                    await UpdateKeyboardMovePhantomPositionAsync();
+                    return;
+                case "Enter":
+                    await CommitKeyboardMoveAsync();
+                    return;
+                case "Escape":
+                    await CancelKeyboardMoveAsync();
+                    return;
+                default:
+                    return;
+            }
+        }
 
         if (row.EventRef is not TEvent typed) return;
 
@@ -716,6 +891,15 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
     private async Task HandleEscapeAsync()
     {
+        // Issue #30 — defensive: the modal move-mode branch in HandleRowKeyDownAsync
+        // normally intercepts Escape first, but Escape can also arrive here via the
+        // shared shortcut-map's Cancel command (KeystrokeScope.Grid or a path that
+        // doesn't route through the row handler).
+        if (_keyboardMoveMode)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
         if (IsDragActive) return;
         var cleared = await TryClearSelectionViaKeyboardAsync();
         if (cleared)
@@ -734,6 +918,245 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         catch (JSDisconnectedException) { /* Circuit gone. */ }
         catch (InvalidOperationException) { /* No JS runtime in tests. */ }
     }
+
+    // ----- Optimistic pins (ADR-0006) -----------------------------------------------
+
+    /// <summary>
+    /// Drop pin entries whose pinned (Start, End) matches the consumer-supplied
+    /// authoritative times — i.e., the consumer has accepted the move and pushed
+    /// the new times back through <see cref="SchedulerComponentBase{TEvent}.Events"/>.
+    /// Mirrors <c>CaleeSchedulerMonthView{TEvent}.ClearAcknowledgedPins</c> verbatim.
+    /// </summary>
+    private void ClearAcknowledgedPins()
+    {
+        if (_optimisticPin.Count == 0) return;
+        var events = Events;
+        if (events is null) return;
+
+        List<string>? toRemove = null;
+        for (var i = 0; i < events.Count; i++)
+        {
+            var ev = events[i];
+            if (_optimisticPin.TryGetValue(ev.Id, out var pin)
+                && pin.Start == ev.Start
+                && pin.End == ev.End)
+            {
+                toRemove ??= new List<string>();
+                toRemove.Add(ev.Id);
+            }
+        }
+        if (toRemove is null) return;
+        foreach (var id in toRemove)
+        {
+            _optimisticPin.Remove(id);
+        }
+    }
+
+    /// <summary>Return the optimistic-pin (Start, End) for the supplied event id if set.</summary>
+    internal (DateTimeOffset Start, DateTimeOffset End)? GetOptimisticPin(string id) =>
+        _optimisticPin.TryGetValue(id, out var pin) ? pin : null;
+
+    /// <summary>
+    /// Resolve an event id to its typed <typeparamref name="TEvent"/> via the lookup
+    /// built each <see cref="ComputeGroups"/> pass. Used by move commit/cancel and
+    /// pointer-drag resolution, where only the id survives the JS round-trip.
+    /// </summary>
+    internal TEvent? TypedForId(string id) => _eventLookup.TryGetValue(id, out var t) ? t : default;
+
+    // ----- Keyboard move (date-cursor model, issue #30) -----------------------------
+
+    /// <summary>The first calendar date in the visible window (test-facing via <see cref="Groups"/>).</summary>
+    private DateOnly WindowFirstDate => _windowFirstDate;
+
+    /// <summary>The last calendar date in the visible window (inclusive).</summary>
+    private DateOnly WindowLastDateInclusive => _windowFirstDate.AddDays(_agendaDays - 1);
+
+    private static DateOnly MinDate(DateOnly a, DateOnly b) => a < b ? a : b;
+
+    private static DateOnly MaxDate(DateOnly a, DateOnly b) => a > b ? a : b;
+
+    /// <summary>Midnight of the supplied date, expressed in the configured <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.</summary>
+    private DateTimeOffset ToZonedMidnight(DateOnly date)
+    {
+        var midnight = date.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(midnight, TimeZone.GetUtcOffset(midnight));
+    }
+
+    /// <summary>
+    /// Move-arithmetic helper shared by keyboard and pointer move. Computed against
+    /// the *real* start date (in the configured time zone) — pinned-from-before rows
+    /// included — so time-of-day and duration are preserved regardless of any active
+    /// optimistic pin. DST-correct: the time-of-day offset is derived from the real
+    /// start's own midnight, and the target's midnight is resolved independently.
+    /// </summary>
+    private (DateTimeOffset Start, DateTimeOffset End) MoveToDate(
+        DateTimeOffset origStart, DateTimeOffset origEnd, DateOnly targetDate)
+    {
+        var realStartInZone = TimeZoneInfo.ConvertTime(origStart, TimeZone);
+        var realStartMidnight = ToZonedMidnight(DateOnly.FromDateTime(realStartInZone.Date));
+        var timeOfDay = origStart - realStartMidnight;
+        var duration = origEnd - origStart;
+        var targetMidnight = ToZonedMidnight(targetDate);
+        var newStart = targetMidnight + timeOfDay;
+        return (newStart, newStart + duration);
+    }
+
+    /// <summary>
+    /// Locate the flat row index (skipping headers) of the row whose
+    /// <see cref="EventRow.Id"/> matches <paramref name="id"/>. Returns <c>-1</c> when
+    /// no such row is currently visible (e.g. filtered out by
+    /// <see cref="SchedulerComponentBase{TEvent}.EventFilter"/> concurrently with a
+    /// move) — callers assign the result directly to <see cref="_focusedRowIndex"/>;
+    /// the next full <see cref="OnParametersSet"/> pass's <see cref="ClampFocus"/>
+    /// recovers from a transient <c>-1</c>.
+    /// </summary>
+    private int FindFlatIndexById(string id)
+    {
+        var cursor = 0;
+        for (var g = 0; g < _groups.Length; g++)
+        {
+            var rows = _groups[g].Rows;
+            for (var r = 0; r < rows.Length; r++)
+            {
+                if (string.Equals(rows[r].Id, id, StringComparison.Ordinal)) return cursor + r;
+            }
+            cursor += rows.Length;
+        }
+        return -1;
+    }
+
+    /// <inheritdoc/>
+    private protected override async Task DispatchKeyboardMoveAsync(TEvent? focusedEvent, string? focusedEventId)
+    {
+        // Fail-closed gate (FR-29) — deliberate divergence from Month, which lacks
+        // this check; required so `m` stays inert when AllowDragToMove is false.
+        if (!AllowDragToMove) return;
+        if (focusedEvent is null || focusedEventId is null) return;
+
+        _keyboardMoveMode = true;
+        _keyboardMoveEventId = focusedEventId;
+        _keyboardMoveOriginalStart = focusedEvent.Start;
+        _keyboardMoveOriginalEnd = focusedEvent.End;
+
+        var windowFirstDate = WindowFirstDate;
+        var windowLastDateInclusive = WindowLastDateInclusive;
+        var realStartInZone = TimeZoneInfo.ConvertTime(focusedEvent.Start, TimeZone);
+        var realStartDate = DateOnly.FromDateTime(realStartInZone.Date);
+        // Cursor starts at the event's displayed anchor — for a leading-edge-pinned
+        // row (real start before the window) that is windowFirstDate.
+        _keyboardMoveTargetDate = MaxDate(windowFirstDate, MinDate(windowLastDateInclusive, realStartDate));
+
+        var request = new KeyboardMoveRequest
+        {
+            Event = focusedEvent,
+            // Day-offset from the window's first day — NOT a time slot; Agenda has no
+            // slot grid, so this is documented as a day-offset for parity with Month's
+            // shape rather than semantic equivalence.
+            CurrentSlotIndex = _keyboardMoveTargetDate.DayNumber - windowFirstDate.DayNumber,
+        };
+        await OnKeyboardMoveRequested.InvokeAsync(request);
+
+        // Seed the pin at the unchanged position so the phantom class shows
+        // immediately, before any arrow key moves the cursor.
+        _optimisticPin[focusedEventId] = (focusedEvent.Start, focusedEvent.End);
+        ComputeGroups();
+        _focusedRowIndex = FindFlatIndexById(focusedEventId);
+        _focusMovePending = true;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Re-derive the phantom pin from the current <see cref="_keyboardMoveTargetDate"/>
+    /// cursor and re-bucket. Called after every ArrowUp/ArrowDown while move mode is
+    /// active.
+    /// </summary>
+    private Task UpdateKeyboardMovePhantomPositionAsync()
+    {
+        if (_keyboardMoveEventId is null) return Task.CompletedTask;
+
+        var (newStart, newEnd) = MoveToDate(_keyboardMoveOriginalStart, _keyboardMoveOriginalEnd, _keyboardMoveTargetDate);
+        _optimisticPin[_keyboardMoveEventId] = (newStart, newEnd);
+        ComputeGroups();
+        _focusedRowIndex = FindFlatIndexById(_keyboardMoveEventId);
+        _focusMovePending = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Commit the in-flight keyboard move. Always fires
+    /// <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/> — even when the
+    /// target date equals the source date (matches Month's keyboard-commit
+    /// semantics; the consumer detects the no-op case via
+    /// <c>NewStart == Event.Start</c>). Reverts the pin when the consumer sets
+    /// <see cref="EventMoveContext.Cancel"/>.
+    /// </summary>
+    private async Task CommitKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return;
+
+        var (newStart, newEnd) = MoveToDate(_keyboardMoveOriginalStart, _keyboardMoveOriginalEnd, _keyboardMoveTargetDate);
+        var typed = TypedForId(_keyboardMoveEventId);
+        if (typed is null)
+        {
+            await CancelKeyboardMoveAsync();
+            return;
+        }
+
+        var ctx = new EventMoveContext { Event = typed, NewStart = newStart, NewEnd = newEnd };
+        await OnEventMoved.InvokeAsync(ctx);
+
+        if (ctx.Cancel)
+        {
+            _optimisticPin.Remove(_keyboardMoveEventId);
+            ComputeGroups();
+        }
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+
+        _focusedRowIndex = FindFlatIndexById(typed.Id);
+        _focusMovePending = true;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Cancel the in-flight keyboard move without firing
+    /// <see cref="SchedulerComponentBase{TEvent}.OnEventMoved"/>. Drops the pin,
+    /// re-buckets, and re-asserts focus on the row (which returns to its original
+    /// group).
+    /// </summary>
+    private Task CancelKeyboardMoveAsync()
+    {
+        if (_keyboardMoveEventId is null) return Task.CompletedTask;
+
+        var id = _keyboardMoveEventId;
+        _optimisticPin.Remove(id);
+        ComputeGroups();
+
+        _keyboardMoveMode = false;
+        _keyboardMoveEventId = null;
+
+        _focusedRowIndex = FindFlatIndexById(id);
+        _focusMovePending = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Test-only entry point for keyboard move dispatch.</summary>
+    internal Task InvokeKeyboardMoveForTestAsync(TEvent ev) => DispatchKeyboardMoveAsync(ev, ev.Id);
+
+    /// <summary>Test-only entry point for committing a keyboard move.</summary>
+    internal Task InvokeKeyboardMoveCommitForTestAsync() => CommitKeyboardMoveAsync();
+
+    /// <summary>Test-only entry point for cancelling a keyboard move.</summary>
+    internal Task InvokeKeyboardMoveCancelForTestAsync() => CancelKeyboardMoveAsync();
+
+    /// <summary>Test-only flag: whether keyboard move mode is currently active.</summary>
+    internal bool IsKeyboardMoveModeForTest => _keyboardMoveMode;
+
+    /// <summary>Test-only access to the keyboard move date cursor.</summary>
+    internal DateOnly KeyboardMoveTargetDateForTest => _keyboardMoveTargetDate;
 
     // ----- Render-data record types ------------------------------------------------
 

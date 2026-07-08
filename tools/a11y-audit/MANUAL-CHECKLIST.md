@@ -185,6 +185,29 @@ spacing:
 | `.calee-scheduler-toolbar-button` (Today) | ~25.6px tall | True size. |
 | `.calee-scheduler-toolbar-button--chevron` (Prev/Next) | 24px tall exactly | Borderline true size — no margin. |
 
+### 8.4 SC 1.4.10 Reflow + mobile touch (issue #10)
+
+The responsive layout pass (issue #10) makes every view usable at a 390px
+viewport. The automated audit (`npm run audit`) now runs each route at **both**
+1280×720 and **390×844** and asserts zero WCAG 2.2 AA violations plus **no
+horizontal page overflow** (`document.documentElement.scrollWidth` ≤ viewport
+width) at the mobile viewport — so reflow (1.4.10) and target size (2.5.8) at
+mobile are covered automatically. The one thing the headless audit cannot drive
+is a **real touch pointer**, so verify manually:
+
+| Step | Expected |
+| --- | --- |
+| Open the demo in a mobile emulator (Chrome DevTools device toolbar, 390px) or a real phone, with touch emulation on. | No horizontal page scrollbar on `/day`, `/week`, `/month`, `/year`, `/agenda`, `/fleet`. Week's 7 columns and Timeline's time axis fit or scroll *inside* the view, never the page. |
+| On `/day` or `/week`, **touch-drag** an event chip to a new time. | The chip moves under the finger (pointer events); `OnEventMoved` fires on release. No ghost is left behind; a cancelled drag reverts. |
+| On `/day` or `/week` (with `AllowDragToCreate`), **touch-drag** across empty slots. | A draft region draws under the finger and `OnEventCreated`-style flow fires on release. |
+| On `/month` (with drag enabled), **touch-drag** a chip to another day cell. | The chip moves to the target cell; `OnEventMoved` fires. |
+| Toolbar at 390px. | All controls reachable and tappable; the range label wraps to its own row; nothing is clipped. |
+
+> Layout-only slice: no interop changes were made in issue #10. Touch drag flows
+> through the same pointer-event path as desktop mouse drag, so if drag works on
+> desktop it should work under touch — this checklist confirms the mobile layout
+> doesn't shrink any drag target below usability or trap the gesture.
+
 ## Known limitations / open items
 
 - ~~The Day-view slot cells don't currently emit an `aria-label` carrying the slot's

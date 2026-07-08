@@ -383,3 +383,47 @@
     outline: 2px solid var(--calee-scheduler-focus-color, #2563eb);
     outline-offset: 1px;
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ *
+ * The 12rem lane-label gutter eats half a 390px viewport, so it drops to 7rem
+ * at mobile (the token drives both the tick-row gutter and each row's label, so
+ * they stay aligned). The time axis is intrinsically wider than the viewport at
+ * any useful pixel-per-day density; that horizontal scroll is contained inside
+ * `.calee-scheduler-timeline-rows` (overflow: auto). `overflow-x: hidden` on the
+ * root is the belt-and-braces guarantee that nothing — the absolutely-positioned
+ * tick labels in the header row in particular — escapes the component box to
+ * overflow the page (AC: no horizontal page overflow at 390px).
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-timeline {
+        --calee-scheduler-timeline-label-width: 7rem;
+        overflow-x: hidden;
+    }
+
+    .calee-scheduler-timeline-label-name {
+        font-size: 0.8125rem;
+    }
+
+    /* The time axis is intrinsically wider than a phone viewport: 24 Day-scale
+       hour slots each need ≥24px (WCAG 2.2 SC 2.5.8) = ~576px, far past ~278px
+       of usable width. Give the time area a 38rem (608px) minimum so every empty
+       create-slot clears the 24px target-size floor, and let the lane-rows
+       container's existing `overflow: auto` contain the horizontal scroll inside
+       the view (the JS `scrollToHourHorizontal` helper already targets that
+       container, so initial scroll-to-now still works). `overflow-x: hidden` on
+       the root keeps that scroll from ever reaching the page. */
+    .calee-scheduler-timeline-time-area {
+        min-width: 38rem;
+    }
+
+    /* Hide the tick-row header at mobile. It is a separate, non-scrolling
+       container from the lane rows, so it cannot stay aligned once the axis
+       scrolls; and 24 hour labels are illegible below ~300px regardless. The
+       time is still conveyed by each slot's aria-label and by the event chips'
+       own time text, so no information is lost. */
+    .calee-scheduler-timeline-tick-row {
+        display: none;
+    }
+}

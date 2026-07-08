@@ -269,3 +269,29 @@
 .calee-scheduler-year-style--heatmap .calee-scheduler-year-cell {
     border: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
 }
+
+/*
+ * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
+ *
+ * Every layout variant uses `minmax(0,1fr)` tracks, so the grid never overflows
+ * the page — but a 4- or 6-across month matrix squeezes each mini-month's seven
+ * day-cells to ~12px at 390px, well under legibility and the 24px target size.
+ * At mobile all multi-column variants collapse to 2 columns (~180px per month →
+ * ~24px day-cells); the single-column variant is left as-is. The variant
+ * selectors below match the per-variant descendant specificity so these win.
+ * Outer padding tightens to reclaim width.
+ */
+@media (max-width: 640px) {
+    .calee-scheduler-year {
+        padding: 0.5rem;
+    }
+
+    .calee-scheduler-year-layout--grid-4x3 .calee-scheduler-year-grid,
+    .calee-scheduler-year-layout--grid-3x4 .calee-scheduler-year-grid,
+    .calee-scheduler-year-layout--grid-2x6 .calee-scheduler-year-grid,
+    .calee-scheduler-year-layout--grid-6x2 .calee-scheduler-year-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: none;
+        gap: 0.75rem;
+    }
+}

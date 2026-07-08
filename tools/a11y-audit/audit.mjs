@@ -102,73 +102,125 @@ async function probeServer() {
     }
 }
 
+// Issue #10 — the audit runs at two viewports. Desktop is the historical pass
+// (1280×720) and owns the roving-tabindex focus checks (viewport-independent, so
+// they only need to run once). Mobile (390×844, the AC target width) additionally
+// asserts there is no horizontal *page* overflow: at that width Week/Timeline
+// scroll their grids internally, but the document element must never grow wider
+// than the viewport (WCAG 2.2 SC 1.4.10 reflow + the issue's explicit AC).
+const VIEWPORTS = [
+    { name: 'desktop', viewport: { width: 1280, height: 720 }, runFocusChecks: true, checkOverflow: false },
+    { name: 'mobile', viewport: { width: 390, height: 844 }, runFocusChecks: false, checkOverflow: true },
+];
+
+/**
+ * Measures whether the document overflows the viewport horizontally. A small
+ * 1px tolerance absorbs sub-pixel rounding. Returns `{ overflow, scrollWidth,
+ * clientWidth }`; `overflow: true` means the page (not an internal scroll
+ * region) is wider than the viewport — a hard fail at mobile.
+ */
+async function checkNoPageOverflow(page) {
+    const m = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+    }));
+    return { overflow: m.scrollWidth > m.clientWidth + 1, ...m };
+}
+
 async function auditOnce() {
     await probeServer();
 
     const browser = await chromium.launch();
-    // Emulate prefers-reduced-motion so the demo's entrance fade is skipped. axe
-    // must sample text at its final opacity — a foreground caught mid-fade is
-    // partially transparent, blends toward the background, and fails contrast
-    // checks even when the settled colors pass (NFR-06).
-    const context = await browser.newContext({ reducedMotion: 'reduce' });
-    const page = await context.newPage();
-
     const results = [];
 
-    for (const route of ROUTES) {
-        const url = BASE_URL + route.path;
-        process.stdout.write(`auditing ${route.path} ... `);
+    for (const vp of VIEWPORTS) {
+        // Emulate prefers-reduced-motion so the demo's entrance fade is skipped. axe
+        // must sample text at its final opacity — a foreground caught mid-fade is
+        // partially transparent, blends toward the background, and fails contrast
+        // checks even when the settled colors pass (NFR-06). A fresh context per
+        // viewport applies the width cleanly.
+        const context = await browser.newContext({ reducedMotion: 'reduce', viewport: vp.viewport });
+        const page = await context.newPage();
 
-        try {
-            await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
-            await page.waitForSelector(route.waitFor, { timeout: 10000 });
-        } catch (err) {
-            console.log('FAIL (load)');
-            results.push({ route: route.path, error: err.message, violations: [] });
-            continue;
+        console.log(`\n=== viewport: ${vp.name} (${vp.viewport.width}×${vp.viewport.height}) ===`);
+
+        for (const route of ROUTES) {
+            const url = BASE_URL + route.path;
+            process.stdout.write(`auditing ${route.path} ... `);
+
+            try {
+                await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+                await page.waitForSelector(route.waitFor, { timeout: 10000 });
+            } catch (err) {
+                console.log('FAIL (load)');
+                results.push({ viewport: vp.name, route: route.path, error: err.message, violations: [] });
+                continue;
+            }
+
+            const axeResult = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+
+            const violations = axeResult.violations.map(v => ({
+                id: v.id,
+                impact: v.impact,
+                help: v.help,
+                helpUrl: v.helpUrl,
+                tags: v.tags,
+                nodes: v.nodes.map(n => ({
+                    target: n.target,
+                    html: n.html.slice(0, 240),
+                    failureSummary: n.failureSummary,
+                })),
+            }));
+
+            console.log(violations.length === 0 ? 'PASS' : `${violations.length} violation(s)`);
+
+            // Issue #10 — mobile page-overflow assertion.
+            let overflowCheck;
+            if (vp.checkOverflow) {
+                process.stdout.write(`  overflow-check ${route.path} ... `);
+                overflowCheck = await checkNoPageOverflow(page);
+                console.log(overflowCheck.overflow
+                    ? `FAIL — page scrollWidth ${overflowCheck.scrollWidth} > clientWidth ${overflowCheck.clientWidth}`
+                    : 'PASS');
+            }
+
+            // Issue #19 — after axe passes, drive the roving-tabindex focus check
+            // (desktop only; viewport-independent, and routes must declare one).
+            let focusCheck;
+            if (vp.runFocusChecks && route.focusCheck) {
+                process.stdout.write(`  focus-check ${route.path} (${route.focusCheck.keys.join(', ')}) ... `);
+                focusCheck = await checkRovingFocus(page, route.focusCheck.keys);
+                console.log(focusCheck.pass ? 'PASS' : `FAIL — ${focusCheck.detail}`);
+            }
+
+            results.push({
+                viewport: vp.name,
+                route: route.path,
+                violations,
+                ...(focusCheck ? { focusCheck } : {}),
+                ...(overflowCheck ? { overflowCheck } : {}),
+            });
         }
 
-        const axeResult = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-
-        const violations = axeResult.violations.map(v => ({
-            id: v.id,
-            impact: v.impact,
-            help: v.help,
-            helpUrl: v.helpUrl,
-            tags: v.tags,
-            nodes: v.nodes.map(n => ({
-                target: n.target,
-                html: n.html.slice(0, 240),
-                failureSummary: n.failureSummary,
-            })),
-        }));
-
-        console.log(violations.length === 0 ? 'PASS' : `${violations.length} violation(s)`);
-
-        // Issue #19 — after axe passes for the route, drive the roving-tabindex
-        // focus check (only on routes that declare one — see ROUTES above).
-        let focusCheck;
-        if (route.focusCheck) {
-            process.stdout.write(`  focus-check ${route.path} (${route.focusCheck.keys.join(', ')}) ... `);
-            focusCheck = await checkRovingFocus(page, route.focusCheck.keys);
-            console.log(focusCheck.pass ? 'PASS' : `FAIL — ${focusCheck.detail}`);
-        }
-
-        results.push({ route: route.path, violations, ...(focusCheck ? { focusCheck } : {}) });
+        await context.close();
     }
 
     await browser.close();
 
     const focusFailures = results.filter(r => r.focusCheck && !r.focusCheck.pass).length;
+    const overflowFailures = results.filter(r => r.overflowCheck && r.overflowCheck.overflow).length;
 
     const report = {
         timestamp: new Date().toISOString(),
         baseUrl: BASE_URL,
         wcagTags: WCAG_TAGS,
+        viewports: VIEWPORTS.map(v => v.name),
         routes: results,
         totalViolations: results.reduce((acc, r) => acc + (r.violations?.length ?? 0), 0),
         focusChecksRun: results.filter(r => r.focusCheck).length,
         focusFailures,
+        overflowChecksRun: results.filter(r => r.overflowCheck).length,
+        overflowFailures,
     };
 
     const outPath = join(__dirname, 'report.json');
@@ -176,8 +228,9 @@ async function auditOnce() {
     console.log(`\nreport written to ${outPath}`);
     console.log(`total violations: ${report.totalViolations}`);
     console.log(`focus checks: ${report.focusChecksRun} run, ${focusFailures} failed`);
+    console.log(`overflow checks: ${report.overflowChecksRun} run, ${overflowFailures} failed`);
 
-    if (report.totalViolations > 0 || focusFailures > 0 || results.some(r => r.error)) {
+    if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0 || results.some(r => r.error)) {
         process.exit(1);
     }
 }

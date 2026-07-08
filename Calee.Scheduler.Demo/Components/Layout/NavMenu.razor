@@ -66,9 +66,37 @@
         margin-top: 1.75rem;
         margin-bottom: 0.5rem;
     }
+
+    /* Responsive (issue #10): below the md breakpoint the sidebar stacks above
+       the content (see MainLayout). Lay the nav links out horizontally so the
+       demo lands on the calendar, not a full screen of vertical links; drop the
+       section labels and the active left-bar (there's no left edge in a wrapped
+       row). h-screen is gated to md+ in the markup so the strip is only as tall
+       as its content at mobile. */
+    @@media (max-width: 640px) {
+        nav[aria-label="Primary"] {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0 0.5rem 0.5rem;
+        }
+
+        .calee-nav-label {
+            display: none;
+        }
+
+        .calee-nav-link {
+            padding: 0.5rem 0.75rem;
+        }
+
+            .calee-nav-active::before {
+                display: none;
+            }
+    }
 </style>
 
-<div class="flex h-screen flex-col">
+<div class="flex flex-col md:h-screen">
     @* Brand mark — terracotta circle with a serif "C". Editorial, characterful. *@
     <div class="px-7 pt-8 pb-7">
         <a href="" class="flex items-center gap-3 group" aria-label="Calee.Scheduler home">

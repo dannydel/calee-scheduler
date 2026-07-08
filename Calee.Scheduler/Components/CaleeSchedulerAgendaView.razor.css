@@ -268,4 +268,12 @@
     background: var(--calee-scheduler-drop-target-bg, #eef4ff);
     border: 2px dashed var(--calee-scheduler-drop-target-border, #2563eb);
     outline: 1px solid var(--calee-scheduler-drop-target-outline, #3b82f6);
+    /* Match the root rule (CaleeScheduler.razor.css:184) so the standalone
+       highlight layers above the sticky group headers (z-index: 2) instead of
+       rendering underneath them, is click-through, and sizes its border/outline
+       inside the group box. */
+    pointer-events: none;
+    z-index: 5;
+    transition: all 50ms ease-out;
+    box-sizing: border-box;
 }

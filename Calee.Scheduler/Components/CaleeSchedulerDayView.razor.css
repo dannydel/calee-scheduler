@@ -90,6 +90,11 @@
     align-items: center;
     gap: 0.25rem;
     padding: 0.125rem 0.5rem;
+    box-sizing: border-box;
+    /* Content-sized chip: the 13px title + 0.125rem vertical padding renders
+       ~20px tall, below the WCAG 2.2 SC 2.5.8 24px minimum. Floor the target at
+       24px; align-items:center keeps the label vertically centered. */
+    min-height: 24px;
     border: none;
     border-left: 3px solid var(--calee-scheduler-event-color);
     background: color-mix(in srgb, var(--calee-scheduler-event-color) 12%, transparent);

@@ -202,14 +202,18 @@ spacing:
   Month, Year, Timeline/Fleet, Agenda).~~ **Resolved (issue #19)** — see the banner
   near the top of this document. All six roving views, including Year, are
   covered by the audit's focus-check step.
-- **[Issue #20, open]** Drag-to-move and drag-to-resize have no functional
-  keyboard (or other single-pointer) alternative in the library as shipped —
-  see §8.1. `OnMoveModeRequested` / `OnResizeKeystrokeRequested` are
-  parameterless trigger placeholders; the demo does not wire either. Issue #20
-  was blocked on the roving-tabindex real-focus fix above (a keyboard "move
-  mode" needs to know which event is actually focused); that block is now
-  cleared, but #20 itself still needs either a richer payload (API change) or
-  a documented consumer wrapper pattern — not fixed by #19.
+- ~~**[Issue #20, open]** Drag-to-move and drag-to-resize have no functional
+  keyboard (or other single-pointer) alternative in the library as shipped.~~
+  **Resolved (issue #20, closed 2026-07-03; commit 2c286a8)** — the keyboard
+  move/resize alternative shipped: `m` enters move mode, arrow keys adjust
+  position (cross-day in Week, cross-lane in Timeline), Enter commits via
+  `OnEventMoved` and Escape cancels; `Shift+ArrowUp`/`Shift+ArrowDown` resize
+  the event's End by one slot and fire `OnEventResized`. Both paths honor the
+  consumer's `Cancel` flag. Two additive callbacks —
+  `OnKeyboardMoveRequested` (`KeyboardMoveRequest`) and
+  `OnKeyboardResizeRequested` (`KeyboardResizeRequest`) — surface the intent to
+  consumers. This unblocked once issue #19 made roving-tabindex transfer real
+  focus. See §8.1 for the per-view keystroke sequences.
 
 ## When this checklist passes
 

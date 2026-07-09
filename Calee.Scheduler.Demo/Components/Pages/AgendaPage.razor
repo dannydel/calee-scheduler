@@ -21,7 +21,22 @@
                                View="SchedulerView.Agenda"
                                AgendaDays="@_agendaDays"
                                @bind-Date="_anchor"
-                               AvailableViews="_availableViews" />
+                               AvailableViews="_availableViews">
+            @* Issue #31 — one labeled, ≥24px slot control on the standalone toolbar
+               path. This lives in the toolbar, not the agenda [role="list"] below,
+               so it must not steal the initial roving-tabindex focus stop or
+               reorder that grid's first cell (issue #19's live-browser focus check
+               explicitly focuses the first roving row rather than relying on tab
+               order, so this slot cannot regress it — see tools/a11y-audit). *@
+            <ToolbarEnd>
+                <button type="button"
+                        class="calee-demo-toolbar-icon-button"
+                        aria-label="Export agenda"
+                        @onclick="HandleExportClicked">
+                    <span aria-hidden="true">⇩</span>
+                </button>
+            </ToolbarEnd>
+        </CaleeSchedulerToolbar>
     </div>
 
     @* Window-length control above the grid — lets the user smoke-test
@@ -244,6 +259,17 @@
 
     private void HandleHelpRequested() => _helpVisible = true;
     private void HandleCommandPaletteRequested() => _paletteVisible = true;
+
+    /// <summary>
+    /// Stub handler for the toolbar's ToolbarEnd "Export agenda" button (issue
+    /// #31). The RCL has no export API — exporting is entirely consumer
+    /// territory — so this demo intentionally does nothing beyond proving the
+    /// slot's control is wired to a real click handler.
+    /// </summary>
+    private void HandleExportClicked()
+    {
+        // Intentional no-op stub — see the summary above.
+    }
 
     /// <summary>
     /// Demo-side handling of the view-switch trigger fired from the keyboard or the

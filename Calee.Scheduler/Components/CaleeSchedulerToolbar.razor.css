@@ -52,6 +52,15 @@
     gap: 0.25rem;
 }
 
+.calee-scheduler-toolbar-start,
+.calee-scheduler-toolbar-end {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 0 1 auto;   /* don't grow (label owns slack); shrink to avoid overflow */
+    min-width: 0;     /* critical: lets content shrink below intrinsic width at 390px */
+}
+
 .calee-scheduler-toolbar-label {
     flex: 1 1 auto;
     text-align: center;
@@ -146,6 +155,16 @@
         row-gap: 0.5rem;
     }
 
+    /*
+     * Explicit order (issue #31): the optional start/end content slots flank the
+     * always-present regions without disturbing the range label's "drops to its
+     * own full-width row last" behavior.
+     */
+    .calee-scheduler-toolbar-start {
+        order: 0;
+        flex-wrap: wrap;
+    }
+
     .calee-scheduler-toolbar-left {
         order: 1;
     }
@@ -155,8 +174,13 @@
         flex-wrap: wrap;
     }
 
-    .calee-scheduler-toolbar-label {
+    .calee-scheduler-toolbar-end {
         order: 3;
+        flex-wrap: wrap;
+    }
+
+    .calee-scheduler-toolbar-label {
+        order: 4;
         flex-basis: 100%;
     }
 

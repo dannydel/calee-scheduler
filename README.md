@@ -703,7 +703,9 @@ Every region carries a stable `data-calee-region` attribute (FR-55) so consumer 
 }
 ```
 
-Documented regions: `scheduler`, `toolbar`, `toolbar-today`, `toolbar-prev`, `toolbar-next`, `range-label`, `view-switcher`, `toolbar-view-button`, `day-header`, `time-gutter`, `all-day`, `hour-grid`, `event`, `overflow-chip`, `month-cell`, `lane-rows`, `lane-row`, `unassigned-row`, `lane-label`. JS-created elements: `.calee-scheduler-drop-target-highlight` (drop-target highlight, issue #13), `.calee-scheduler-drag-ghost` (drag ghost).
+Documented regions: `scheduler`, `toolbar`, `toolbar-today`, `toolbar-prev`, `toolbar-next`, `range-label`, `view-switcher`, `toolbar-view-button`, `toolbar-start`, `toolbar-end`, `day-header`, `time-gutter`, `all-day`, `hour-grid`, `event`, `overflow-chip`, `month-cell`, `lane-rows`, `lane-row`, `unassigned-row`, `lane-label`. JS-created elements: `.calee-scheduler-drop-target-highlight` (drop-target highlight, issue #13), `.calee-scheduler-drag-ghost` (drag ghost).
+
+`toolbar-start` and `toolbar-end` (issue #31) are conditional, unlike the always-present regions above — they exist only when the corresponding `ToolbarStart` / `ToolbarEnd` slot is populated; a `null` slot emits no element at all, so there's nothing to select.
 
 ### 8.5 Putting it together
 

@@ -142,6 +142,55 @@ main {
     line-height: 1.3;
 }
 
+/*
+ * Toolbar content slot demo controls (issue #31 — ToolbarStart / ToolbarEnd).
+ * The RCL owns the slot wrapper's positioning; these rules style the demo's
+ * own injected controls. Both are held to the WCAG 2.2 SC 2.5.8 24px minimum
+ * target size, matching the library's own toolbar-button floor.
+ */
+.calee-demo-toolbar-slot-label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #1c1917;
+    margin-right: 0.25rem;
+}
+
+.calee-demo-toolbar-select {
+    min-height: 24px;
+    min-width: 24px;
+    border: 1px solid #e7e5e4;
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8125rem;
+    background: #fbfaf7;
+    color: #1c1917;
+}
+
+.calee-demo-toolbar-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    min-width: 24px;
+    border: 1px solid #e7e5e4;
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    font-size: 1rem;
+    line-height: 1;
+    background: #fbfaf7;
+    color: #1c1917;
+    cursor: pointer;
+}
+
+.calee-demo-toolbar-icon-button:hover {
+    background: #f1efec;
+}
+
+.calee-demo-toolbar-icon-button:focus-visible {
+    outline: 2px solid #b1462d;
+    outline-offset: 1px;
+}
+
 /* The Blazor error banner — keep visible but soften it for the editorial look. */
 #blazor-error-ui {
     background: #1c1917;

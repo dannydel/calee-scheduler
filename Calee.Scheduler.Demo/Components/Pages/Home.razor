@@ -98,7 +98,33 @@
                         OnDayOverflowClicked="HandleOverflow"
                         OnHelpRequested="HandleHelpRequested"
                         OnCommandPaletteRequested="HandleCommandPaletteRequested"
-                        ShowToolbar="true" />
+                        ShowToolbar="true">
+            @* Issue #31 — toolbar content slots. Demonstrates both ToolbarStart and
+               ToolbarEnd on the composed-root path. Neither control is wired into
+               real coloring/printing behavior — the RCL doesn't own consumer
+               dialogs/print flows (AGENTS.md) — these are stubs that prove the
+               slots render, take real tab stops, and meet the WCAG 2.2 SC 2.5.8
+               24px target-size floor (see app.css .calee-demo-toolbar-select /
+               .calee-demo-toolbar-icon-button). *@
+            <ToolbarStart>
+                <span class="calee-demo-toolbar-slot-label" aria-hidden="true">Color by</span>
+                <select aria-label="Color by"
+                        class="calee-demo-toolbar-select"
+                        @bind="_colorBy">
+                    <option value="none">None</option>
+                    <option value="driver">Driver</option>
+                    <option value="type">Event type</option>
+                </select>
+            </ToolbarStart>
+            <ToolbarEnd>
+                <button type="button"
+                        class="calee-demo-toolbar-icon-button"
+                        aria-label="Print schedule"
+                        @onclick="HandlePrintClicked">
+                    <span aria-hidden="true">🖨</span>
+                </button>
+            </ToolbarEnd>
+        </CaleeScheduler>
     </div>
 
     <PageFooterNote Caption="One composed scheduler with all six views accessible from the toolbar's view-switcher, the “1”–“6” keystrokes, or Cmd/Ctrl+K. The seed unions every per-page fixture set — week-aligned time-grid events, a six-day Launch-week banner that crosses a week boundary, year-scale density clusters on the 15th + 16th, a rolling agenda window, and three fleet drivers with cross-lane overlap — so each view renders meaningful content without re-seeding. Press “?” at any time for the shortcut map." />
@@ -152,6 +178,23 @@
     private YearViewStyle _yearStyle = YearViewStyle.MiniMonths;
     private int _agendaDays = 7;
     private static readonly int[] _agendaDaysOptions = new[] { 3, 7, 14, 30 };
+
+    // ── Issue #31 — toolbar content slot demo state ─────────────────────────
+    // "Color by" is a stub: the RCL owns positioning, not per-event coloring
+    // policy, so selecting an option here doesn't recolor anything — it just
+    // proves the slot renders as a real, labeled control with its own state.
+    private string _colorBy = "none";
+
+    /// <summary>
+    /// Stub handler for the ToolbarEnd "Print schedule" button (issue #31). The
+    /// RCL has no print API — printing is entirely consumer territory — so this
+    /// demo intentionally does nothing beyond proving the slot's control is
+    /// wired to a real click handler.
+    /// </summary>
+    private void HandlePrintClicked()
+    {
+        // Intentional no-op stub — see the summary above.
+    }
 
     // ── Help + palette dialog state ─────────────────────────────────────────
     private bool _helpVisible;

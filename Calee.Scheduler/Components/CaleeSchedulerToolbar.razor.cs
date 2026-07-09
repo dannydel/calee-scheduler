@@ -166,6 +166,27 @@ public partial class CaleeSchedulerToolbar : ComponentBase
     public string? ToolbarClass { get; set; }
 
     /// <summary>
+    /// Optional consumer content rendered at the start of the toolbar, before the
+    /// Today / Previous / Next navigation group. Takes its natural position in the
+    /// DOM and tab order (first tab stop in the toolbar when it contains interactive
+    /// controls). When <see langword="null"/> no wrapper element is emitted and the
+    /// toolbar markup is byte-identical to the no-slot layout. The library owns the
+    /// toolbar shell, spacing, and wrap behavior; the consumer owns the injected
+    /// content, including its target size (WCAG 2.2 SC 2.5.8) and accessible labels.
+    /// </summary>
+    [Parameter] public RenderFragment? ToolbarStart { get; set; }
+
+    /// <summary>
+    /// Optional consumer content rendered at the end of the toolbar, after the view
+    /// switcher. Takes its natural position in the DOM and tab order (last tab stop
+    /// in the toolbar when it contains interactive controls). When
+    /// <see langword="null"/> no wrapper element is emitted and the toolbar markup is
+    /// byte-identical to the no-slot layout. Same ownership split as
+    /// <see cref="ToolbarStart"/>.
+    /// </summary>
+    [Parameter] public RenderFragment? ToolbarEnd { get; set; }
+
+    /// <summary>
     /// Optional logger used to warn about ignored direct parameters when the toolbar
     /// is running in cascaded mode.
     /// </summary>

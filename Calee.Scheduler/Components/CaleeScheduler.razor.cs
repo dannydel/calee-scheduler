@@ -295,6 +295,22 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     [Parameter]
     public string? ToolbarClass { get; set; }
 
+    /// <summary>
+    /// Forwarded to <see cref="CaleeSchedulerToolbar.ToolbarStart"/>. Consumer content
+    /// rendered at the start of the toolbar, before the Today / Previous / Next group.
+    /// Only rendered when <see cref="ShowToolbar"/> is <see langword="true"/>. See the
+    /// toolbar parameter for the DOM/tab-order and ownership contract.
+    /// </summary>
+    [Parameter] public RenderFragment? ToolbarStart { get; set; }
+
+    /// <summary>
+    /// Forwarded to <see cref="CaleeSchedulerToolbar.ToolbarEnd"/>. Consumer content
+    /// rendered at the end of the toolbar, after the view switcher. Only rendered when
+    /// <see cref="ShowToolbar"/> is <see langword="true"/>. See the toolbar parameter
+    /// for the DOM/tab-order and ownership contract.
+    /// </summary>
+    [Parameter] public RenderFragment? ToolbarEnd { get; set; }
+
     /// <summary>Optional class hook for day-header cells (Day / Week / Month) (FR-54).</summary>
     [Parameter]
     public string? DayHeaderClass { get; set; }

@@ -1113,6 +1113,41 @@ public class CaleeSchedulerTests
     }
 
     // ───────────────────────────────────────────────────────────────────────────
+    // Issue #31 — toolbar content slots forwarded from the root.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ToolbarStart_And_ToolbarEnd_Forwarded_To_Toolbar()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.ToolbarStart, "<span data-testid=\"root-start\">Root start</span>")
+            .Add(c => c.ToolbarEnd, "<span data-testid=\"root-end\">Root end</span>"));
+
+        var start = cut.Find("[data-calee-region='toolbar-start']");
+        var end = cut.Find("[data-calee-region='toolbar-end']");
+        Assert.Contains("Root start", start.InnerHtml);
+        Assert.Contains("Root end", end.InnerHtml);
+    }
+
+    [Fact]
+    public void ToolbarStart_And_ToolbarEnd_Absent_When_ShowToolbar_False()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeScheduler<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.ShowToolbar, false)
+            .Add(c => c.ToolbarStart, "<span>Root start</span>")
+            .Add(c => c.ToolbarEnd, "<span>Root end</span>"));
+
+        Assert.Empty(cut.FindAll("[data-calee-region='toolbar-start']"));
+        Assert.Empty(cut.FindAll("[data-calee-region='toolbar-end']"));
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
     // Issue #7 — SchedulerView.WorkWeek on the root scheduler.
     // ───────────────────────────────────────────────────────────────────────────
 

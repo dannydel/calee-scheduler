@@ -3,6 +3,7 @@ using Bunit;
 using Calee.Scheduler.Components;
 using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Extensions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Calee.Scheduler.Tests;
@@ -635,5 +636,115 @@ public class CaleeSchedulerToolbarTests
                 .Add(c => c.Date, Anchor)
                 .Add(c => c.View, SchedulerView.Week)));
         Assert.Equal("TimeZone", ex.ParamName);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // Issue #31 — toolbar content slots (ToolbarStart / ToolbarEnd).
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ToolbarStart_Renders_Before_Nav_Group()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.ToolbarStart, "<button type=\"button\" data-testid=\"start-btn\">Start</button>"));
+
+        var start = cut.Find("[data-calee-region='toolbar-start']");
+        Assert.Contains("start-btn", start.InnerHtml);
+
+        var markup = cut.Markup;
+        var startIndex = markup.IndexOf("data-calee-region=\"toolbar-start\"", StringComparison.Ordinal);
+        var todayIndex = markup.IndexOf("data-calee-region=\"toolbar-today\"", StringComparison.Ordinal);
+        Assert.True(startIndex >= 0 && todayIndex >= 0 && startIndex < todayIndex,
+            "toolbar-start must precede toolbar-today in document order.");
+    }
+
+    [Fact]
+    public void ToolbarEnd_Renders_After_View_Switcher()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.ToolbarEnd, "<button type=\"button\" data-testid=\"end-btn\">End</button>"));
+
+        var end = cut.Find("[data-calee-region='toolbar-end']");
+        Assert.Contains("end-btn", end.InnerHtml);
+
+        var markup = cut.Markup;
+        var switcherIndex = markup.IndexOf("data-calee-region=\"view-switcher\"", StringComparison.Ordinal);
+        var endIndex = markup.IndexOf("data-calee-region=\"toolbar-end\"", StringComparison.Ordinal);
+        Assert.True(switcherIndex >= 0 && endIndex >= 0 && switcherIndex < endIndex,
+            "toolbar-end must follow view-switcher in document order.");
+    }
+
+    [Fact]
+    public void Null_Slots_Emit_No_Wrapper()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week));
+
+        Assert.Empty(cut.FindAll("[data-calee-region='toolbar-start']"));
+        Assert.Empty(cut.FindAll("[data-calee-region='toolbar-end']"));
+    }
+
+    [Fact]
+    public void Explicit_Null_Slots_Markup_Matches_Default()
+    {
+        using var ctxDefault = NewContext();
+        var defaultCut = ctxDefault.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week));
+
+        using var ctxExplicit = NewContext();
+        var explicitCut = ctxExplicit.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.ToolbarStart, (RenderFragment?)null)
+            .Add(c => c.ToolbarEnd, (RenderFragment?)null));
+
+        explicitCut.MarkupMatches(defaultCut.Markup);
+    }
+
+    [Fact]
+    public void Populated_Slots_Expose_Both_Region_Attributes()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.ToolbarStart, "<span>Start content</span>")
+            .Add(c => c.ToolbarEnd, "<span>End content</span>"));
+
+        var start = cut.Find("[data-calee-region='toolbar-start']");
+        var end = cut.Find("[data-calee-region='toolbar-end']");
+        Assert.Contains("Start content", start.InnerHtml);
+        Assert.Contains("End content", end.InnerHtml);
+    }
+
+    [Fact]
+    public void Slots_Do_Not_Disturb_Shell()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.ToolbarStart, "<span>Start content</span>")
+            .Add(c => c.ToolbarEnd, "<span>End content</span>"));
+
+        Assert.Single(cut.FindAll("[data-calee-region='range-label'][aria-live='polite']"));
+        Assert.Single(cut.FindAll("[data-calee-region='view-switcher'][role='radiogroup']"));
+        Assert.Equal(5, cut.FindAll("[data-calee-region='toolbar-view-button']").Count);
     }
 }

@@ -53,6 +53,13 @@
      class="@toolbarClasses"
      @attributes="AdditionalAttributes">
 
+    @if (ToolbarStart is not null)
+    {
+        <div class="calee-scheduler-toolbar-start" data-calee-region="toolbar-start">
+            @ToolbarStart
+        </div>
+    }
+
     @* Left region: Today + Prev + Next *@
     <div class="calee-scheduler-toolbar-left">
         <button type="button"
@@ -109,4 +116,11 @@
             </button>
         }
     </div>
+
+    @if (ToolbarEnd is not null)
+    {
+        <div class="calee-scheduler-toolbar-end" data-calee-region="toolbar-end">
+            @ToolbarEnd
+        </div>
+    }
 </div>

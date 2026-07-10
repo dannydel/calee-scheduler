@@ -112,7 +112,7 @@ public partial class CaleeSchedulerToolbar : ComponentBase
     /// favor of <see cref="SchedulerStateContainer.TimeZone"/>.
     /// </summary>
     [Parameter]
-    public TimeZoneInfo TimeZone { get; set; } = default!;
+    public TimeZoneInfo? TimeZone { get; set; }
 
     /// <summary>
     /// Ambient time zone supplied by an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>

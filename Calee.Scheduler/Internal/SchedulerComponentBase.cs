@@ -54,7 +54,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// resolved value every grid-frame computation actually reads. ADR-0001 / PRD §4.6.
     /// </summary>
     [Parameter]
-    public TimeZoneInfo TimeZone { get; set; } = default!;
+    public TimeZoneInfo? TimeZone { get; set; }
 
     /// <summary>
     /// Ambient time zone supplied by an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>

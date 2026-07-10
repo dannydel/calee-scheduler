@@ -199,6 +199,14 @@
     font-weight: 600;
 }
 
+/* When "today" lands on an out-of-month day it carries both --today and --muted.
+   The muted zinc-500 (#71717a) date text on the #eef4ff today background is only
+   4.37:1, under the WCAG 2.1 AA 1.4.3 4.5:1 threshold. Today is emphasized, so
+   render its date at full strength (#18181b, ~15:1 here) regardless of --muted. */
+.calee-scheduler-year-cell--today .calee-scheduler-year-cell-date {
+    color: #18181b;
+}
+
 .calee-scheduler-year-cell-date {
     line-height: 1;
     padding: 0.125rem 0;

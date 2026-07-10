@@ -107,7 +107,7 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
 
     /// <summary>
     /// Whether to render a vertical current-time indicator across all lane rows
-    /// when today (in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>) is in
+    /// when today (in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>) is in
     /// range. Only applies when <see cref="TimeScale"/> is <see cref="TimelineScale.Day"/>
     /// (FR-07). Defaults to <see langword="true"/>.
     /// </summary>
@@ -306,7 +306,7 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             case TimelineScale.Day:
                 {
                     var localDate = CurrentDate.Date;
-                    var offset = TimeZone.GetUtcOffset(localDate);
+                    var offset = ResolvedTimeZone.GetUtcOffset(localDate);
                     _rangeStart = new DateTimeOffset(localDate, offset);
                     _rangeEndExclusive = _rangeStart.AddDays(1);
                     _dayBounds = new[] { (_rangeStart, _rangeEndExclusive) };
@@ -315,17 +315,17 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             case TimelineScale.Week:
                 {
                     _dayBounds = SchedulerViewPrimitives.ComputeWeekDays(
-                        CurrentDate, _resolvedFirstDayOfWeek, TimeZone);
+                        CurrentDate, _resolvedFirstDayOfWeek, ResolvedTimeZone);
                     _rangeStart = _dayBounds[0].Start;
                     _rangeEndExclusive = _dayBounds[^1].End;
                     break;
                 }
             case TimelineScale.Month:
                 {
-                    var (start, end) = SchedulerViewPrimitives.ComputeMonthRange(CurrentDate, TimeZone);
+                    var (start, end) = SchedulerViewPrimitives.ComputeMonthRange(CurrentDate, ResolvedTimeZone);
                     _rangeStart = start;
                     _rangeEndExclusive = end;
-                    _dayBounds = SchedulerViewPrimitives.ComputeDayBounds(start, end, TimeZone);
+                    _dayBounds = SchedulerViewPrimitives.ComputeDayBounds(start, end, ResolvedTimeZone);
                     break;
                 }
             default:
@@ -450,7 +450,7 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         int? endHour)
     {
         var rowSet = new VisibleEventSet<TEvent>(
-            rowEvents, _rangeStart, _rangeEndExclusive, TimeZone, EventSplitMode.Continuous);
+            rowEvents, _rangeStart, _rangeEndExclusive, ResolvedTimeZone, EventSplitMode.Continuous);
 
         // Apply any optimistic-pin Start/End overrides (ADR-0006) before layout. The grouping
         // pass above already routed pinned events into the right row's bucket via the pin's
@@ -638,7 +638,7 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// <summary>The row at the supplied index — exposed for the .razor markup.</summary>
     internal RowLayout Row(int index) => _rows[index];
 
-    /// <summary>True when today (in TimeZone) falls inside the visible Day range.</summary>
+    /// <summary>True when today (in ResolvedTimeZone) falls inside the visible Day range.</summary>
     internal bool IsTodayInDayRange =>
         TimeScale == TimelineScale.Day &&
         Today.Date == CurrentDate.Date &&
@@ -665,9 +665,9 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     internal bool ShowLaterChipFor(int rowIndex) =>
         TimeScale == TimelineScale.Day && _rows[rowIndex].Layout.LaterOverflow.Count > 0;
 
-    /// <summary>Format an event's start/end as an accessible time range in TimeZone.</summary>
+    /// <summary>Format an event's start/end as an accessible time range in ResolvedTimeZone.</summary>
     internal string FormatEventTimeRange(ICalendarEvent ev) =>
-        SchedulerViewPrimitives.FormatEventTimeRange(ev, TimeZone);
+        SchedulerViewPrimitives.FormatEventTimeRange(ev, ResolvedTimeZone);
 
     /// <summary>Return the consumer's original TEvent for a positioned event (unwraps chunks via Id).
     /// Walks the per-row VisibleEventSets; lanes are bounded and small.</summary>
@@ -1326,8 +1326,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     {
         // Multi-day all-day events use exclusive End (e.g., Vacation Mon–Wed has End=Thu 00:00).
         // AddTicks(-1) normalizes that to the inclusive last day for the spoken accessible name.
-        var startDate = TimeZoneInfo.ConvertTime(ev.Start, TimeZone).Date;
-        var endDateInclusive = TimeZoneInfo.ConvertTime(ev.End, TimeZone).AddTicks(-1).Date;
+        var startDate = TimeZoneInfo.ConvertTime(ev.Start, ResolvedTimeZone).Date;
+        var endDateInclusive = TimeZoneInfo.ConvertTime(ev.End, ResolvedTimeZone).AddTicks(-1).Date;
         if (startDate == endDateInclusive)
         {
             return $"{ev.Title}, all day on {startDate:MMM d}, {laneName}";
@@ -1344,8 +1344,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// <summary>Accessible name for a "+N" overlap block in a lane row.</summary>
     internal string OverlapBlockAccessibleName(RowLayout row, OverlapOverflowBlock block)
     {
-        var start = TimeZoneInfo.ConvertTime(block.RegionStart, TimeZone);
-        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, TimeZone);
+        var start = TimeZoneInfo.ConvertTime(block.RegionStart, ResolvedTimeZone);
+        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, ResolvedTimeZone);
         return $"{block.Events.Count} more events from {start:h:mm tt} to {end:h:mm tt}, {row.LaneName}, activate to choose";
     }
 

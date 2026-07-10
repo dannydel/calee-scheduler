@@ -54,7 +54,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>
     /// Whether to render a horizontal current-time indicator when "today in
-    /// <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>" matches <c>CurrentDate</c>
+    /// <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>" matches <c>CurrentDate</c>
     /// (FR-07). Defaults to <see langword="true"/>.
     /// </summary>
     [Parameter]
@@ -126,7 +126,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     private DateTimeOffset _keyboardMoveOriginalStart;
     private DateTimeOffset _keyboardMoveOriginalEnd;
 
-    // Day boundary in TimeZone — used by the layout engine and by slot snapping.
+    // Day boundary in ResolvedTimeZone — used by the layout engine and by slot snapping.
     private DateTimeOffset _dayStartLocal;
     private DateTimeOffset _dayEndLocal;
 
@@ -204,11 +204,11 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         // the parameter name; rethrow as-is — tests assert on the .Message containing "StartHour".
         SchedulerViewPrimitives.ValidateHourParameters(_resolvedStartHour, _resolvedEndHour, _resolvedSlotMinutes);
 
-        // Compute the day boundary in TimeZone. We treat the date portion of CurrentDate
-        // as the local-to-TimeZone day; the offset on CurrentDate itself is irrelevant
-        // for choosing which calendar day to render (per PRD §4.6 and FR-09a).
+        // Compute the day boundary in ResolvedTimeZone. We treat the date portion of
+        // CurrentDate as the local-to-zone day; the offset on CurrentDate itself is
+        // irrelevant for choosing which calendar day to render (per PRD §4.6 and FR-09a).
         var localDate = CurrentDate.Date;
-        var offsetAtMidnight = TimeZone.GetUtcOffset(localDate);
+        var offsetAtMidnight = ResolvedTimeZone.GetUtcOffset(localDate);
         _dayStartLocal = new DateTimeOffset(localDate, offsetAtMidnight);
         _dayEndLocal = _dayStartLocal.AddDays(1);
 
@@ -245,7 +245,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
             GetFilteredEvents(),
             _dayStartLocal,
             _dayEndLocal,
-            TimeZone,
+            ResolvedTimeZone,
             EventSplitMode.PerDay);
 
         // Apply any optimistic-pin overrides (ADR-0006). When an event has a pinned
@@ -446,7 +446,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>Format a positioned event's start/end as an accessible time range.</summary>
     internal string FormatEventTimeRange(ICalendarEvent ev) =>
-        SchedulerViewPrimitives.FormatEventTimeRange(ev, TimeZone);
+        SchedulerViewPrimitives.FormatEventTimeRange(ev, ResolvedTimeZone);
 
     /// <summary>True when the indicator should be rendered (FR-07).</summary>
     internal bool IsTodayInView => Today.Date == CurrentDate.Date && ShowCurrentTimeIndicator;
@@ -508,7 +508,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>
     /// Fires <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> with the
-    /// rendered day's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// rendered day's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.
     /// No-op while a drag is active (ADR-0006 precedence — matches every other click
     /// handler in the view).
     /// </summary>
@@ -559,8 +559,8 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
     /// <summary>Accessible name for a "+N" overlap block.</summary>
     internal string OverlapBlockAccessibleName(OverlapOverflowBlock block)
     {
-        var start = TimeZoneInfo.ConvertTime(block.RegionStart, TimeZone);
-        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, TimeZone);
+        var start = TimeZoneInfo.ConvertTime(block.RegionStart, ResolvedTimeZone);
+        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, ResolvedTimeZone);
         return $"{block.Events.Count} more events from {start:h:mm tt} to {end:h:mm tt}, activate to choose";
     }
 
@@ -701,7 +701,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>
     /// Fire OnSlotClicked for a clicked slot. The supplied slot index is 0..SlotCount-1.
-    /// The emitted SchedulerSlot start/end carry TimeZone's offset (FR-21).
+    /// The emitted SchedulerSlot start/end carry ResolvedTimeZone's offset (FR-21).
     /// After the callback resolves, removes focus from any focused event chip so the
     /// "clicking off an event clears its focus ring" mental model holds even when
     /// the clicked slot itself has tabindex=-1 (would not naturally receive focus).
@@ -1526,7 +1526,7 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
 
     /// <summary>
     /// Drop handler for a drag-to-create. Computes the spanned (Start, End) in the
-    /// view's TimeZone, fires <see cref="SchedulerComponentBase{TEvent}.OnEventCreated"/>,
+    /// view's ResolvedTimeZone, fires <see cref="SchedulerComponentBase{TEvent}.OnEventCreated"/>,
     /// then exits — the library does NOT render an optimistic phantom event (Option A in
     /// the Task 8 lifecycle decision; see the commit body). The consumer typically opens
     /// an editor; on save it pushes the new event back through

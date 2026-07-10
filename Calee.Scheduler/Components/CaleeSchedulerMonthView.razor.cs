@@ -75,7 +75,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     private DayOfWeek _resolvedFirstDayOfWeek;
     private int _resolvedMaxEventsPerDay;
 
-    // The 42 day cells in display order, each as a midnight-midnight bound in TimeZone.
+    // The 42 day cells in display order, each as a midnight-midnight bound in ResolvedTimeZone.
     // Index = week-row * 7 + column.
     private (DateTimeOffset Start, DateTimeOffset End)[] _gridCells = Array.Empty<(DateTimeOffset, DateTimeOffset)>();
 
@@ -207,7 +207,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         for (var i = 0; i < 42; i++)
         {
             var d = gridStartDate.AddDays(i);
-            var offset = TimeZone.GetUtcOffset(d);
+            var offset = ResolvedTimeZone.GetUtcOffset(d);
             var start = new DateTimeOffset(d, offset);
             var end = start.AddDays(1);
             _gridCells[i] = (start, end);
@@ -239,7 +239,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
             : filtered.Select(e => (ICalendarEvent)e).ToList();
 
         // (1) Partition into single-day chips (per cell index) and multi-day bar segments
-        // (per week row). "Single-day" = first/last day match in TimeZone AND the event
+        // (per week row). "Single-day" = first/last day match in ResolvedTimeZone AND the event
         // fits inside one cell's midnight–midnight bound.
         var chipsPerCell = new List<ICalendarEvent>[42];
         for (var i = 0; i < 42; i++) chipsPerCell[i] = new List<ICalendarEvent>();
@@ -284,7 +284,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <summary>
     /// True when the event is contained within a single grid cell (either an all-day event
     /// that spans exactly one date or a timed event whose start and end share the same
-    /// date in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>).
+    /// date in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>).
     /// </summary>
     private bool IsSingleCellEvent(ICalendarEvent ev, out int cellIndex)
     {
@@ -488,7 +488,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         _gridCells[cellIndex].Start.Year == _displayedYear
         && _gridCells[cellIndex].Start.Month == _displayedMonth;
 
-    /// <summary>True when the cell at <paramref name="cellIndex"/> matches "today in TimeZone".</summary>
+    /// <summary>True when the cell at <paramref name="cellIndex"/> matches "today in ResolvedTimeZone".</summary>
     internal bool IsTodayCell(int cellIndex) =>
         _gridCells[cellIndex].Start.Date == Today.Date;
 
@@ -572,7 +572,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <summary>Format an event's start time in the configured zone (e.g., "9:00 AM").</summary>
     internal string FormatStartTime(ICalendarEvent ev)
     {
-        var startLocal = TimeZoneInfo.ConvertTime(ev.Start, TimeZone);
+        var startLocal = TimeZoneInfo.ConvertTime(ev.Start, ResolvedTimeZone);
         return startLocal.ToString("h:mm tt");
     }
 
@@ -584,8 +584,8 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     internal string BarAccessibleName(BarSegment bar)
     {
         var ev = bar.Event;
-        var start = TimeZoneInfo.ConvertTime(ev.Start, TimeZone);
-        var end = TimeZoneInfo.ConvertTime(ev.End, TimeZone);
+        var start = TimeZoneInfo.ConvertTime(ev.Start, ResolvedTimeZone);
+        var end = TimeZoneInfo.ConvertTime(ev.End, ResolvedTimeZone);
         if (ev.IsAllDay)
         {
             // All-day events end at the *next day*'s midnight; subtract a day for the readable
@@ -695,7 +695,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <remarks>
     /// <para>
     /// <strong>All-day shape.</strong> Month cells are whole-day, so the proposed event
-    /// is an all-day event by convention: <c>Start = midnight in TimeZone</c>,
+    /// is an all-day event by convention: <c>Start = midnight in ResolvedTimeZone</c>,
     /// <c>End = Start + 1 day</c>. The duration defaults to 1440 minutes (one day) per
     /// the per-view rule, but the consumer can override via
     /// <see cref="Extensions.CaleeSchedulerOptions.DefaultCreateDurationMinutes"/>. A non-1440

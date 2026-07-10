@@ -8,7 +8,7 @@ A Blazor scheduling component suite for internal .NET applications — Day, Week
 - Standalone views or a composed root scheduler with a shared toolbar and view switcher.
 - Sweep-line overlap layout with lane reuse; events render correctly without consumer geometry math.
 - Fail-closed interaction surface: drag-to-move (Day, Week, Month, Agenda, Timeline views), drag-to-resize, drag-to-create, double-click-to-create, delete, multi-select, undo/redo triggers, shortcuts, and command-palette hooks.
-- Required per-view `TimeZone` parameter — the library never converts event times; it uses the supplied zone for "today", day boundaries, and emitted `SchedulerSlot` offsets only.
+- Optional `TimeZone` parameter, resolved through a layered chain (explicit parameter → ancestor `CascadingValue<TimeZoneInfo>` → `CaleeSchedulerOptions.DefaultTimeZone` → throw) — the library never converts event times; it uses the resolved zone for "today", day boundaries, and emitted `SchedulerSlot` offsets only.
 - WCAG 2.2 AA-oriented default markup (with documented exceptions — see §9.1a): structural ARIA, roving tabindex, screen-reader-checked, contrast-verified default theme (§9). Keyboard alternatives to all drag interactions: `n` for drag-to-create, `m` + arrow keys + Enter/Escape for drag-to-move, `Shift+ArrowUp`/`Shift+ArrowDown` for drag-to-resize.
 - CSS isolation with documented theming levers: `--calee-scheduler-*` custom properties, attribute splatting, named class hooks, and `::deep` via `data-calee-region` attributes.
 - No transitive runtime dependencies beyond `Microsoft.AspNetCore.Components.*`.
@@ -60,9 +60,9 @@ builder.Services.AddCaleeScheduler(options =>
 
 What each piece does:
 
-- `AddCaleeScheduler` registers `CaleeSchedulerOptions` and the validation rules in PRD §4.6. There is intentionally **no** `DefaultTimeZone` option (ADR-0001).
+- `AddCaleeScheduler` registers `CaleeSchedulerOptions` and the validation rules in PRD §4.6. It also exposes an optional `DefaultTimeZone` — the last rung of the time-zone resolution chain (§5.1).
 - `<CaleeScheduler TEvent="CalendarEvent" ...>` mounts the root component (toolbar + active view). `TEvent` is required even when using the default `CalendarEvent` — this is the generic-only API (ADR-0004).
-- `TimeZone` is required on every view. It controls "today" highlights and the offsets stamped onto `SchedulerSlot` payloads, **not** event positioning (FR-09).
+- `TimeZone` is optional and resolved through a layered chain (§5.1). It controls "today" highlights and the offsets stamped onto `SchedulerSlot` payloads, **not** event positioning (FR-09).
 - `Events` is `IReadOnlyList<TEvent>`. `null` is treated as empty and logged at Warning (PRD §4.6).
 
 Add `@using Calee.Scheduler.Components` and `@using Calee.Scheduler.Contracts` to your `_Imports.razor` to avoid re-importing per page.
@@ -118,7 +118,7 @@ builder.Services.AddCaleeScheduler(options =>
 
 Every property has a sane default; `AddCaleeScheduler()` with no arguments is valid. Contract violations (`StartHour > EndHour`, slot duration not in `{15, 30, 60}`, `MaxEventsPerDay < 1`, etc.) surface as `OptionsValidationException` on the first `IOptions<CaleeSchedulerOptions>.Value` access.
 
-`TimeZone` is intentionally **not** an option. It is a required per-component parameter on every view. Picking it once at registration time would let "today" highlights and slot offsets silently disagree page-by-page when developer-machine local time differs from production server time.
+`DefaultTimeZone` is the lowest-precedence rung of the time-zone resolution chain (§5.1): an explicit `TimeZone` parameter wins, then an ancestor `CascadingValue<TimeZoneInfo>`, then this option. It defaults to `null` — if none of the three supply a zone, the component throws rather than guessing a locale.
 
 ---
 
@@ -432,13 +432,32 @@ It does **not** suppress:
 
 The single most-asked question. Read this before shipping.
 
-### 5.1 Why `TimeZone` is required on every view
+### 5.1 How the grid time zone is resolved
 
 The library has to know what day "today" is, where day boundaries fall, and what offset to stamp onto the `SchedulerSlot` it emits when a consumer clicks an empty cell. There is no universal right answer — desktop apps want browser-local, multi-tenant SaaS wants the user's profile zone, ops dashboards want the data-center zone.
 
-Rather than guess, every view requires an explicit `TimeZoneInfo TimeZone` parameter. Passing `null` is a hard fail (`ArgumentNullException`). There is intentionally no service-level `DefaultTimeZone` silently inheriting a wrong default is worse than failing loudly at the call site.
+Rather than guess, the grid zone resolves through an explicit chain (first non-`null` wins):
 
-There is a roadmap item to make this easier and or remove it entirely since it can be quite tedious to have to define this over and over again.
+1. **Explicit `TimeZone` parameter** on the component.
+2. **An ancestor `CascadingValue<TimeZoneInfo>`** — set it once in a layout or `App.razor` and every scheduler and toolbar below inherits it. This is the ergonomic path for apps with one app-wide zone.
+3. **`CaleeSchedulerOptions.DefaultTimeZone`** — configured at registration via `AddCaleeScheduler(o => o.DefaultTimeZone = ...)`.
+4. **Otherwise the component throws `InvalidOperationException`** with guidance naming all three ways to supply a zone.
+
+The library **never** falls back to `TimeZoneInfo.Local` or `Utc` — silently inheriting a wrong default is worse than failing loudly at the call site.
+
+```razor
+@* App-wide zone, set once — no per-component TimeZone needed below. *@
+<CascadingValue Value="_appZone">
+    <CaleeScheduler TEvent="CalendarEvent" Events="@_events" />
+</CascadingValue>
+
+@code {
+    private readonly TimeZoneInfo _appZone =
+        TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+}
+```
+
+An explicit `TimeZone` parameter still wins where you need a specific instance to differ (e.g. a fleet dashboard showing two zones side by side).
 
 ### 5.2 What the library does and doesn't do
 

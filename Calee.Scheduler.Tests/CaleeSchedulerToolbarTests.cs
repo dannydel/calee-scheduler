@@ -20,10 +20,10 @@ public class CaleeSchedulerToolbarTests
     // Tue 2026-03-17 in America/New_York (EDT: -04:00 begins 2026-03-08).
     private static readonly DateTimeOffset Anchor = new(2026, 3, 17, 0, 0, 0, TimeSpan.FromHours(-4));
 
-    private static BunitContext NewContext()
+    private static BunitContext NewContext(TimeZoneInfo? defaultTimeZone = null)
     {
         var ctx = new BunitContext();
-        ctx.Services.AddCaleeScheduler();
+        ctx.Services.AddCaleeScheduler(o => o.DefaultTimeZone = defaultTimeZone);
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         return ctx;
     }
@@ -630,12 +630,61 @@ public class CaleeSchedulerToolbarTests
     public void Missing_TimeZone_In_Standalone_Mode_Throws()
     {
         using var ctx = NewContext();
-        var ex = Assert.Throws<ArgumentNullException>(() =>
+
+        // No TimeZone, no cascade, and NewContext's AddCaleeScheduler() leaves
+        // DefaultTimeZone at its null default — the layered resolution's terminal
+        // throw fires (issue #34).
+        var ex = Assert.Throws<InvalidOperationException>(() =>
             ctx.Render<CaleeSchedulerToolbar>(p => p
                 .Add(c => c.TimeZone, (TimeZoneInfo)null!)
                 .Add(c => c.Date, Anchor)
                 .Add(c => c.View, SchedulerView.Week)));
-        Assert.Equal("TimeZone", ex.ParamName);
+        Assert.Contains("TimeZone", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("CascadingValue", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("DefaultTimeZone", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Standalone_Mode_Resolves_TimeZone_From_Ancestor_Cascade()
+    {
+        // No TimeZone parameter, no DefaultTimeZone option — only an ancestor
+        // CascadingValue<TimeZoneInfo> (issue #34, rung 2).
+        using var ctx = NewContext();
+        DateTimeOffset? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .AddCascadingValue(TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.DateChanged, d => captured = d));
+
+        var today = cut.Find("[data-calee-region='toolbar-today']");
+        today.Click();
+
+        Assert.NotNull(captured);
+        var nowInZone = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+        Assert.Equal(nowInZone.Date, captured!.Value.Date);
+        Assert.Equal(TZ.GetUtcOffset(captured.Value.Date), captured.Value.Offset);
+    }
+
+    [Fact]
+    public void Standalone_Mode_Resolves_TimeZone_From_DefaultTimeZone_Option()
+    {
+        // No TimeZone parameter, no cascade — only CaleeSchedulerOptions.DefaultTimeZone
+        // (issue #34, rung 3).
+        using var ctx = NewContext(defaultTimeZone: TZ);
+        DateTimeOffset? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.DateChanged, d => captured = d));
+
+        var today = cut.Find("[data-calee-region='toolbar-today']");
+        today.Click();
+
+        Assert.NotNull(captured);
+        var nowInZone = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+        Assert.Equal(nowInZone.Date, captured!.Value.Date);
+        Assert.Equal(TZ.GetUtcOffset(captured.Value.Date), captured.Value.Offset);
     }
 
     // ───────────────────────────────────────────────────────────────────────────

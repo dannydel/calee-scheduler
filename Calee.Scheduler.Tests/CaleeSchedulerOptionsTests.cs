@@ -111,4 +111,26 @@ public class CaleeSchedulerOptionsTests
 
         Assert.Equal(SchedulerView.WorkWeek, options.DefaultView);
     }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // Issue #34 — optional TimeZone, layered resolution: DefaultTimeZone option.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DefaultTimeZone_DefaultsToNull()
+    {
+        var options = Resolve(configure: null);
+
+        Assert.Null(options.DefaultTimeZone);
+    }
+
+    [Fact]
+    public void AddCaleeScheduler_WithConfigure_DefaultTimeZone_RoundTrips()
+    {
+        var tz = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+
+        var options = Resolve(o => o.DefaultTimeZone = tz);
+
+        Assert.Same(tz, options.DefaultTimeZone);
+    }
 }

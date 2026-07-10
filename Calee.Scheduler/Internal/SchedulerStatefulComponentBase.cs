@@ -19,7 +19,7 @@ namespace Calee.Scheduler.Internal;
 /// <see cref="SetCurrentDateAsync"/> simply fires <c>DateChanged</c> — the consumer is
 /// expected to push a new <c>Date</c> back in (typical <c>@bind-Date</c> usage). When the
 /// consumer omits <c>Date</c>, the view is in <em>uncontrolled</em> mode: it tracks the
-/// anchor internally, seeded from "today in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>"
+/// anchor internally, seeded from "today in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>"
 /// per FR-09a.
 /// </para>
 /// <para>
@@ -61,7 +61,7 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
     /// <summary>
     /// Bindable anchor date for this view. When <see langword="null"/>, the view manages
     /// its own anchor (uncontrolled mode) seeded from "today in
-    /// <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>" per FR-09a.
+    /// <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>" per FR-09a.
     /// </summary>
     [Parameter]
     public DateTimeOffset? Date { get; set; }
@@ -81,27 +81,42 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
     protected DateTimeOffset CurrentDate => Date ?? _internalDate;
 
     /// <summary>
-    /// "Today" expressed in the configured <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// "Today" expressed in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.
     /// Used to seed the uncontrolled anchor and to highlight today in the grid.
     /// </summary>
-    protected DateTimeOffset Today => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone);
+    protected DateTimeOffset Today => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvedTimeZone);
 
     /// <summary>
-    /// Seeds <see cref="_internalDate"/> with "today in <c>TimeZone</c>" so uncontrolled
-    /// renders have a valid anchor before <c>OnParametersSet</c> ever runs.
+    /// Seeds <see cref="_internalDate"/> with "today in the resolved zone" (issue #34)
+    /// so uncontrolled renders have a valid anchor before <c>OnParametersSet</c> ever runs.
     /// </summary>
     /// <remarks>
-    /// Defensive fallback: if <see cref="SchedulerComponentBase{TEvent}.TimeZone"/> is
-    /// somehow null at this point (it shouldn't be — Blazor sets parameters before
-    /// <c>OnInitialized</c>, and the base's <c>OnParametersSet</c> override validates it),
-    /// use <see cref="DateTimeOffset.UtcNow"/> as a non-throwing seed. The base's
-    /// <c>OnParametersSet</c> validation will still throw on the same parameter set,
-    /// surfacing the developer bug exactly once.
+    /// Defensive fallback: <see cref="SchedulerComponentBase{TEvent}.ResolveTimeZone"/>
+    /// throws <see cref="InvalidOperationException"/> when none of the explicit
+    /// <c>TimeZone</c> parameter, an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>, or
+    /// <see cref="Calee.Scheduler.Extensions.CaleeSchedulerOptions.DefaultTimeZone"/>
+    /// supplied a value. Blazor sets parameters (including the cascade) before
+    /// <c>OnInitialized</c> runs, so resolution normally succeeds here too — but rather
+    /// than let an unresolved zone throw mid-seed (before the base's own
+    /// <c>OnParametersSet</c> gets a chance to raise the same failure authoritatively),
+    /// this catches the exception and falls back to <see cref="DateTimeOffset.UtcNow"/>
+    /// as a non-throwing seed. The base's <c>OnParametersSet</c> validation still throws
+    /// on the same parameter set, surfacing the developer bug exactly once.
     /// </remarks>
     protected override void OnInitialized()
     {
-        _internalDate = TimeZone is not null
-            ? TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone)
+        TimeZoneInfo? tz;
+        try
+        {
+            tz = ResolveTimeZone();
+        }
+        catch (InvalidOperationException)
+        {
+            tz = null;
+        }
+
+        _internalDate = tz is not null
+            ? TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz)
             : DateTimeOffset.UtcNow;
     }
 

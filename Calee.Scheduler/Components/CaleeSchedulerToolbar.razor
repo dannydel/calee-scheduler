@@ -31,7 +31,7 @@
     // Resolve the effective values from either the cascaded container or direct params.
     var effectiveView = State?.CurrentView ?? View;
     var effectiveDate = State?.CurrentDate ?? Date;
-    var effectiveTz = State?.TimeZone ?? TimeZone;
+    var effectiveTz = EffectiveTimeZone;
     var effectiveFirstDay = State?.FirstDayOfWeek ?? FirstDayOfWeek;
     var effectiveAvailableViews = State?.AvailableViews
         ?? AvailableViews

@@ -10,16 +10,24 @@ namespace Calee.Scheduler.Extensions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// There is intentionally no <c>DefaultTimeZone</c> property. The grid time zone
-/// (used to compute "today", day boundaries, and the offset stamped on emitted
-/// <see cref="SchedulerSlot"/> values) is a per-component <em>required</em> parameter
-/// on every view — see PRD §4.3 and ADR-0001. Picking a time zone wrong at the
-/// service-registration level is a silent footgun: a consumer that scaffolded
-/// against the developer's machine local time may then ship to production
-/// against UTC server time, with "today" highlights and slot offsets disagreeing
-/// page-by-page and no error to surface the drift. By forcing the consumer to
-/// pass <c>TimeZone</c> explicitly per view, the library makes the choice visible
-/// at every call site and impossible to inherit accidentally.
+/// <see cref="DefaultTimeZone"/> is the last rung of the grid time zone's layered
+/// resolution (issue #34). The grid time zone (used to compute "today", day
+/// boundaries, and the offset stamped on emitted <see cref="SchedulerSlot"/>
+/// values — PRD §4.3 / ADR-0001) is resolved per component in this precedence,
+/// first non-null wins:
+/// <list type="number">
+///   <item><description>The component's own explicit <c>TimeZone</c> parameter.</description></item>
+///   <item><description>An ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>.</description></item>
+///   <item><description><see cref="DefaultTimeZone"/> on this options type.</description></item>
+/// </list>
+/// When none of the three supply a value, the component throws
+/// <see cref="InvalidOperationException"/> naming all three options rather than
+/// silently falling back to <see cref="TimeZoneInfo.Local"/> or
+/// <see cref="TimeZoneInfo.Utc"/> — a silent local/UTC fallback is exactly the
+/// footgun this layered design avoids: a consumer that scaffolded against the
+/// developer's machine local time could otherwise ship to production against UTC
+/// server time, with "today" highlights and slot offsets disagreeing page-by-page
+/// and no error to surface the drift.
 /// </para>
 /// <para>
 /// Hard-fail validation (see <see cref="ServiceCollectionExtensions.AddCaleeScheduler"/>)
@@ -100,4 +108,14 @@ public sealed class CaleeSchedulerOptions
     /// double-click-to-create has a sensible default to lean on.
     /// </remarks>
     public int? DefaultCreateDurationMinutes { get; set; }
+
+    /// <summary>
+    /// Service-level fallback grid time zone, consulted last in the layered
+    /// <c>TimeZone</c> resolution (issue #34): explicit <c>TimeZone</c> parameter →
+    /// ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c> → this option → throw. Defaults
+    /// to <see langword="null"/>, meaning "no service-level default" — a consumer that
+    /// relies solely on this option must set it explicitly; there is no implicit
+    /// <see cref="TimeZoneInfo.Local"/> or <see cref="TimeZoneInfo.Utc"/> substitution.
+    /// </summary>
+    public TimeZoneInfo? DefaultTimeZone { get; set; }
 }

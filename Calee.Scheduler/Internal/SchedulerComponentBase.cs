@@ -27,7 +27,11 @@ namespace Calee.Scheduler.Internal;
 /// <para>
 /// <strong>Validation policy</strong> follows PRD §4.6:
 /// <list type="bullet">
-///   <item><description>Null <c>TimeZone</c> is a hard-fail (<see cref="ArgumentNullException"/>).</description></item>
+///   <item><description><c>TimeZone</c> is optional (issue #34) but its layered resolution
+///     is a hard-fail: when none of the explicit parameter, an ancestor
+///     <c>CascadingValue&lt;TimeZoneInfo&gt;</c>, or <see cref="CaleeSchedulerOptions.DefaultTimeZone"/>
+///     supply a value, <see cref="OnParametersSet"/> throws
+///     <see cref="InvalidOperationException"/>.</description></item>
 ///   <item><description>Null <c>Events</c> is a soft-degradation case — treated as empty and logged via
 ///     <see cref="ILogger"/> when one is available.</description></item>
 /// </list>
@@ -43,10 +47,58 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
 {
     /// <summary>
     /// Time zone used to compute "today", day boundaries, and the offset stamped onto
-    /// emitted <see cref="SchedulerSlot"/> values. Required — see ADR-0001 / PRD §4.6.
+    /// emitted <see cref="SchedulerSlot"/> values. Optional (issue #34) — resolved via a
+    /// layered chain, first non-null wins: this parameter → an ancestor
+    /// <c>CascadingValue&lt;TimeZoneInfo&gt;</c> → <see cref="CaleeSchedulerOptions.DefaultTimeZone"/>
+    /// → <see cref="InvalidOperationException"/>. See <see cref="ResolvedTimeZone"/> for the
+    /// resolved value every grid-frame computation actually reads. ADR-0001 / PRD §4.6.
     /// </summary>
-    [Parameter, EditorRequired]
-    public TimeZoneInfo TimeZone { get; set; } = default!;
+    [Parameter]
+    public TimeZoneInfo? TimeZone { get; set; }
+
+    /// <summary>
+    /// Ambient time zone supplied by an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>
+    /// (issue #34) — the second rung of <see cref="TimeZone"/>'s layered resolution.
+    /// Distinct from the <see cref="SchedulerStateContainer"/> cascade the root scheduler
+    /// uses for its own descendants; this cascade lets a consumer establish a single
+    /// ambient zone above a standalone view (or above the whole app) without threading
+    /// <c>TimeZone</c> through every call site.
+    /// </summary>
+    [CascadingParameter]
+    private TimeZoneInfo? AmbientTimeZone { get; set; }
+
+    /// <summary>
+    /// The time zone actually used for every grid-frame computation this render pass —
+    /// "today", day/week/month boundaries, and the offset stamped onto emitted
+    /// <see cref="SchedulerSlot"/> values. Computed once per <c>OnParametersSet</c> by
+    /// <see cref="ResolveTimeZone"/> and never <see langword="null"/> once that method has
+    /// run without throwing. Event <c>Start</c>/<c>End</c> rendering never reads this —
+    /// events still render at their literal <see cref="DateTimeOffset"/> (ADR-0001).
+    /// </summary>
+    protected TimeZoneInfo ResolvedTimeZone { get; private set; } = default!;
+
+    /// <summary>
+    /// Resolves <see cref="ResolvedTimeZone"/> per issue #34's layered precedence, first
+    /// non-null wins: <see cref="TimeZone"/> → <see cref="AmbientTimeZone"/> →
+    /// <see cref="CaleeSchedulerOptions.DefaultTimeZone"/> → throw. Deliberately does NOT
+    /// fall back to <see cref="TimeZoneInfo.Local"/> or <see cref="TimeZoneInfo.Utc"/> —
+    /// a silent local/UTC substitution is exactly the footgun this chain exists to avoid
+    /// (see <see cref="CaleeSchedulerOptions"/>'s remarks).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// None of the three sources supplied a value.
+    /// </exception>
+    private protected TimeZoneInfo ResolveTimeZone() =>
+        TimeZone
+        ?? AmbientTimeZone
+        ?? SchedulerOptions.Value.DefaultTimeZone
+        ?? throw new InvalidOperationException(
+            "Calee.Scheduler could not resolve a TimeZone. Supply one of, in order of " +
+            "precedence: (1) the component's TimeZone parameter, (2) an ancestor " +
+            "<CascadingValue TValue=\"TimeZoneInfo\" Value=\"...\"> wrapping this component, " +
+            "or (3) a service-level default via " +
+            "services.AddCaleeScheduler(o => o.DefaultTimeZone = ...). The library never " +
+            "falls back to TimeZoneInfo.Local or TimeZoneInfo.Utc silently.");
 
     /// <summary>
     /// Events to render. <see langword="null"/> is treated as empty per PRD §4.6
@@ -81,7 +133,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <para>
     /// <strong>Evaluated per rendered day, not per slot.</strong> Day/Week/Month views
     /// call this once per rendered day (in the grid time zone, ADR-0001 — the argument
-    /// is always a day's midnight boundary in <see cref="TimeZone"/>) and cache the
+    /// is always a day's midnight boundary in <see cref="ResolvedTimeZone"/>) and cache the
     /// result for the render, the same way <c>EventClass</c> is evaluated once per
     /// event rather than recomputed per pixel. A Week/WorkWeek view with a
     /// <c>VisibleDays</c> subset only evaluates the hook for the visible columns —
@@ -108,7 +160,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <summary>
     /// Optional render fragment for the *inside* of each day-header cell on time-grid
     /// views (issue #9) — e.g. a per-day count badge. Receives the day's midnight
-    /// <see cref="DateTimeOffset"/> in <see cref="TimeZone"/>: the same value shape
+    /// <see cref="DateTimeOffset"/> in <see cref="ResolvedTimeZone"/>: the same value shape
     /// <see cref="DayModifier"/> receives, for consistency across the library's
     /// per-day hooks. The library owns the header cell container and the default
     /// weekday/date label; this template renders *after* that label, inside the same
@@ -152,7 +204,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <summary>
     /// Fired when the user activates a day-header cell on a time-grid view (issue #9)
     /// — pointer click, or Enter/Space while the header holds keyboard focus. Receives
-    /// the day's midnight <see cref="DateTimeOffset"/> in <see cref="TimeZone"/>,
+    /// the day's midnight <see cref="DateTimeOffset"/> in <see cref="ResolvedTimeZone"/>,
     /// matching <see cref="DayHeaderTemplate"/>'s context.
     /// </summary>
     /// <remarks>
@@ -324,7 +376,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// or double-clicks an empty slot / month cell (FR-32). Carries an
     /// <see cref="EventCreateContext"/> whose <see cref="EventCreateContext.Slot"/>
     /// describes the spanned <c>(Start, End)</c> in the configured
-    /// <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>'s offset. In
+    /// <see cref="ResolvedTimeZone"/>'s offset. In
     /// <c>CaleeSchedulerTimelineView</c> the <see cref="SchedulerSlot.LaneId"/> is
     /// populated to the anchor row's lane id (<see langword="null"/> when the anchor
     /// row is the unassigned row). In Day, Week, and Month views
@@ -366,7 +418,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <para>
     /// <strong>Month view all-day shape.</strong> Month view cells are whole-day,
     /// so a double-click-to-create on Month produces an event with
-    /// <c>Start = midnight in TimeZone</c> and <c>End = Start + 1 day</c>. The
+    /// <c>Start = midnight in ResolvedTimeZone</c> and <c>End = Start + 1 day</c>. The
     /// <see cref="EventCreateContext"/> contract has no <c>IsAllDay</c> field; the
     /// all-day intent is conveyed via that Start/End shape. Consumers that need an
     /// <c>IsAllDay = true</c> flag on the persisted event set it themselves after
@@ -687,7 +739,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// </summary>
     /// <remarks>
     /// When the root scheduler is used and this callback is NOT wired by the consumer,
-    /// the root flips its own anchor to "today in <c>TimeZone</c>" automatically
+    /// the root flips its own anchor to "today in <c>ResolvedTimeZone</c>" automatically
     /// (uncontrolled-mode convenience). Wiring the callback opts the consumer in to
     /// owning the navigation behavior. See ADR-0013 row 7.
     /// </remarks>
@@ -2193,16 +2245,16 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     protected ILogger<SchedulerComponentBase<TEvent>>? Logger { get; set; }
 
     /// <summary>
-    /// Validates required parameters per PRD §4.6. Throws <see cref="ArgumentNullException"/>
-    /// when <see cref="TimeZone"/> is <see langword="null"/>.
+    /// Resolves <see cref="ResolvedTimeZone"/> per issue #34's layered chain, then
+    /// validates the remaining required parameters per PRD §4.6.
     /// </summary>
-    /// <exception cref="ArgumentNullException">When <see cref="TimeZone"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// None of <see cref="TimeZone"/>, an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>,
+    /// or <see cref="CaleeSchedulerOptions.DefaultTimeZone"/> supplied a value.
+    /// </exception>
     protected override void OnParametersSet()
     {
-        if (TimeZone is null)
-        {
-            throw new ArgumentNullException(nameof(TimeZone));
-        }
+        ResolvedTimeZone = ResolveTimeZone();
 
         // Phase 2 Task 14 — rebuild the standalone-mode resolved shortcut map when the
         // consumer's parameter references change. The cascade-hosted path is owned by
@@ -2279,8 +2331,8 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// (the "normal day" case in both branches).
     /// </summary>
     /// <param name="day">
-    /// The day's midnight boundary in <see cref="TimeZone"/> (ADR-0001) — callers pass
-    /// the same per-day instant used elsewhere for that day's grid math, not an
+    /// The day's midnight boundary in <see cref="ResolvedTimeZone"/> (ADR-0001) — callers
+    /// pass the same per-day instant used elsewhere for that day's grid math, not an
     /// arbitrary time-of-day.
     /// </param>
     protected SchedulerDayState? GetDayState(DateTimeOffset day) => DayModifier?.Invoke(day);
@@ -2310,7 +2362,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     {
         if (DayModifier is null) return false;
 
-        var days = SchedulerViewPrimitives.ComputeDayBounds(start, endExclusive, TimeZone);
+        var days = SchedulerViewPrimitives.ComputeDayBounds(start, endExclusive, ResolvedTimeZone);
         for (var i = 0; i < days.Count; i++)
         {
             if (DayModifier(days[i].Start)?.IsBlocked == true) return true;
@@ -2319,16 +2371,16 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     }
 
     /// <summary>
-    /// Returns the current wall-clock time in the configured <see cref="TimeZone"/>
-    /// formatted as e.g. "10:35 AM". Used by the views' current-time indicators
-    /// as a hover-tooltip title so screen-readable info is available without the
-    /// user having to look elsewhere. The value is computed at render time —
-    /// re-renders that change anything else on the page will refresh it, but the
-    /// library doesn't poll on a timer to keep it second-precise.
+    /// Returns the current wall-clock time in <see cref="ResolvedTimeZone"/> formatted
+    /// as e.g. "10:35 AM". Used by the views' current-time indicators as a hover-tooltip
+    /// title so screen-readable info is available without the user having to look
+    /// elsewhere. The value is computed at render time — re-renders that change anything
+    /// else on the page will refresh it, but the library doesn't poll on a timer to keep
+    /// it second-precise.
     /// </summary>
     protected string CurrentTimeText()
     {
-        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone);
+        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvedTimeZone);
         return now.ToString("h:mm tt");
     }
 }

@@ -7,10 +7,6 @@
     <RootNamespace>Calee.Scheduler</RootNamespace>
     <AssemblyName>Calee.Scheduler</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- RZ2012: [EditorRequired] missing-attribute warning. The root scheduler composes
-         CaleeSchedulerToolbar with TimeZone supplied via the cascaded SchedulerStateContainer,
-         not via the direct parameter; the analyzer cannot see across the cascade. -->
-    <NoWarn>$(NoWarn);RZ2012</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

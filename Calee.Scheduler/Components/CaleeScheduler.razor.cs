@@ -46,7 +46,8 @@ namespace Calee.Scheduler.Components;
 /// to re-render on every unrelated parameter set.
 /// </para>
 /// <para>
-/// <strong>Validation.</strong> Inherits <c>TimeZone</c> hard-fail from the base.
+/// <strong>Validation.</strong> Inherits the layered <c>TimeZone</c> resolution
+/// (issue #34) from the base — see <see cref="SchedulerComponentBase{TEvent}.ResolveTimeZone"/>.
 /// Additionally throws <see cref="InvalidOperationException"/> when <see cref="View"/>
 /// resolves to <see cref="SchedulerView.Timeline"/> but the timeline binding is incomplete
 /// (PRD §4.6 — the timeline view shape requires both <see cref="Lanes"/> and
@@ -463,7 +464,7 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     /// <inheritdoc/>
     protected override void OnParametersSet()
     {
-        base.OnParametersSet(); // validates TimeZone
+        base.OnParametersSet(); // resolves ResolvedTimeZone (issue #34)
 
         // PRD §4.6: View=Timeline requires both Lanes and LaneKey to be wired.
         if (EffectiveView == SchedulerView.Timeline && !TimelineViewAvailable)
@@ -536,7 +537,7 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         // Compute the canonical visible range for the current effective state. This is
         // the source of truth for OnRangeChanged — child view range events are absorbed
         // and re-derived here so consumers receive a single notification per render.
-        var range = ComputeRange(EffectiveView, CurrentDate, EffectiveFirstDayOfWeek, TimeZone, EffectiveTimelineScale, _resolvedAgendaDays, _resolvedWorkWeekDays);
+        var range = ComputeRange(EffectiveView, CurrentDate, EffectiveFirstDayOfWeek, ResolvedTimeZone, EffectiveTimelineScale, _resolvedAgendaDays, _resolvedWorkWeekDays);
 
         // Mutate the cascading container in place. The toolbar reads these values on
         // every render; the stable reference identity prevents wholesale subtree
@@ -544,7 +545,7 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
         _state.CurrentView = EffectiveView;
         _state.CurrentDate = CurrentDate;
         _state.CurrentRange = range;
-        _state.TimeZone = TimeZone;
+        _state.TimeZone = ResolvedTimeZone;
         _state.FirstDayOfWeek = EffectiveFirstDayOfWeek;
         _state.AvailableViews = AvailableViews;
         _state.TimelineScale = EffectiveView == SchedulerView.Timeline
@@ -907,13 +908,13 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
             await OnTodayRequested.InvokeAsync();
             return;
         }
-        // Uncontrolled-anchor convenience: snap to today in the configured TimeZone.
+        // Uncontrolled-anchor convenience: snap to today in ResolvedTimeZone.
         // Controlled mode (Date.HasValue) defers to the consumer's binding push.
         if (Date.HasValue)
         {
             return;
         }
-        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone);
+        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvedTimeZone);
         await HandleRequestDateChangeAsync(today);
     }
 

@@ -52,9 +52,14 @@ public class SchedulerComponentBaseTests
     {
         using var ctx = NewContext();
 
-        // Don't pass TimeZone. Mounting triggers OnParametersSet → ArgumentNullException.
-        var ex = Assert.Throws<ArgumentNullException>(() => ctx.Render<TestView>());
-        Assert.Equal("TimeZone", ex.ParamName);
+        // Don't pass TimeZone, and don't supply a cascade or a DefaultTimeZone option
+        // (NewContext's AddCaleeScheduler() leaves DefaultTimeZone at its null default).
+        // Mounting triggers OnParametersSet → the layered resolution's terminal throw
+        // (issue #34).
+        var ex = Assert.Throws<InvalidOperationException>(() => ctx.Render<TestView>());
+        Assert.Contains("TimeZone", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("CascadingValue", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("DefaultTimeZone", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

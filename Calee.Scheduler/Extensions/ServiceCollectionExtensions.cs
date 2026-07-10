@@ -9,8 +9,12 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers Calee.Scheduler services and binds <see cref="CaleeSchedulerOptions"/>.
-    /// Per PRD §4.3 there is no service-level <c>DefaultTimeZone</c> — <c>TimeZone</c> is
-    /// a required per-component parameter on every view (ADR-0001).
+    /// Per issue #34, <c>TimeZone</c> is resolved per component via a layered chain —
+    /// explicit parameter → ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c> →
+    /// <see cref="CaleeSchedulerOptions.DefaultTimeZone"/> configured here → throw — so
+    /// setting <c>o.DefaultTimeZone</c> in <paramref name="configure"/> is one way to
+    /// supply a service-level fallback without threading <c>TimeZone</c> through every
+    /// component (ADR-0001).
     /// </summary>
     /// <param name="services">The service collection to extend.</param>
     /// <param name="configure">

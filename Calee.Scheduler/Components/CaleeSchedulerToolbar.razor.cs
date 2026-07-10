@@ -1,8 +1,10 @@
 #nullable enable
 using Calee.Scheduler.Contracts;
+using Calee.Scheduler.Extensions;
 using Calee.Scheduler.Internal;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Calee.Scheduler.Components;
 
@@ -38,10 +40,13 @@ namespace Calee.Scheduler.Components;
 /// </list>
 /// </para>
 /// <para>
-/// <strong>Validation.</strong> In standalone mode a null <see cref="TimeZone"/>
-/// throws <see cref="ArgumentNullException"/> from <see cref="OnParametersSet"/>
-/// (PRD §4.6 hard-fail). In cascaded mode <see cref="TimeZone"/> is supplied via
-/// the container — it's the root scheduler's responsibility to enforce.
+/// <strong>Validation.</strong> In standalone mode <see cref="TimeZone"/> is optional
+/// (issue #34) — <see cref="OnParametersSet"/> eagerly forces <see cref="EffectiveTimeZone"/>'s
+/// layered resolution, which throws <see cref="InvalidOperationException"/> when none of
+/// the explicit parameter, an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>, or
+/// <see cref="CaleeSchedulerOptions.DefaultTimeZone"/> supply a value. In cascaded mode
+/// <see cref="TimeZone"/> is ignored — the root scheduler's already-resolved value is
+/// supplied via the container.
 /// </para>
 /// </remarks>
 public partial class CaleeSchedulerToolbar : ComponentBase
@@ -101,12 +106,23 @@ public partial class CaleeSchedulerToolbar : ComponentBase
 
     /// <summary>
     /// Time zone used to compute "today" (for the Today button) and as the basis for
-    /// month/week boundary math in the range label. Required in standalone mode
-    /// (PRD §4.6). In cascaded mode this value is read from
-    /// <see cref="SchedulerStateContainer.TimeZone"/>.
+    /// month/week boundary math in the range label. Optional (issue #34) — in standalone
+    /// mode it participates in the layered resolution documented on
+    /// <see cref="EffectiveTimeZone"/>. In cascaded mode this parameter is ignored in
+    /// favor of <see cref="SchedulerStateContainer.TimeZone"/>.
     /// </summary>
-    [Parameter, EditorRequired]
-    public TimeZoneInfo TimeZone { get; set; } = default!;
+    [Parameter]
+    public TimeZoneInfo? TimeZone { get; set; }
+
+    /// <summary>
+    /// Ambient time zone supplied by an ancestor <c>CascadingValue&lt;TimeZoneInfo&gt;</c>
+    /// (issue #34) — consulted in standalone mode, after <see cref="TimeZone"/> and before
+    /// <see cref="SchedulerOptions"/>'s <see cref="CaleeSchedulerOptions.DefaultTimeZone"/>.
+    /// Distinct from the <see cref="SchedulerStateContainer"/> cascade — a standalone
+    /// toolbar (no root scheduler) can still pick up an ambient zone this way.
+    /// </summary>
+    [CascadingParameter]
+    private TimeZoneInfo? AmbientTimeZone { get; set; }
 
     /// <summary>
     /// First day of the week (FR-04) used to compute the Week range label's bounds.
@@ -193,16 +209,22 @@ public partial class CaleeSchedulerToolbar : ComponentBase
     [Inject]
     private ILogger<CaleeSchedulerToolbar>? Logger { get; set; }
 
+    /// <summary>
+    /// Service-level defaults, consulted as the last rung of <see cref="EffectiveTimeZone"/>'s
+    /// layered resolution in standalone mode (issue #34).
+    /// </summary>
+    [Inject]
+    protected IOptions<CaleeSchedulerOptions> SchedulerOptions { get; set; } = default!;
+
     /// <inheritdoc/>
     protected override void OnParametersSet()
     {
         if (State is null)
         {
-            // Standalone mode: TimeZone is the toolbar's own contract per PRD §4.6.
-            if (TimeZone is null)
-            {
-                throw new ArgumentNullException(nameof(TimeZone));
-            }
+            // Standalone mode: force the layered resolution now so a misconfigured
+            // toolbar fails loudly during OnParametersSet rather than lazily the first
+            // time the markup reads EffectiveTimeZone.
+            _ = EffectiveTimeZone;
         }
         else
         {
@@ -243,8 +265,30 @@ public partial class CaleeSchedulerToolbar : ComponentBase
 
     // ----- Effective accessors used by the .razor markup ----------------------------
 
-    /// <summary>The time zone in effect for this render (container's value wins).</summary>
-    private TimeZoneInfo EffectiveTimeZone => State?.TimeZone ?? TimeZone;
+    /// <summary>
+    /// The time zone in effect for this render. In cascaded mode, the container's value
+    /// (set by the root scheduler, which has already resolved its own layered chain)
+    /// always wins. In standalone mode, resolves the same layered chain as
+    /// <see cref="SchedulerComponentBase{TEvent}.ResolveTimeZone"/> (issue #34), first
+    /// non-null wins: <see cref="TimeZone"/> → <see cref="AmbientTimeZone"/> →
+    /// <see cref="CaleeSchedulerOptions.DefaultTimeZone"/> → throw.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Standalone mode, and none of the three sources supplied a value.
+    /// </exception>
+    private TimeZoneInfo EffectiveTimeZone =>
+        State?.TimeZone
+        ?? TimeZone
+        ?? AmbientTimeZone
+        ?? SchedulerOptions.Value.DefaultTimeZone
+        ?? throw new InvalidOperationException(
+            "Calee.Scheduler could not resolve a TimeZone for the standalone " +
+            "CaleeSchedulerToolbar. Supply one of, in order of precedence: (1) the " +
+            "TimeZone parameter, (2) an ancestor " +
+            "<CascadingValue TValue=\"TimeZoneInfo\" Value=\"...\"> wrapping the toolbar, " +
+            "or (3) a service-level default via " +
+            "services.AddCaleeScheduler(o => o.DefaultTimeZone = ...). The library never " +
+            "falls back to TimeZoneInfo.Local or TimeZoneInfo.Utc silently.");
 
     /// <summary>The view in effect for this render.</summary>
     private SchedulerView EffectiveView => State?.CurrentView ?? View;

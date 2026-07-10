@@ -27,10 +27,9 @@
         {
             @* In cascaded mode (the path used by the root) the toolbar reads TimeZone /
                View / Date / AvailableViews from the cascaded state container; its own
-               [EditorRequired] TimeZone parameter is intentionally ignored. The
-               RZ2012 analyzer warning for the omitted attribute is suppressed at the
-               project level (see Calee.Scheduler.csproj NoWarn) so that a clean library
-               build does not carry an unactionable warning. *@
+               (optional, issue #34) TimeZone parameter is intentionally left unset —
+               the root's already-resolved ResolvedTimeZone flows down via the container
+               instead. *@
             <CaleeSchedulerToolbar ToolbarClass="@ToolbarClass" ToolbarStart="@ToolbarStart" ToolbarEnd="@ToolbarEnd" />
         }
 
@@ -38,7 +37,7 @@
         {
             case SchedulerView.Day:
                 <CaleeSchedulerDayView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -93,7 +92,7 @@
                    Week case verbatim so drag/resize/keyboard behavior is identical —
                    see the VisibleDays engine primitive added for issue #6. *@
                 <CaleeSchedulerWeekView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -145,7 +144,7 @@
 
             case SchedulerView.Week:
                 <CaleeSchedulerWeekView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -196,7 +195,7 @@
 
             case SchedulerView.Month:
                 <CaleeSchedulerMonthView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -238,7 +237,7 @@
                    Day/Week/Month. YearStyle + YearLayout flow as direct parameters
                    (no cascade plumbing needed; the root is the single source of truth). *@
                 <CaleeSchedulerYearView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -272,7 +271,7 @@
                    step (which reads the cascaded SchedulerStateContainer.AgendaDays)
                    matches the rendered window. *@
                 <CaleeSchedulerAgendaView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"
@@ -308,7 +307,7 @@
                 @* FR-09c guard already enforced in OnParametersSet — Lanes / LaneKey
                    are non-null here. The null-forgiving operator is safe. *@
                 <CaleeSchedulerTimelineView TEvent="TEvent"
-                    TimeZone="@TimeZone"
+                    TimeZone="@ResolvedTimeZone"
                     Date="@CurrentDate"
                     DateChanged="@OnDateChangedFromChildAsync"
                     Events="@Events"

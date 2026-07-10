@@ -29,7 +29,8 @@ namespace Calee.Scheduler.Components;
 /// <para>
 /// <strong>Per-day count rule (matches CONTEXT.md).</strong> A day is "touched" by an
 /// event when the event's <c>[Start, End)</c> half-open range overlaps the day's
-/// <c>[midnight, next-midnight)</c> bound in the configured <see cref="TimeZone"/>. The
+/// <c>[midnight, next-midnight)</c> bound in the configured
+/// <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>. The
 /// rule is consistent across all-day and timed events — an all-day event whose
 /// <c>End</c> is the next midnight after its last day counts on every date in its span
 /// (matching how Day/Week/Month treat all-day events), and a timed multi-day event
@@ -124,7 +125,7 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
     // newly-active day cell.
     private bool _focusMovePending;
 
-    /// <summary>Inclusive start of the visible range (Jan 1 of the displayed year at midnight in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>).</summary>
+    /// <summary>Inclusive start of the visible range (Jan 1 of the displayed year at midnight in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>).</summary>
     internal DateTimeOffset YearStart { get; private set; }
 
     /// <summary>Exclusive end of the visible range (Jan 1 of the next year at midnight).</summary>
@@ -161,8 +162,8 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
     {
         var first = new DateTime(_displayedYear, 1, 1);
         var next = new DateTime(_displayedYear + 1, 1, 1);
-        YearStart = new DateTimeOffset(first, TimeZone.GetUtcOffset(first));
-        YearEndExclusive = new DateTimeOffset(next, TimeZone.GetUtcOffset(next));
+        YearStart = new DateTimeOffset(first, ResolvedTimeZone.GetUtcOffset(first));
+        YearEndExclusive = new DateTimeOffset(next, ResolvedTimeZone.GetUtcOffset(next));
     }
 
     /// <summary>
@@ -184,7 +185,7 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
             {
                 var d = gridStartDate.AddDays(i);
                 var date = DateOnly.FromDateTime(d);
-                var offset = TimeZone.GetUtcOffset(d);
+                var offset = ResolvedTimeZone.GetUtcOffset(d);
                 var startOfDay = new DateTimeOffset(d, offset);
                 cells[i] = new DayCell(
                     Date: date,
@@ -235,8 +236,8 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
             var spanEnd = ev.End > yearEnd ? yearEnd : ev.End;
 
             // Convert clamped bounds to the configured zone to derive touched dates.
-            var startInZone = TimeZoneInfo.ConvertTime(spanStart, TimeZone);
-            var endInZone = TimeZoneInfo.ConvertTime(spanEnd, TimeZone);
+            var startInZone = TimeZoneInfo.ConvertTime(spanStart, ResolvedTimeZone);
+            var endInZone = TimeZoneInfo.ConvertTime(spanEnd, ResolvedTimeZone);
 
             var firstDay = DateOnly.FromDateTime(startInZone.Date);
             // The last touched day is the day whose midnight is < end. If end is exactly
@@ -323,7 +324,7 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
     internal int DisplayedYear => _displayedYear;
 
     /// <summary>The configured time zone (test access — base property is protected).</summary>
-    internal TimeZoneInfo EffectiveTimeZone => TimeZone;
+    internal TimeZoneInfo EffectiveTimeZone => ResolvedTimeZone;
 
     /// <summary>The configured first-day-of-week (test access — base property is protected).</summary>
     internal DayOfWeek EffectiveFirstDayOfWeek => _resolvedFirstDayOfWeek;
@@ -374,7 +375,7 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
     /// <summary>True when the supplied cell is "today" in the configured time zone.</summary>
     internal bool IsTodayCell(DateOnly date)
     {
-        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone);
+        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvedTimeZone);
         return DateOnly.FromDateTime(today.Date) == date;
     }
 

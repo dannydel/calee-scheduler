@@ -99,7 +99,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     /// <summary>
     /// Whether to render a horizontal current-time indicator on today's column when
-    /// today (in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>) is within the
+    /// today (in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>) is within the
     /// visible week (FR-07). Defaults to <see langword="true"/>.
     /// </summary>
     [Parameter]
@@ -142,7 +142,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     private DayOfWeek _resolvedFirstDayOfWeek;
     private int _resolvedMaxOverlapColumns;
 
-    // The 7 visible days, each as a midnight–midnight bound in TimeZone.
+    // The 7 visible days, each as a midnight–midnight bound in ResolvedTimeZone.
     private IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> _weekDays = Array.Empty<(DateTimeOffset, DateTimeOffset)>();
 
     // Cached DayModifier results (issue #8), one entry per _weekDays column — evaluated
@@ -283,7 +283,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// </summary>
     private IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> ResolveVisibleWeekDays()
     {
-        var allDays = SchedulerViewPrimitives.ComputeWeekDays(CurrentDate, _resolvedFirstDayOfWeek, TimeZone);
+        var allDays = SchedulerViewPrimitives.ComputeWeekDays(CurrentDate, _resolvedFirstDayOfWeek, ResolvedTimeZone);
 
         if (VisibleDays is null)
         {
@@ -317,7 +317,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
             GetFilteredEvents(),
             WeekStart,
             WeekEndExclusive,
-            TimeZone,
+            ResolvedTimeZone,
             EventSplitMode.PerDay);
 
         // All-day bars: one bar per event, spanning the contiguous run of visible day
@@ -540,7 +540,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     /// <summary>
     /// Fires <see cref="SchedulerComponentBase{TEvent}.OnDayHeaderClicked"/> with the
-    /// column's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// column's midnight boundary in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.
     /// No-op while a drag is active (ADR-0006 precedence — matches every other click
     /// handler in the view).
     /// </summary>
@@ -582,11 +582,11 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <summary>Format an hour-of-day for the time gutter.</summary>
     internal static string FormatHour(int hour) => SchedulerViewPrimitives.FormatHour(hour);
 
-    /// <summary>Format an event's start/end as an accessible time range in TimeZone.</summary>
+    /// <summary>Format an event's start/end as an accessible time range in ResolvedTimeZone.</summary>
     internal string FormatEventTimeRange(ICalendarEvent ev) =>
-        SchedulerViewPrimitives.FormatEventTimeRange(ev, TimeZone);
+        SchedulerViewPrimitives.FormatEventTimeRange(ev, ResolvedTimeZone);
 
-    /// <summary>True when the supplied column index is "today in TimeZone".</summary>
+    /// <summary>True when the supplied column index is "today in ResolvedTimeZone".</summary>
     internal bool IsTodayColumn(int colIndex) =>
         colIndex >= 0 && colIndex < _weekDays.Count
         && Today.Date == _weekDays[colIndex].Start.Date;
@@ -1119,7 +1119,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var daysMoved = (targetDayDate - originDayDate).Days;
 
         var newStartDate = _keyboardMoveOriginalStart.Date.AddDays(daysMoved);
-        var newDayBase = new DateTimeOffset(newStartDate, TimeZone.GetUtcOffset(newStartDate));
+        var newDayBase = new DateTimeOffset(newStartDate, ResolvedTimeZone.GetUtcOffset(newStartDate));
         var snappedTimeOfDay = newStartLocal - targetDayStart;
         var newStart = newDayBase + snappedTimeOfDay;
         var newEnd = newStart + duration;
@@ -1253,8 +1253,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     internal string OverlapBlockAccessibleName(int colIndex, OverlapOverflowBlock block)
     {
         var weekday = WeekdayOf(colIndex);
-        var start = TimeZoneInfo.ConvertTime(block.RegionStart, TimeZone);
-        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, TimeZone);
+        var start = TimeZoneInfo.ConvertTime(block.RegionStart, ResolvedTimeZone);
+        var end = TimeZoneInfo.ConvertTime(block.RegionEnd, ResolvedTimeZone);
         return $"{block.Events.Count} more events from {start:h:mm tt} to {end:h:mm tt} on {weekday}, activate to choose";
     }
 
@@ -1530,7 +1530,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // ev.Start's own date shifted by daysMoved, in the grid time zone (ADR-0001).
         var snappedTimeOfDay = snappedOnTargetDay - targetDayStart;
         var newStartDate = ev.Start.Date.AddDays(daysMoved);
-        var newStartDayBase = new DateTimeOffset(newStartDate, TimeZone.GetUtcOffset(newStartDate));
+        var newStartDayBase = new DateTimeOffset(newStartDate, ResolvedTimeZone.GetUtcOffset(newStartDate));
         var newStart = newStartDayBase + snappedTimeOfDay;
 
         var duration = ev.End - ev.Start;

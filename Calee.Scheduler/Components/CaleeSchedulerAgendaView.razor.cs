@@ -28,7 +28,7 @@ namespace Calee.Scheduler.Components;
 /// </para>
 /// <para>
 /// <strong>Per-day grouping rule.</strong> An event belongs to the date group of its
-/// <c>Start</c> in the configured <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>
+/// <c>Start</c> in the configured <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>
 /// — except for events whose start is before the window's first day but whose end
 /// extends into the window. Those events are <em>pinned</em> to the window's first
 /// day (so the user has an anchor row for them; without the pin a multi-day event
@@ -80,7 +80,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     /// snapped to the nearest bound; the resolved value is exposed via
     /// <see cref="ResolvedAgendaDays"/> for test/diagnostic introspection). The window
     /// starts at <c>CurrentDate</c>'s date and extends <c>AgendaDays</c> calendar days
-    /// forward in the configured <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.
+    /// forward in the configured <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -132,8 +132,8 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private IJSRuntime JSRuntime { get; set; } = default!;
 
     // Resolved inputs after OnParametersSet.
-    private DateTimeOffset _windowStart;            // Inclusive start (midnight in TimeZone).
-    private DateTimeOffset _windowEndExclusive;     // Exclusive end (midnight in TimeZone).
+    private DateTimeOffset _windowStart;            // Inclusive start (midnight in ResolvedTimeZone).
+    private DateTimeOffset _windowEndExclusive;     // Exclusive end (midnight in ResolvedTimeZone).
     private DateOnly _windowFirstDate;              // The first calendar date in the window.
 
     // The grouped agenda rows. Top-level is one DateGroup per visible date; each
@@ -232,12 +232,12 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private void ComputeWindow()
     {
         var firstDate = CurrentDate.Date;
-        var firstOffset = TimeZone.GetUtcOffset(firstDate);
+        var firstOffset = ResolvedTimeZone.GetUtcOffset(firstDate);
         _windowStart = new DateTimeOffset(firstDate, firstOffset);
         _windowFirstDate = DateOnly.FromDateTime(firstDate);
 
         var endDate = firstDate.AddDays(_agendaDays);
-        var endOffset = TimeZone.GetUtcOffset(endDate);
+        var endOffset = ResolvedTimeZone.GetUtcOffset(endDate);
         _windowEndExclusive = new DateTimeOffset(endDate, endOffset);
     }
 
@@ -325,15 +325,15 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             if (effEnd <= windowStart) continue;
             if (effStart >= windowEnd) continue;
 
-            // Anchor date: usually the effective Start.Date in TimeZone; pinned to the
+            // Anchor date: usually the effective Start.Date in ResolvedTimeZone; pinned to the
             // window's first day when the effective start began before the window.
             // The *real* (unpinned) start date is kept separately so the leading-edge
             // "pinned from before" clip only shows when there is no active move pin —
             // a moved phantom whose target != real start date should not render the
             // misleading ← indicator.
-            var realStartInZone = TimeZoneInfo.ConvertTime(ev.Start, TimeZone);
+            var realStartInZone = TimeZoneInfo.ConvertTime(ev.Start, ResolvedTimeZone);
             var realStartDate = DateOnly.FromDateTime(realStartInZone.Date);
-            var effStartInZone = TimeZoneInfo.ConvertTime(effStart, TimeZone);
+            var effStartInZone = TimeZoneInfo.ConvertTime(effStart, ResolvedTimeZone);
             var effStartDate = DateOnly.FromDateTime(effStartInZone.Date);
             var anchorDate = effStartDate < windowFirstDate ? windowFirstDate : effStartDate;
             // If the calculated anchor falls outside the visible window (can happen
@@ -390,10 +390,10 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                 if (byKey != 0) return byKey;
                 return a.InputOrder.CompareTo(b.InputOrder);
             });
-            // Compute the day's [midnight, next-midnight) bounds in TimeZone for the
+            // Compute the day's [midnight, next-midnight) bounds in ResolvedTimeZone for the
             // header's drill-down callback.
             var dayDate = date.ToDateTime(TimeOnly.MinValue);
-            var dayOffset = TimeZone.GetUtcOffset(dayDate);
+            var dayOffset = ResolvedTimeZone.GetUtcOffset(dayDate);
             var dayStart = new DateTimeOffset(dayDate, dayOffset);
             var dayEnd = dayStart.AddDays(1);
             groups[g] = new DateGroup(date, dayStart, dayEnd, bucket.ToArray());
@@ -501,7 +501,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
     /// <summary>Today expressed as a <see cref="DateOnly"/> in the configured time zone.</summary>
     internal DateOnly TodayInZone =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone).Date);
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvedTimeZone).Date);
 
     /// <summary>Format the group's header label (e.g., "Tuesday, March 17").</summary>
     internal string FormatGroupHeader(DateGroup group)
@@ -527,7 +527,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     internal string FormatRowTime(EventRow row)
     {
         var ev = row.EventRef;
-        var tz = TimeZone;
+        var tz = ResolvedTimeZone;
         var startInZone = TimeZoneInfo.ConvertTime(ev.Start, tz);
         var endInZone = TimeZoneInfo.ConvertTime(ev.End, tz);
 
@@ -610,7 +610,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             return;
         }
 
-        var realStartDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ev.Start, TimeZone).Date);
+        var realStartDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ev.Start, ResolvedTimeZone).Date);
         // No-op guard (matches Month's pointer semantics): dropping back onto the
         // event's own real start date does not fire OnEventMoved.
         if (targetDate == realStartDate) return;
@@ -975,11 +975,11 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
     private static DateOnly MaxDate(DateOnly a, DateOnly b) => a > b ? a : b;
 
-    /// <summary>Midnight of the supplied date, expressed in the configured <see cref="SchedulerComponentBase{TEvent}.TimeZone"/>.</summary>
+    /// <summary>Midnight of the supplied date, expressed in the configured <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.</summary>
     private DateTimeOffset ToZonedMidnight(DateOnly date)
     {
         var midnight = date.ToDateTime(TimeOnly.MinValue);
-        return new DateTimeOffset(midnight, TimeZone.GetUtcOffset(midnight));
+        return new DateTimeOffset(midnight, ResolvedTimeZone.GetUtcOffset(midnight));
     }
 
     /// <summary>
@@ -992,7 +992,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private (DateTimeOffset Start, DateTimeOffset End) MoveToDate(
         DateTimeOffset origStart, DateTimeOffset origEnd, DateOnly targetDate)
     {
-        var realStartInZone = TimeZoneInfo.ConvertTime(origStart, TimeZone);
+        var realStartInZone = TimeZoneInfo.ConvertTime(origStart, ResolvedTimeZone);
         var realStartMidnight = ToZonedMidnight(DateOnly.FromDateTime(realStartInZone.Date));
         var timeOfDay = origStart - realStartMidnight;
         var duration = origEnd - origStart;
@@ -1040,7 +1040,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
         var windowFirstDate = WindowFirstDate;
         var windowLastDateInclusive = WindowLastDateInclusive;
-        var realStartInZone = TimeZoneInfo.ConvertTime(focusedEvent.Start, TimeZone);
+        var realStartInZone = TimeZoneInfo.ConvertTime(focusedEvent.Start, ResolvedTimeZone);
         var realStartDate = DateOnly.FromDateTime(realStartInZone.Date);
         // Cursor starts at the event's displayed anchor — for a leading-edge-pinned
         // row (real start before the window) that is windowFirstDate.

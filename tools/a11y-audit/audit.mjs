@@ -364,6 +364,119 @@ async function auditKeyboardInteractions() {
     let failures = [];
 
     try {
+        // -- Composed root: toolbar radio roving focus (issue #43) --
+        process.stdout.write('toolbar radio arrow focus (root) ... ');
+        await page.goto(BASE_URL + '/', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-region="toolbar-view-button"][aria-checked="true"]', { timeout: 10000 });
+
+        const initialToolbarState = await page.evaluate(() => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            return { checkedIndex: radios.findIndex(radio => radio.getAttribute('aria-checked') === 'true'), count: radios.length };
+        });
+        await page.locator('[data-calee-region="toolbar-view-button"][aria-checked="true"]').focus();
+        await page.keyboard.press('ArrowRight');
+        await page.waitForFunction((initial) => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            const expectedIndex = (initial.checkedIndex + 1) % initial.count;
+            return radios[expectedIndex]?.getAttribute('aria-checked') === 'true'
+                && document.activeElement === radios[expectedIndex];
+        }, initialToolbarState, { timeout: 5000 });
+        const toolbarFocus = await page.evaluate((initial) => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            const checked = radios.filter(radio => radio.getAttribute('aria-checked') === 'true');
+            const expectedIndex = (initial.checkedIndex + 1) % initial.count;
+            return {
+                pass: checked.length === 1
+                    && radios.indexOf(checked[0]) === expectedIndex
+                    && document.activeElement === checked[0]
+                    && radios.filter(radio => radio.getAttribute('tabindex') === '0').length === 1,
+                detail: `checked=${checked.length}, expected index=${expectedIndex}, actual index=${radios.indexOf(checked[0])}`,
+            };
+        }, initialToolbarState);
+        if (!toolbarFocus.pass) {
+            failures.push(`Toolbar radio arrow focus: ${toolbarFocus.detail}`);
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        process.stdout.write('toolbar radio ArrowLeft and wrap (root) ... ');
+        await page.keyboard.press('ArrowLeft');
+        await page.waitForFunction((initial) => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            return radios[initial.checkedIndex]?.getAttribute('aria-checked') === 'true'
+                && document.activeElement === radios[initial.checkedIndex];
+        }, initialToolbarState, { timeout: 5000 });
+        await page.locator('[data-calee-region="toolbar-view-button"]').first().focus();
+        await page.keyboard.press('ArrowLeft');
+        await page.waitForFunction(() => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            const last = radios.at(-1);
+            return last?.getAttribute('aria-checked') === 'true'
+                && document.activeElement === last
+                && radios.filter(radio => radio.getAttribute('tabindex') === '0').length === 1;
+        }, null, { timeout: 5000 });
+        console.log('PASS');
+
+        // -- Day view: shortcut help focus and Escape restoration (issue #41) --
+        process.stdout.write('shortcut help focus and Escape (Day) ... ');
+        await page.goto(BASE_URL + '/day', { waitUntil: 'networkidle', timeout: 15000 });
+        const initialCell = page.locator('[role="gridcell"][tabindex="0"]').first();
+        await initialCell.focus();
+        await page.keyboard.press('?');
+        await closeButton.waitFor({ state: 'visible', timeout: 5000 });
+        await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Close', null, { timeout: 5000 });
+        const helpFocus = await closeButton.evaluate(el => document.activeElement === el);
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 });
+        const helpRestored = await page.evaluate(() =>
+            document.activeElement?.matches('[role="gridcell"][tabindex="0"]'));
+        if (!helpFocus || !helpRestored) {
+            failures.push(`Shortcut help focus: close=${helpFocus}, restored=${helpRestored}`);
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        // -- Delete preserves focus for immediate undo in every affected view (issue #42) --
+        const deleteFocusRoutes = [
+            { name: 'Day', path: '/day', eventSelector: '[data-calee-region="event"]', focusSelector: '[role="gridcell"][tabindex="0"]' },
+            { name: 'Week', path: '/week', eventSelector: '[data-calee-region="event"]', focusSelector: '[role="gridcell"][tabindex="0"]' },
+            { name: 'Month', path: '/month', eventSelector: '[data-calee-region="event"]', focusSelector: '[role="gridcell"][tabindex="0"]' },
+            // Agenda's standalone demo intentionally doesn't wire delete/undo. Exercise
+            // the same component through the composed root, which supplies delete.
+            { name: 'Agenda', path: '/', viewSelector: '[data-calee-view="Agenda"]', eventSelector: '[data-calee-region="agenda-row"]', focusSelector: '[role="listitem"][tabindex="0"]', canUndo: false },
+            { name: 'Timeline', path: '/fleet', eventSelector: '[data-calee-region="event"]', focusSelector: '[role="gridcell"][tabindex="0"]' },
+        ];
+        for (const route of deleteFocusRoutes) {
+            process.stdout.write(`${route.canUndo === false ? 'delete focus' : 'delete focus and immediate undo'} (${route.name}) ... `);
+            await page.goto(BASE_URL + route.path, { waitUntil: 'networkidle', timeout: 15000 });
+            if (route.viewSelector) {
+                await page.locator(route.viewSelector).click();
+            }
+            const events = page.locator(route.eventSelector);
+            await events.first().waitFor({ state: 'visible', timeout: 5000 });
+            const countBeforeDelete = await events.count();
+            await events.first().focus();
+            await page.keyboard.press('Delete');
+            await page.waitForFunction(
+                ({ eventSelector, count }) => document.querySelectorAll(eventSelector).length < count,
+                { eventSelector: route.eventSelector, count: countBeforeDelete },
+                { timeout: 5000 });
+            await page.waitForFunction(
+                focusSelector => document.activeElement?.matches(focusSelector),
+                route.focusSelector,
+                { timeout: 5000 });
+            if (route.canUndo !== false) {
+                await page.keyboard.press('Control+Z');
+                await page.waitForFunction(
+                    ({ eventSelector, count }) => document.querySelectorAll(eventSelector).length === count,
+                    { eventSelector: route.eventSelector, count: countBeforeDelete },
+                    { timeout: 5000 });
+            }
+            console.log('PASS');
+        }
+
         // -- Year view: exactly one canonical current-date cell --
         process.stdout.write('aria-current uniqueness (Year) ... ');
         await page.goto(BASE_URL + '/year', { waitUntil: 'networkidle', timeout: 15000 });

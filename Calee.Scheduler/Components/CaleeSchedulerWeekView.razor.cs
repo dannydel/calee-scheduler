@@ -1241,10 +1241,9 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         if (typed is null) return;
 
         var changed = await TryDeleteFocusedEventAsync(ev.Id, typed);
-        // Standalone path needs its own re-render; cascade path is owned by the
-        // root's HandleRequestSelectionChangeAsync (see SchedulerComponentBase.IsStandalone).
-        if (changed && IsStandalone)
+        if (changed)
         {
+            _focusMovePending = true;
             StateHasChanged();
         }
     }

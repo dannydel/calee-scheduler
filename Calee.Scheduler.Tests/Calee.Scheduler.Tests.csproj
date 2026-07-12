@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Calee.Scheduler\Calee.Scheduler.csproj" />
+    <ProjectReference Include="..\Calee.Scheduler.Demo\Calee.Scheduler.Demo.csproj" />
   </ItemGroup>
 
   <ItemGroup>

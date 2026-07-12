@@ -20,6 +20,7 @@ namespace Calee.Scheduler.Tests;
 public class SelectionDeleteTests
 {
     private static readonly TimeZoneInfo TZ = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+    private const string ModulePath = "./_content/Calee.Scheduler/calee-scheduler.js";
     // Tuesday 2026-05-19 in America/New_York (EDT -04:00).
     private static readonly DateTimeOffset Anchor = new(2026, 5, 19, 0, 0, 0, TimeSpan.FromHours(-4));
 
@@ -147,6 +148,61 @@ public class SelectionDeleteTests
 
         Assert.Single(deletes);
         Assert.Equal("a", deletes[0].Event.Id);
+    }
+
+    [Fact]
+    public async Task Day_Accepted_Delete_Restores_Grid_Focus_And_Undo_Remains_Dispatchable()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+        var undoRequests = 0;
+        var ev = Timed("a", 9, 10);
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 18)
+            .Add(c => c.AllowDelete, true)
+            .Add(c => c.AllowUndoRedo, true)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.OnEventDeleted,
+                EventCallback.Factory.Create<EventDeleteContext>(this, _ => { }))
+            .Add(c => c.OnUndoRequested,
+                EventCallback.Factory.Create(this, () => undoRequests++)));
+
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid'] .calee-scheduler-event").KeyDown("Delete"));
+
+        var focusCall = Assert.Single(module.Invocations["focusActiveGridCell"]);
+        var container = Assert.IsType<ElementReference>(focusCall.Arguments[0]);
+        Assert.False(string.IsNullOrEmpty(container.Id));
+
+        await cut.InvokeAsync(() => cut.Find("[role='grid']").KeyDown(
+            new KeyboardEventArgs { Key = "z", MetaKey = true }));
+
+        Assert.Equal(1, undoRequests);
+    }
+
+    [Fact]
+    public async Task Day_Canceled_Delete_Does_Not_Restore_Grid_Focus()
+    {
+        using var ctx = NewContext();
+        var module = ctx.JSInterop.SetupModule(ModulePath);
+        module.SetupVoid("focusActiveGridCell", _ => true).SetVoidResult();
+        var ev = Timed("a", 9, 10);
+        var cut = ctx.Render<CaleeSchedulerDayView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.AllowDelete, true)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.OnEventDeleted,
+                EventCallback.Factory.Create<EventDeleteContext>(this, ctxArg => ctxArg.Cancel = true)));
+
+        await cut.InvokeAsync(() =>
+            cut.Find("[data-calee-region='hour-grid'] .calee-scheduler-event").KeyDown("Delete"));
+
+        Assert.Empty(module.Invocations["focusActiveGridCell"]);
     }
 
     // ───────────────────────────────────────────────────────────────────────────

@@ -862,7 +862,11 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                 if (!AllowDelete) return false;
                 if (IsDragActive) return false;
                 var changed = await TryDeleteFocusedEventAsync(focusedEventId, focusedEvent);
-                if (changed && IsStandalone) StateHasChanged();
+                if (changed)
+                {
+                    _focusMovePending = true;
+                    StateHasChanged();
+                }
                 return true;
             case SchedulerCommandIds.Cancel:
                 await HandleEscapeAsync();

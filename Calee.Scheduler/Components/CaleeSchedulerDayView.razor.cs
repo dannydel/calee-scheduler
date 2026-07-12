@@ -1101,13 +1101,12 @@ public partial class CaleeSchedulerDayView<TEvent> : SchedulerStatefulComponentB
         if (typed is null) return;
 
         var changed = await TryDeleteFocusedEventAsync(ev.Id, typed);
-        if (changed && IsStandalone)
+        if (changed)
         {
-            // Standalone path: ApplyNewSelectionAsync mutated _localSelection
-            // already; flag a re-render so the new aria-selected / CSS-class state
-            // applies on the next paint. The cascade path is owned by the root
-            // scheduler's HandleRequestSelectionChangeAsync, which StateHasChanged()s
-            // and re-pushes the cascade — calling here too would be redundant.
+            // The focused chip may disappear when the consumer handles the delete.
+            // Restore focus to the roving grid cell after that render so the next
+            // Cmd/Ctrl+Z is received by the scheduler.
+            _focusMovePending = true;
             StateHasChanged();
         }
     }

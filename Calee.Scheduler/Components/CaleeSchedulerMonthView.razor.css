@@ -315,7 +315,9 @@
     font-weight: 500;
     border-left: 3px solid var(--calee-scheduler-event-color);
     border-radius: 3px;
-    margin: 0 2px;
+    /* Keep the painted bar inside the percentage-sized grid segment. External
+       margins enlarge an absolutely positioned bar beyond that segment. */
+    margin: 0;
     cursor: pointer;
     overflow: hidden;
     pointer-events: auto;
@@ -351,6 +353,11 @@
 }
 
 .calee-scheduler-month-bar-title {
+    /* A flex item defaults to a content-sized minimum, which lets a long title
+       extend past the segment it belongs to. Allow it to shrink so its ellipsis
+       is resolved within the bar's own clipping box. */
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

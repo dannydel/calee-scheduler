@@ -11,6 +11,8 @@
 
 @using Calee.Scheduler.Contracts
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
 
 @if (IsVisible)
 {
@@ -53,6 +55,7 @@
             <div class="flex justify-end pt-4">
                 <button type="button"
                         class="px-4 py-2 text-sm font-sans bg-accent text-white rounded-md hover:bg-accent/90 transition-colors"
+                        @ref="_closeButtonRef"
                         @onclick="HandleCloseAsync">
                     Close
                 </button>
@@ -68,14 +71,97 @@
     /// <summary>Fires when the user clicks Close, the backdrop, or presses Escape.</summary>
     [Parameter] public EventCallback OnClose { get; set; }
 
-    private Task HandleCloseAsync() => OnClose.InvokeAsync();
-    private Task HandleBackdropClickAsync() => OnClose.InvokeAsync();
+    private const string FocusModulePath = "./js/dialog-focus.js";
+
+    private ElementReference _closeButtonRef;
+    private IJSObjectReference? _focusModule;
+    private bool _previouslyVisible;
+    private bool _focusOnOpen;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !_previouslyVisible)
+        {
+            _focusOnOpen = true;
+        }
+
+        _previouslyVisible = IsVisible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!IsVisible || !_focusOnOpen)
+        {
+            return;
+        }
+
+        _focusOnOpen = false;
+
+        try
+        {
+            _focusModule ??= await JS.InvokeAsync<IJSObjectReference>("import", FocusModulePath);
+            await _focusModule.InvokeAsync<bool>("captureInvokerAndFocus", _closeButtonRef);
+        }
+        catch (JSException)
+        {
+            await FocusCloseButtonAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            await FocusCloseButtonAsync();
+        }
+    }
+
+    private async Task HandleCloseAsync()
+    {
+        await RestoreInvokerFocusAsync();
+        await OnClose.InvokeAsync();
+    }
+
+    private Task HandleBackdropClickAsync() => HandleCloseAsync();
 
     private async Task HandleKeyDownAsync(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
         {
-            await OnClose.InvokeAsync();
+            await HandleCloseAsync();
+        }
+    }
+
+    private async Task RestoreInvokerFocusAsync()
+    {
+        if (_focusModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _focusModule.InvokeAsync<bool>("restoreCapturedInvoker");
+        }
+        catch (JSException)
+        {
+            // Focus restoration is best effort; closing the dialog must not depend on it.
+        }
+        catch (InvalidOperationException)
+        {
+            // The renderer may already be disposed during navigation.
+        }
+    }
+
+    private async Task FocusCloseButtonAsync()
+    {
+        try
+        {
+            await _closeButtonRef.FocusAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // The dialog can be removed before a delayed render completes.
+        }
+        catch (JSException)
+        {
+            // The browser may be navigating away while the dialog is opening.
         }
     }
 }

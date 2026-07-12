@@ -1499,13 +1499,11 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     /// <param name="focusedId">The event id the user pressed Delete on (the chip with focus).</param>
     /// <param name="focusedEvent">The resolved consumer event corresponding to <paramref name="focusedId"/>.</param>
     /// <returns>
-    /// <see langword="true"/> when the selection set actually changed as a result
-    /// (caller may want to <see cref="ComponentBase.StateHasChanged"/> for the
-    /// standalone path; the cascade path already re-renders via the root). Returns
-    /// <see langword="false"/> when the consumer canceled the delete OR the
-    /// deleted ids weren't part of the selection set OR the consumer's
-    /// <c>Events</c> list still includes them (rare — the library can't actually
-    /// prune in that case).
+    /// <see langword="true"/> when the consumer accepted the delete. Returns
+    /// <see langword="false"/> when the consumer canceled the delete or no
+    /// matching selected event could be resolved for a batch delete. Callers use
+    /// a successful result to restore scheduler focus after the focused chip is
+    /// removed from the consumer's authoritative event list.
     /// </returns>
     protected async Task<bool> TryDeleteFocusedEventAsync(string focusedId, TEvent focusedEvent)
     {
@@ -1546,7 +1544,8 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
             {
                 if (!deletedIds.Contains(id)) pruned.Add(id);
             }
-            return await ApplyNewSelectionAsync(pruned);
+            await ApplyNewSelectionAsync(pruned);
+            return true;
         }
 
         // Single-event delete path. Covers both "no selection" and "focused chip
@@ -1571,9 +1570,9 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
             {
                 if (!string.Equals(id, focusedId, StringComparison.Ordinal)) pruned.Add(id);
             }
-            return await ApplyNewSelectionAsync(pruned);
+            await ApplyNewSelectionAsync(pruned);
         }
-        return false;
+        return true;
     }
 
     /// <summary>

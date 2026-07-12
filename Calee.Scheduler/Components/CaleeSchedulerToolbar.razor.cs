@@ -3,8 +3,10 @@ using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Extensions;
 using Calee.Scheduler.Internal;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.JSInterop;
 
 namespace Calee.Scheduler.Components;
 
@@ -51,6 +53,9 @@ namespace Calee.Scheduler.Components;
 /// </remarks>
 public partial class CaleeSchedulerToolbar : ComponentBase
 {
+    private readonly Dictionary<SchedulerView, ElementReference> _viewButtonRefs = [];
+    private SchedulerView? _focusViewAfterRender;
+
     /// <summary>
     /// Default view-switcher options when neither cascaded nor explicit values are set.
     /// Includes the five unconditionally-renderable views (Day / Week / Month / Year /
@@ -343,6 +348,61 @@ public partial class CaleeSchedulerToolbar : ComponentBase
         return ViewChanged.InvokeAsync(view);
     }
 
+    /// <summary>
+    /// Applies the WAI-ARIA radio-group arrow-key convention to the view switcher.
+    /// Arrow keys wrap through the configured views, selecting the destination and
+    /// moving real browser focus only after its roving tabindex has rendered.
+    /// </summary>
+    private async Task HandleViewButtonKeyDownAsync(
+        KeyboardEventArgs e,
+        SchedulerView currentView,
+        IReadOnlyList<SchedulerView> availableViews)
+    {
+        var direction = e.Key switch
+        {
+            "ArrowLeft" => -1,
+            "ArrowRight" => 1,
+            _ => 0,
+        };
+
+        if (direction == 0 || availableViews.Count == 0)
+        {
+            return;
+        }
+
+        var currentIndex = IndexOf(availableViews, currentView);
+        if (currentIndex < 0)
+        {
+            return;
+        }
+
+        var nextIndex = (currentIndex + direction + availableViews.Count) % availableViews.Count;
+        var nextView = availableViews[nextIndex];
+
+        await HandleViewChangeAsync(nextView);
+        _focusViewAfterRender = nextView;
+    }
+
+    /// <inheritdoc/>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusViewAfterRender is not { } view
+            || !_viewButtonRefs.TryGetValue(view, out var button))
+        {
+            return;
+        }
+
+        _focusViewAfterRender = null;
+
+        try
+        {
+            await button.FocusAsync();
+        }
+        catch (JSException) { /* Browser teardown or unavailable interop. */ }
+        catch (JSDisconnectedException) { /* Circuit gone. */ }
+        catch (InvalidOperationException) { /* No JS runtime during tests/prerendering. */ }
+    }
+
     private Task DispatchDateChangeAsync(DateTimeOffset newDate)
     {
         if (State?.RequestDateChange is not null)
@@ -350,6 +410,19 @@ public partial class CaleeSchedulerToolbar : ComponentBase
             return State.RequestDateChange(newDate);
         }
         return DateChanged.InvokeAsync(newDate);
+    }
+
+    private static int IndexOf(IReadOnlyList<SchedulerView> views, SchedulerView view)
+    {
+        for (var index = 0; index < views.Count; index++)
+        {
+            if (views[index] == view)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     // ----- Static label helpers used by the .razor markup ---------------------------

@@ -109,9 +109,12 @@
                     class="@buttonClasses"
                     role="radio"
                     aria-checked="@(isActive ? "true" : "false")"
+                    tabindex="@(isActive ? "0" : "-1")"
                     data-calee-region="toolbar-view-button"
                     data-calee-view="@capturedView"
-                    @onclick="@(() => HandleViewChangeAsync(capturedView))">
+                    @ref="_viewButtonRefs[capturedView]"
+                    @onclick="@(() => HandleViewChangeAsync(capturedView))"
+                    @onkeydown="@((KeyboardEventArgs e) => HandleViewButtonKeyDownAsync(e, capturedView, effectiveAvailableViews))">
                 @ViewLabel(capturedView)
             </button>
         }

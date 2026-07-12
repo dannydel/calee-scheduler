@@ -4,6 +4,7 @@ using Calee.Scheduler.Components;
 using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Extensions;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Calee.Scheduler.Tests;
@@ -82,6 +83,84 @@ public class CaleeSchedulerToolbarTests
         monthBtn.Click();
 
         Assert.Equal(SchedulerView.Month, captured);
+    }
+
+    [Fact]
+    public async Task View_Switcher_ArrowRight_Selects_And_Focuses_Next_View()
+    {
+        using var ctx = NewContext();
+        var views = new[] { SchedulerView.Day, SchedulerView.Week, SchedulerView.Month };
+        SchedulerView? captured = null;
+        ctx.JSInterop.SetupVoid("Blazor._internal.domWrapper.focus", _ => true).SetVoidResult();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.AvailableViews, views)
+            .Add(c => c.ViewChanged, view => captured = view));
+
+        var week = cut.Find("[data-calee-view='Week']");
+        await cut.InvokeAsync(() => week.KeyDown(new KeyboardEventArgs { Key = "ArrowRight" }));
+
+        Assert.Equal(SchedulerView.Month, captured);
+        var focus = Assert.Single(
+            ctx.JSInterop.Invocations,
+            invocation => invocation.Identifier == "Blazor._internal.domWrapper.focus");
+        var focusedButton = Assert.IsType<ElementReference>(focus.Arguments[0]);
+        Assert.False(string.IsNullOrEmpty(focusedButton.Id));
+    }
+
+    [Fact]
+    public async Task View_Switcher_ArrowRight_Wraps_Last_View_To_First()
+    {
+        using var ctx = NewContext();
+        SchedulerView? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Month)
+            .Add(c => c.AvailableViews, new[] { SchedulerView.Day, SchedulerView.Week, SchedulerView.Month })
+            .Add(c => c.ViewChanged, view => captured = view));
+
+        await cut.InvokeAsync(() => cut.Find("[data-calee-view='Month']")
+            .KeyDown(new KeyboardEventArgs { Key = "ArrowRight" }));
+
+        Assert.Equal(SchedulerView.Day, captured);
+    }
+
+    [Fact]
+    public async Task View_Switcher_ArrowLeft_Wraps_First_View_To_Last()
+    {
+        using var ctx = NewContext();
+        SchedulerView? captured = null;
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Day)
+            .Add(c => c.AvailableViews, new[] { SchedulerView.Day, SchedulerView.Week, SchedulerView.Month })
+            .Add(c => c.ViewChanged, view => captured = view));
+
+        await cut.InvokeAsync(() => cut.Find("[data-calee-view='Day']")
+            .KeyDown(new KeyboardEventArgs { Key = "ArrowLeft" }));
+
+        Assert.Equal(SchedulerView.Month, captured);
+    }
+
+    [Fact]
+    public void View_Switcher_Uses_A_Single_Roving_Tab_Stop()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<CaleeSchedulerToolbar>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.View, SchedulerView.Week)
+            .Add(c => c.AvailableViews, new[] { SchedulerView.Day, SchedulerView.Week, SchedulerView.Month }));
+
+        var buttons = cut.FindAll("[data-calee-region='toolbar-view-button']");
+        var activeButton = Assert.Single(buttons, button => button.GetAttribute("tabindex") == "0");
+        Assert.Equal("Week", activeButton.TextContent.Trim());
+        Assert.All(buttons.Where(button => button.GetAttribute("tabindex") != "0"),
+            button => Assert.Equal("-1", button.GetAttribute("tabindex")));
     }
 
     [Fact]

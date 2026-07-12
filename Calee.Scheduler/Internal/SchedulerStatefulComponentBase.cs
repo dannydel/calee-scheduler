@@ -223,7 +223,7 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
     /// <param name="highlightMode">
     /// The shape of the drop-target highlight (issue #13). <c>"slot-band"</c> for
     /// Day/Week views, <c>"lane-row"</c> for Timeline view, <c>"day-cell"</c> for
-    /// Month view (deferred to issue #11). When <see langword="null"/>, no highlight.
+    /// Month view. When <see langword="null"/>, no highlight.
     /// </param>
     /// <param name="eventDurationPixels">
     /// For move: the event's height (Day/Week) or width (Timeline) in pixels (issue #13).
@@ -232,7 +232,14 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
     /// For move: the event's duration in slot-count (issue #13).
     /// </param>
     /// <param name="eventDurationDays">
-    /// For Week/Timeline move: the event's duration in calendar days (issue #13).
+    /// For Week/Timeline/Month move: the event's duration in calendar days (issue #13).
+    /// </param>
+    /// <param name="eventStartCellIndex">
+    /// For Month move: the event anchor's linear day-cell index.
+    /// </param>
+    /// <param name="ghostGroupKey">
+    /// For Month multi-row bars: the shared key identifying every rendered segment
+    /// that belongs in the drag preview.
     /// </param>
     /// <param name="columnCount">
     /// For Week view: the number of visible day columns (issue #13). Defaults to 1.
@@ -269,6 +276,8 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
         double eventDurationPixels = 0,
         int eventDurationSlots = 0,
         int eventDurationDays = 0,
+        int eventStartCellIndex = -1,
+        string? ghostGroupKey = null,
         int columnCount = 1,
         int rowCount = 1,
         int slotCount = 0)
@@ -314,9 +323,13 @@ public abstract class SchedulerStatefulComponentBase<TEvent> : SchedulerComponen
             eventDurationPixels: eventDurationPixels,
             eventDurationSlots: eventDurationSlots,
             eventDurationDays: eventDurationDays,
+            eventStartCellIndex: eventStartCellIndex,
+            ghostGroupKey: ghostGroupKey,
             columnCount: columnCount,
             rowCount: rowCount,
-            slotCount: slotCount);
+            slotCount: slotCount,
+            pointerStartViewportX: args.ClientX,
+            pointerStartViewportY: args.ClientY);
     }
 
     /// <summary>

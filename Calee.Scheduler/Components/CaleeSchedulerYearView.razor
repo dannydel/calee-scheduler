@@ -95,7 +95,10 @@
                             var cell = month.Cells[cellIndex];
                             var isTabbable = IsCellTabbable(monthIndex, cellIndex);
                             var bucket = DensityBucket(cell.Date);
-                            var isToday = IsTodayCell(cell.Date);
+                            // A date can appear in its own mini-month and in an adjacent
+                            // month's muted padding. Only the canonical in-month instance
+                            // may represent the document's current date.
+                            var isToday = cell.InMonth && IsTodayCell(cell.Date);
 
                             var cellClasses = "calee-scheduler-year-cell"
                                 + (cell.InMonth

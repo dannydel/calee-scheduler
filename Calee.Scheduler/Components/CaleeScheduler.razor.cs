@@ -612,9 +612,9 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
             case SchedulerView.Day:
                 {
                     var local = date.Date;
-                    var offset = tz.GetUtcOffset(local);
-                    var start = new DateTimeOffset(local, offset);
-                    return new SchedulerRange(start, start.AddDays(1));
+                    var start = SchedulerViewPrimitives.MidnightInZone(local, tz);
+                    var end = SchedulerViewPrimitives.MidnightInZone(local.AddDays(1), tz);
+                    return new SchedulerRange(start, end);
                 }
             case SchedulerView.Week:
                 {

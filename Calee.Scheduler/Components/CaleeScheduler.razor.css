@@ -191,6 +191,25 @@
     box-sizing: border-box;
 }
 
+/* Month events can span week rows. The outer element covers the grid and owns no
+   paint; one child per visible week segment carries the standard target treatment. */
+::deep .calee-scheduler-drop-target-highlight--month {
+    background: transparent;
+    border: 0;
+    outline: 0;
+    width: auto;
+    height: auto;
+    transition: none;
+}
+
+::deep .calee-scheduler-drop-target-highlight-segment {
+    background: var(--calee-scheduler-drop-target-bg);
+    border: 2px dashed var(--calee-scheduler-drop-target-border);
+    outline: 1px solid var(--calee-scheduler-drop-target-outline);
+    box-sizing: border-box;
+    transition: all 50ms ease-out;
+}
+
 /*
  * Keyboard move/resize phantom (issue #13). When the user has activated
  * keyboard-move or keyboard-resize mode, the event chip at the phantom position

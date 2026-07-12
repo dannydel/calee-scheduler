@@ -208,6 +208,10 @@ public class CaleeSchedulerMonthViewTests
         var row3Bar = bars.First(b => (b.GetAttribute("style") ?? "").Contains("left: 0.0000"));
         Assert.Contains("calee-scheduler-month-bar--clip-left", row3Bar.GetAttribute("class") ?? "");
         Assert.DoesNotContain("calee-scheduler-month-bar--clip-right", row3Bar.GetAttribute("class") ?? "");
+
+        Assert.Equal(new[] { "18", "21" }, bars.Select(b => b.GetAttribute("data-calee-cell-index")));
+        Assert.All(bars, b => Assert.Equal("trip", b.GetAttribute("data-calee-drag-group")));
+        Assert.Equal(2, cut.Instance.BarRefsBySegmentKey.Count);
     }
 
     [Fact]
@@ -261,6 +265,31 @@ public class CaleeSchedulerMonthViewTests
         var overflow = targetCell.QuerySelectorAll("[data-calee-region='overflow-chip']");
         Assert.Single(overflow);
         Assert.Contains("+2 more", overflow[0].TextContent);
+    }
+
+    [Fact]
+    public void Dense_Row_Grows_For_Bar_Chips_And_Overflow_Action()
+    {
+        using var ctx = NewContext();
+
+        var may15 = Edt(2026, 5, 15);
+        var events = new List<CalendarEvent>
+        {
+            AllDay("bar", Edt(2026, 5, 13), Edt(2026, 5, 16)),
+        };
+        events.AddRange(Enumerable.Range(0, 5)
+            .Select(i => Timed($"e{i}", may15.AddHours(8 + i), may15.AddHours(9 + i))));
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events)
+            .Add(c => c.MaxEventsPerDay, 3));
+
+        var targetCell = cut.FindAll("[data-calee-region='month-cell']")[19];
+        var weekRow = targetCell.ParentElement!;
+        Assert.Contains("--calee-scheduler-month-row-visible-line-count: 4", weekRow.GetAttribute("style"));
+        Assert.Equal("+3 more", targetCell.QuerySelector(".calee-scheduler-month-overflow-chip")!.TextContent.Trim());
     }
 
     [Fact]
@@ -794,6 +823,29 @@ public class CaleeSchedulerMonthViewTests
         Assert.Equal(ev.Start.AddDays(2), captured!.NewStart);
         Assert.Equal(ev.End.AddDays(2), captured.NewEnd);
         Assert.Equal(3, (captured.NewEnd - captured.NewStart).TotalDays);
+    }
+
+    [Fact]
+    public async Task DragToMove_TargetDate_FromLiveGeometry_MovesWholeCrossWeekEvent()
+    {
+        using var ctx = NewContext();
+        var ev = AllDay("launch", Edt(2026, 5, 14), Edt(2026, 5, 20));
+        EventMoveContext? captured = null;
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { ev })
+            .Add(c => c.AllowDragToMove, true)
+            .Add(c => c.OnEventMoved,
+                EventCallback.Factory.Create<EventMoveContext>(this, move => captured = move)));
+
+        var payload = new DropPayload(0, 0, 0, 0, "move", TargetKey: "2026-05-21");
+        await cut.InvokeAsync(() => cut.Instance.InvokeMoveDropForTestAsync(ev, payload));
+
+        Assert.NotNull(captured);
+        Assert.Equal(Edt(2026, 5, 21), captured!.NewStart);
+        Assert.Equal(Edt(2026, 5, 27), captured.NewEnd);
     }
 
     [Fact]

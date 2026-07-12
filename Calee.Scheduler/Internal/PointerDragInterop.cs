@@ -128,7 +128,7 @@ internal sealed class PointerDragInterop : IAsyncDisposable
     /// <param name="highlightMode">
     /// The shape of the drop-target highlight (issue #13). <c>"slot-band"</c> for
     /// Day/Week views, <c>"lane-row"</c> for Timeline view, <c>"day-cell"</c> for
-    /// Month view (deferred to issue #11). When <see langword="null"/>, no highlight
+    /// Month view. When <see langword="null"/>, no highlight
     /// is created.
     /// </param>
     /// <param name="eventDurationPixels">
@@ -138,7 +138,15 @@ internal sealed class PointerDragInterop : IAsyncDisposable
     /// For move: the event's duration in slot-count (issue #13).
     /// </param>
     /// <param name="eventDurationDays">
-    /// For Week/Timeline move: the event's duration in calendar days (issue #13).
+    /// For Week/Timeline/Month move: the event's duration in calendar days (issue #13).
+    /// </param>
+    /// <param name="eventStartCellIndex">
+    /// For Month move: the event anchor's linear day-cell index. Used with the
+    /// grabbed segment's cell index to preserve the event-wide offset.
+    /// </param>
+    /// <param name="ghostGroupKey">
+    /// For Month multi-row bars: the shared <c>data-calee-drag-group</c> value whose
+    /// rendered segments should be cloned into one drag preview.
     /// </param>
     /// <param name="columnCount">
     /// For Week view: the number of visible day columns (issue #13). Defaults to 1.
@@ -149,6 +157,11 @@ internal sealed class PointerDragInterop : IAsyncDisposable
     /// <param name="slotCount">
     /// For Day/Week/Timeline: the number of time slots (issue #13). Defaults to 0.
     /// </param>
+    /// <param name="pointerStartViewportX">
+    /// Viewport X from the originating pointer-down. Move/resize drags use this as
+    /// their exact delta origin instead of discarding the first pointer-move.
+    /// </param>
+    /// <param name="pointerStartViewportY">Viewport Y from the originating pointer-down.</param>
     public async Task StartDragAsync(
         ElementReference elementRef,
         DragMode mode,
@@ -168,9 +181,13 @@ internal sealed class PointerDragInterop : IAsyncDisposable
         double eventDurationPixels = 0,
         int eventDurationSlots = 0,
         int eventDurationDays = 0,
+        int eventStartCellIndex = -1,
+        string? ghostGroupKey = null,
         int columnCount = 1,
         int rowCount = 1,
-        int slotCount = 0)
+        int slotCount = 0,
+        double? pointerStartViewportX = null,
+        double? pointerStartViewportY = null)
     {
         if (_disposed)
         {
@@ -232,9 +249,13 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 eventDurationPixels,
                 eventDurationSlots,
                 eventDurationDays,
+                eventStartCellIndex,
+                ghostGroupKey,
                 columnCount,
                 rowCount,
                 slotCount,
+                pointerStartX = pointerStartViewportX,
+                pointerStartY = pointerStartViewportY,
             });
         }
         else if (mode == DragMode.CreateRegion)
@@ -259,9 +280,13 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 eventDurationPixels,
                 eventDurationSlots,
                 eventDurationDays,
+                eventStartCellIndex,
+                ghostGroupKey,
                 columnCount,
                 rowCount,
                 slotCount,
+                pointerStartX = pointerStartViewportX,
+                pointerStartY = pointerStartViewportY,
             });
         }
         else
@@ -280,9 +305,13 @@ internal sealed class PointerDragInterop : IAsyncDisposable
                 eventDurationPixels,
                 eventDurationSlots,
                 eventDurationDays,
+                eventStartCellIndex,
+                ghostGroupKey,
                 columnCount,
                 rowCount,
                 slotCount,
+                pointerStartX = pointerStartViewportX,
+                pointerStartY = pointerStartViewportY,
             });
         }
     }
@@ -467,12 +496,10 @@ internal enum ResizeAxis
 /// <param name="DeltaYPx">Total vertical movement from drag start, snap-applied.</param>
 /// <param name="Mode">Echoes the <see cref="DragMode"/> the drag was started with.</param>
 /// <param name="TargetKey">
-/// Issue #30 — the <c>data-calee-date</c> ("yyyy-MM-dd") of the Agenda date-group
-/// hit-tested under the pointer's live <c>clientY</c> at release; <see langword="null"/>
-/// when the drop landed outside any group or for non-Agenda drag modes. A variable-
-/// height list has no uniform pixel divisor, so this is the only reliable target
-/// signal — JS is the only side that holds the live release coordinate (C# never sees
-/// <c>pointermove</c>). Trailing + defaulted so existing positional
+/// The <c>data-calee-date</c> ("yyyy-MM-dd") resolved from live DOM geometry for
+/// variable-height Agenda groups and Month rows; <see langword="null"/> for modes
+/// that use uniform pixel inverse-mapping. JS is the only side that holds the live
+/// release coordinate (C# never sees <c>pointermove</c>). Trailing + defaulted so existing positional
 /// <c>new DropPayload(...)</c> call sites keep compiling and JSON payloads that omit
 /// the field deserialize it to <see langword="null"/>.
 /// </param>

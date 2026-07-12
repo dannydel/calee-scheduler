@@ -54,13 +54,18 @@ internal sealed class EventLayoutEngine
     /// width aligns with the reserved block slot. <see langword="null"/> (the default) disables
     /// the cap entirely, preserving pre-cap behavior.
     /// </param>
+    /// <param name="timeZone">
+    /// Grid time zone used to resolve hour-clipped wall-clock bounds across DST.
+    /// <see langword="null"/> preserves elapsed-hour behavior for low-level callers.
+    /// </param>
     public LayoutResult Layout(
         IReadOnlyList<ICalendarEvent> events,
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd,
         int? rangeStartHour = null,
         int? rangeEndHour = null,
-        int? maxColumns = null)
+        int? maxColumns = null,
+        TimeZoneInfo? timeZone = null)
     {
         if (events is null || events.Count == 0)
         {
@@ -89,10 +94,14 @@ internal sealed class EventLayoutEngine
         // will silently drift. Day/Week views always pass midnight; TimelineView Week/Month
         // passes nulls; TimelineView Day passes midnight + optional hour clip.
         var visibleStart = rangeStartHour.HasValue
-            ? rangeStart.AddHours(rangeStartHour.Value)
+            ? timeZone is null
+                ? rangeStart.AddHours(rangeStartHour.Value)
+                : SchedulerViewPrimitives.TimeInZone(rangeStart.Date, rangeStartHour.Value * 60, timeZone)
             : rangeStart;
         var visibleEnd = rangeEndHour.HasValue
-            ? rangeStart.AddHours(rangeEndHour.Value)
+            ? timeZone is null
+                ? rangeStart.AddHours(rangeEndHour.Value)
+                : SchedulerViewPrimitives.TimeInZone(rangeStart.Date, rangeEndHour.Value * 60, timeZone)
             : rangeEnd;
 
         if (visibleEnd <= visibleStart)
@@ -146,69 +155,8 @@ internal sealed class EventLayoutEngine
             return string.CompareOrdinal(a.Id, b.Id);
         });
 
-        // Sweep-line stack assignment with stack reuse. `stackEnds[i]` is the End of the
-        // event currently parked in stack slot i; a slot is reusable once its End <= current.Start.
-        var stackEnds = new List<DateTimeOffset>();
-        var stackIndices = new int[toLayOut.Count];
-
-        for (var i = 0; i < toLayOut.Count; i++)
-        {
-            var ev = toLayOut[i];
-            var assigned = -1;
-            for (var slot = 0; slot < stackEnds.Count; slot++)
-            {
-                if (stackEnds[slot] <= ev.Start)
-                {
-                    assigned = slot;
-                    stackEnds[slot] = ev.End;
-                    break;
-                }
-            }
-            if (assigned < 0)
-            {
-                assigned = stackEnds.Count;
-                stackEnds.Add(ev.End);
-            }
-            stackIndices[i] = assigned;
-        }
-
-        // StackCount per event: max concurrent count during [E.Start, E.End). Concurrency
-        // changes only at event boundaries, so we sample at E.Start plus every other event's
-        // Start that falls inside E's window.
-        var stackCounts = new int[toLayOut.Count];
-        for (var i = 0; i < toLayOut.Count; i++)
-        {
-            var e = toLayOut[i];
-            var instants = new List<DateTimeOffset> { e.Start };
-            for (var j = 0; j < toLayOut.Count; j++)
-            {
-                if (j == i) continue;
-                var other = toLayOut[j];
-                if (other.Start > e.Start && other.Start < e.End)
-                {
-                    instants.Add(other.Start);
-                }
-            }
-
-            var max = 1;
-            foreach (var t in instants)
-            {
-                var count = 0;
-                for (var k = 0; k < toLayOut.Count; k++)
-                {
-                    var o = toLayOut[k];
-                    // Active at instant t means Start <= t < End. Zero-duration events
-                    // (Start == End) count as active at their Start only — they still
-                    // need a stack slot.
-                    if (o.Start <= t && (t < o.End || (o.Start == o.End && o.Start == t)))
-                    {
-                        count++;
-                    }
-                }
-                if (count > max) max = count;
-            }
-            stackCounts[i] = max;
-        }
+        var stackIndices = AssignStackIndices(toLayOut);
+        var stackCounts = ComputeStackCounts(toLayOut);
 
         // Column cap. maxColumns null or < 2 disables the cap entirely — cap == int.MaxValue
         // means no event ever overflows and widths stay uncapped, preserving pre-cap behavior
@@ -297,6 +245,151 @@ internal sealed class EventLayoutEngine
         });
 
         return new LayoutResult(positioned, earlierOverflow, laterOverflow, blocks);
+    }
+
+    /// <summary>
+    /// Assign the lowest available stack slot to each start-sorted event. Active slots are
+    /// released by end time, while a second min-heap preserves the historical "lowest slot
+    /// wins" behavior. Complexity is O(n log n), including fully-overlapping inputs.
+    /// </summary>
+    private static int[] AssignStackIndices(IReadOnlyList<ICalendarEvent> events)
+    {
+        var active = new PriorityQueue<int, DateTimeOffset>();
+        var available = new PriorityQueue<int, int>();
+        var result = new int[events.Count];
+        var nextSlot = 0;
+
+        for (var i = 0; i < events.Count; i++)
+        {
+            var ev = events[i];
+            while (active.TryPeek(out var releasedSlot, out var end) && end <= ev.Start)
+            {
+                active.Dequeue();
+                available.Enqueue(releasedSlot, releasedSlot);
+            }
+
+            var slot = available.TryDequeue(out var reusable, out _)
+                ? reusable
+                : nextSlot++;
+            result[i] = slot;
+
+            if (ev.End > ev.Start)
+            {
+                active.Enqueue(slot, ev.End);
+            }
+            else
+            {
+                // Zero-duration and inverted events were immediately reusable in the
+                // previous stackEnds implementation because End <= Start.
+                available.Enqueue(slot, slot);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Compute each event's maximum local concurrency. Concurrency changes only at unique
+    /// start instants, so a sweep builds one count per instant and a range-max tree answers
+    /// every event window in O(log n). Overall complexity is O(n log n), replacing the
+    /// previous per-event × per-start × per-event scan.
+    /// </summary>
+    private static int[] ComputeStackCounts(IReadOnlyList<ICalendarEvent> events)
+    {
+        var eventStartIndices = new int[events.Count];
+        var startTimes = new List<DateTimeOffset>();
+        var concurrencyAtStart = new List<int>();
+        var activeEnds = new PriorityQueue<DateTimeOffset, DateTimeOffset>();
+
+        for (var i = 0; i < events.Count;)
+        {
+            var start = events[i].Start;
+            while (activeEnds.TryPeek(out _, out var end) && end <= start)
+            {
+                activeEnds.Dequeue();
+            }
+
+            var groupEnd = i;
+            var positiveDurationStarts = 0;
+            var zeroDurationStarts = 0;
+            while (groupEnd < events.Count && events[groupEnd].Start == start)
+            {
+                var eventEnd = events[groupEnd].End;
+                if (eventEnd > start) positiveDurationStarts++;
+                else if (eventEnd == start) zeroDurationStarts++;
+                groupEnd++;
+            }
+
+            var startIndex = startTimes.Count;
+            startTimes.Add(start);
+            concurrencyAtStart.Add(activeEnds.Count + positiveDurationStarts + zeroDurationStarts);
+            for (var eventIndex = i; eventIndex < groupEnd; eventIndex++)
+            {
+                eventStartIndices[eventIndex] = startIndex;
+                if (events[eventIndex].End > start)
+                {
+                    activeEnds.Enqueue(events[eventIndex].End, events[eventIndex].End);
+                }
+            }
+
+            i = groupEnd;
+        }
+
+        var rangeMax = new RangeMaxTree(concurrencyAtStart);
+        var result = new int[events.Count];
+        for (var i = 0; i < events.Count; i++)
+        {
+            var ev = events[i];
+            var left = eventStartIndices[i];
+            var rightExclusive = ev.End > ev.Start
+                ? LowerBound(startTimes, ev.End)
+                : left + 1;
+            result[i] = Math.Max(1, rangeMax.Query(left, rightExclusive));
+        }
+
+        return result;
+    }
+
+    private static int LowerBound(IReadOnlyList<DateTimeOffset> values, DateTimeOffset target)
+    {
+        var low = 0;
+        var high = values.Count;
+        while (low < high)
+        {
+            var mid = low + ((high - low) / 2);
+            if (values[mid] < target) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    private sealed class RangeMaxTree
+    {
+        private readonly int _size;
+        private readonly int[] _tree;
+
+        public RangeMaxTree(IReadOnlyList<int> values)
+        {
+            _size = 1;
+            while (_size < values.Count) _size *= 2;
+            _tree = new int[_size * 2];
+            for (var i = 0; i < values.Count; i++) _tree[_size + i] = values[i];
+            for (var i = _size - 1; i > 0; i--)
+            {
+                _tree[i] = Math.Max(_tree[i * 2], _tree[(i * 2) + 1]);
+            }
+        }
+
+        public int Query(int left, int rightExclusive)
+        {
+            var max = 0;
+            for (left += _size, rightExclusive += _size; left < rightExclusive; left /= 2, rightExclusive /= 2)
+            {
+                if ((left & 1) != 0) max = Math.Max(max, _tree[left++]);
+                if ((rightExclusive & 1) != 0) max = Math.Max(max, _tree[--rightExclusive]);
+            }
+            return max;
+        }
     }
 
     /// <summary>

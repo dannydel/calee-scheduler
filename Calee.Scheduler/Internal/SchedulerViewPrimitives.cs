@@ -102,12 +102,42 @@ internal static class SchedulerViewPrimitives
         for (var i = 0; i < 7; i++)
         {
             var d = firstDay.AddDays(i);
-            var offset = tz.GetUtcOffset(d);
-            var start = new DateTimeOffset(d, offset);
-            var end = start.AddDays(1);
+            var start = MidnightInZone(d, tz);
+            var end = MidnightInZone(d.AddDays(1), tz);
             result[i] = (start, end);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Resolve the supplied calendar date's midnight with the offset that applies on
+    /// that date in <paramref name="tz"/>. Call this independently for both ends of a
+    /// day; adding 24 hours to the first midnight is incorrect across DST transitions.
+    /// </summary>
+    /// <param name="date">Calendar date whose midnight should be resolved.</param>
+    /// <param name="tz">Grid time zone.</param>
+    /// <returns>Midnight on <paramref name="date"/> with that date's zone offset.</returns>
+    internal static DateTimeOffset MidnightInZone(DateTime date, TimeZoneInfo tz)
+    {
+        ArgumentNullException.ThrowIfNull(tz);
+        var midnight = DateTime.SpecifyKind(date.Date, DateTimeKind.Unspecified);
+        return new DateTimeOffset(midnight, tz.GetUtcOffset(midnight));
+    }
+
+    /// <summary>Resolve a <see cref="DateOnly"/> through <see cref="MidnightInZone(DateTime, TimeZoneInfo)"/>.</summary>
+    internal static DateTimeOffset MidnightInZone(DateOnly date, TimeZoneInfo tz) =>
+        MidnightInZone(date.ToDateTime(TimeOnly.MinValue), tz);
+
+    /// <summary>
+    /// Resolve wall-clock minutes from midnight on a calendar date with the offset
+    /// applicable at that local time. Values at or beyond 24 hours roll into the next
+    /// calendar day, which keeps exclusive slot ends DST-safe.
+    /// </summary>
+    internal static DateTimeOffset TimeInZone(DateTime date, int minutesFromMidnight, TimeZoneInfo tz)
+    {
+        ArgumentNullException.ThrowIfNull(tz);
+        var local = DateTime.SpecifyKind(date.Date.AddMinutes(minutesFromMidnight), DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, tz.GetUtcOffset(local));
     }
 
     /// <summary>
@@ -584,7 +614,7 @@ internal static class SchedulerViewPrimitives
         var startDate = rangeStart.Date;
         var endDate = rangeEndExclusive.Date;
         // If the end isn't exactly on midnight, round up to include the partial last day.
-        if (rangeEndExclusive > new DateTimeOffset(endDate, tz.GetUtcOffset(endDate)))
+        if (rangeEndExclusive > MidnightInZone(endDate, tz))
         {
             endDate = endDate.AddDays(1);
         }
@@ -594,9 +624,8 @@ internal static class SchedulerViewPrimitives
         for (var i = 0; i < dayCount; i++)
         {
             var d = startDate.AddDays(i);
-            var off = tz.GetUtcOffset(d);
-            var s = new DateTimeOffset(d, off);
-            var e = s.AddDays(1);
+            var s = MidnightInZone(d, tz);
+            var e = MidnightInZone(d.AddDays(1), tz);
             result[i] = (s, e);
         }
         return result;

@@ -174,6 +174,33 @@ public class CaleeSchedulerMonthViewTests
     }
 
     [Fact]
+    public void Multi_Day_Bar_Renders_Its_Title_In_Its_Own_Segment()
+    {
+        using var ctx = NewContext();
+
+        var title = "Industry conference — Chicago with a deliberately long title";
+        var multiDay = new CalendarEvent(
+            "conference",
+            title,
+            Edt(2026, 5, 13),
+            Edt(2026, 5, 16),
+            IsAllDay: true);
+        var adjacent = Timed("customer-demo", Edt(2026, 5, 16, 9), Edt(2026, 5, 16, 10));
+
+        var cut = ctx.Render<CaleeSchedulerMonthView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, new[] { multiDay, adjacent }));
+
+        var bar = Assert.Single(cut.FindAll(".calee-scheduler-month-bar"));
+        var titleElement = Assert.Single(bar.QuerySelectorAll(".calee-scheduler-month-bar-title"));
+
+        Assert.Equal(title, titleElement.TextContent);
+        Assert.Same(bar, titleElement.ParentElement);
+        Assert.Single(cut.FindAll(".calee-scheduler-month-chip"));
+    }
+
+    [Fact]
     public void Multi_Day_Event_Crossing_Week_Boundary_Renders_Separate_Bars_Per_Week_Row()
     {
         using var ctx = NewContext();

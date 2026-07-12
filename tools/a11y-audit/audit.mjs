@@ -127,6 +127,39 @@ async function checkNoPageOverflow(page) {
     return { overflow: m.scrollWidth > m.clientWidth + 1, ...m };
 }
 
+/**
+ * Issue #38 — a Month bar title must not outgrow its rendered segment. The
+ * long-title fixture is measured in the live browser because bUnit cannot
+ * resolve flex sizing, clipping, or ellipsis geometry.
+ */
+async function checkMonthBarLabelContainment(page) {
+    return page.evaluate(() => {
+        const tolerance = 0.5;
+        const failures = [...document.querySelectorAll('.calee-scheduler-month-bar')]
+            .map((bar) => {
+                const title = bar.querySelector('.calee-scheduler-month-bar-title');
+                if (!title) return 'bar has no title element';
+
+                const barRect = bar.getBoundingClientRect();
+                const titleRect = title.getBoundingClientRect();
+                const barStyle = getComputedStyle(bar);
+                const titleStyle = getComputedStyle(title);
+                const titleEscapes = titleRect.left < barRect.left - tolerance
+                    || titleRect.right > barRect.right + tolerance;
+                const hasExternalMargins = Math.abs(parseFloat(barStyle.marginLeft)) > tolerance
+                    || Math.abs(parseFloat(barStyle.marginRight)) > tolerance;
+
+                if (titleEscapes) return `title geometry escapes bar (${titleRect.left.toFixed(1)}-${titleRect.right.toFixed(1)} vs ${barRect.left.toFixed(1)}-${barRect.right.toFixed(1)})`;
+                if (titleStyle.minWidth !== '0px') return `title min-width is ${titleStyle.minWidth}, expected 0px`;
+                if (hasExternalMargins) return `bar has external horizontal margins (${barStyle.marginLeft}, ${barStyle.marginRight})`;
+                return null;
+            })
+            .filter(Boolean);
+
+        return { pass: failures.length === 0, detail: failures.join('; ') || 'all Month bar titles are contained' };
+    });
+}
+
 async function auditOnce() {
     await probeServer();
 
@@ -193,12 +226,26 @@ async function auditOnce() {
                 console.log(focusCheck.pass ? 'PASS' : `FAIL — ${focusCheck.detail}`);
             }
 
+            let monthBarLabelCheck;
+            if (route.path === '/month') {
+                process.stdout.write(`  month-bar-label-check ${route.path} ... `);
+                monthBarLabelCheck = await checkMonthBarLabelContainment(page);
+                console.log(monthBarLabelCheck.pass ? 'PASS' : `FAIL — ${monthBarLabelCheck.detail}`);
+                if (!monthBarLabelCheck.pass) {
+                    await page.screenshot({
+                        path: join(__dirname, `issue-38-month-label-failure-${vp.name}.png`),
+                        fullPage: true,
+                    });
+                }
+            }
+
             results.push({
                 viewport: vp.name,
                 route: route.path,
                 violations,
                 ...(focusCheck ? { focusCheck } : {}),
                 ...(overflowCheck ? { overflowCheck } : {}),
+                ...(monthBarLabelCheck ? { monthBarLabelCheck } : {}),
             });
         }
 
@@ -209,6 +256,7 @@ async function auditOnce() {
 
     const focusFailures = results.filter(r => r.focusCheck && !r.focusCheck.pass).length;
     const overflowFailures = results.filter(r => r.overflowCheck && r.overflowCheck.overflow).length;
+    const monthBarLabelFailures = results.filter(r => r.monthBarLabelCheck && !r.monthBarLabelCheck.pass).length;
 
     const report = {
         timestamp: new Date().toISOString(),
@@ -221,6 +269,8 @@ async function auditOnce() {
         focusFailures,
         overflowChecksRun: results.filter(r => r.overflowCheck).length,
         overflowFailures,
+        monthBarLabelChecksRun: results.filter(r => r.monthBarLabelCheck).length,
+        monthBarLabelFailures,
     };
 
     const outPath = join(__dirname, 'report.json');
@@ -229,8 +279,9 @@ async function auditOnce() {
     console.log(`total violations: ${report.totalViolations}`);
     console.log(`focus checks: ${report.focusChecksRun} run, ${focusFailures} failed`);
     console.log(`overflow checks: ${report.overflowChecksRun} run, ${overflowFailures} failed`);
+    console.log(`Month bar label checks: ${report.monthBarLabelChecksRun} run, ${monthBarLabelFailures} failed`);
 
-    if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0 || results.some(r => r.error)) {
+    if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0 || monthBarLabelFailures > 0 || results.some(r => r.error)) {
         process.exit(1);
     }
 }

@@ -101,6 +101,50 @@ public class CaleeSchedulerTimelineViewTests
     }
 
     [Fact]
+    public void Lane_Virtualization_Is_Opt_In_And_Exposes_Logical_Row_Metadata()
+    {
+        using var ctx = NewContext();
+        var lanes = Enumerable.Range(0, 25)
+            .Select(i => (ILane)LaneOf($"lane-{i}", $"Lane {i}"))
+            .ToArray();
+
+        var cut = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Lanes, lanes)
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => null))
+            .Add(c => c.ShowUnassignedRow, false)
+            .Add(c => c.EnableLaneVirtualization, true));
+
+        Assert.Equal("26", cut.Find("[role='grid']").GetAttribute("aria-rowcount"));
+        Assert.Equal(20, cut.FindAll("[data-calee-region='lane-row']").Count);
+        Assert.Equal("2", cut.Find("[data-lane-id='lane-0']").GetAttribute("aria-rowindex"));
+        Assert.NotNull(cut.Find(".calee-scheduler-timeline-virtual-spacer"));
+    }
+
+    [Fact]
+    public void Lane_Virtualization_Reenables_With_Initial_Window_After_Drag_Gating()
+    {
+        using var ctx = NewContext();
+        var lanes = Enumerable.Range(0, 25)
+            .Select(i => (ILane)LaneOf($"lane-{i}", $"Lane {i}"))
+            .ToArray();
+        var cut = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Lanes, lanes)
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => null))
+            .Add(c => c.ShowUnassignedRow, false)
+            .Add(c => c.EnableLaneVirtualization, true));
+
+        cut.Render(p => p.Add(c => c.AllowDragToMove, true));
+        Assert.Equal(25, cut.FindAll("[data-calee-region='lane-row']").Count);
+
+        cut.Render(p => p.Add(c => c.AllowDragToMove, false));
+        Assert.Equal(20, cut.FindAll("[data-calee-region='lane-row']").Count);
+    }
+
+    [Fact]
     public void LaneKey_Returning_Null_Goes_To_Unassigned_Row()
     {
         using var ctx = NewContext();

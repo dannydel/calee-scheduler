@@ -106,6 +106,13 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     public bool ShowUnassignedRow { get; set; } = true;
 
     /// <summary>
+    /// Enables vertical lane-row virtualization for TimelineView. Disabled by default
+    /// for 1.x rendering compatibility.
+    /// </summary>
+    [Parameter]
+    public bool EnableLaneVirtualization { get; set; }
+
+    /// <summary>
     /// Whether to render a vertical current-time indicator across all lane rows
     /// when today (in <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>) is in
     /// range. Only applies when <see cref="TimeScale"/> is <see cref="TimelineScale.Day"/>
@@ -194,6 +201,16 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     private ElementReference _timeAreaScrollContainer;
     private bool _scrollPending;
     private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<TimelineVirtualizationInterop>? _virtualizationRef;
+    private readonly VirtualRowHeightIndex _rowHeightIndex = new(80);
+    private int _firstMountedRow;
+    private int _lastMountedRowExclusive;
+    private bool _virtualizationRegistered;
+    private bool _wasVirtualizingRows;
+
+    // Pointer drags currently resolve lane targets from mounted browser geometry. Keep
+    // their proven full-row path until their logical height-index target resolver ships.
+    private bool CanVirtualizeRows => EnableLaneVirtualization && !AllowDragToMove && !AllowDragToCreate;
 
     // Issue #19 — set by HandleGridKeyDownAsync when an arrow key moves the roving
     // tabindex; consumed in OnAfterRenderAsync (after the tabindex swap has actually
@@ -353,6 +370,16 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             CaptureTimelineLayoutInputs();
         }
 
+        if (!CanVirtualizeRows)
+        {
+            SetMountedRange(0, _rows.Length);
+        }
+        else if (!_wasVirtualizingRows)
+        {
+            SetMountedRange(0, Math.Min(_rows.Length, InitialMountedRowCount));
+        }
+        _wasVirtualizingRows = CanVirtualizeRows;
+
         // FR-23.
         if (_lastRangeStart != _rangeStart || _lastRangeEnd != _rangeEndExclusive)
         {
@@ -441,11 +468,55 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         }
 
         _rows = rowList.ToArray();
+        _rowHeightIndex.Reset(_rows.Length);
+        if (!CanVirtualizeRows)
+        {
+            SetMountedRange(0, _rows.Length);
+        }
+        else if (_lastMountedRowExclusive == 0)
+        {
+            SetMountedRange(0, Math.Min(_rows.Length, InitialMountedRowCount));
+        }
+        else
+        {
+            SetMountedRange(_firstMountedRow, _lastMountedRowExclusive);
+        }
 
         // Clamp focus to current row count.
         if (_focusedRowIndex >= _rows.Length) _focusedRowIndex = Math.Max(0, _rows.Length - 1);
 
         PruneEventRefs();
+    }
+
+    private const int InitialMountedRowCount = 20;
+    private const int VirtualRowOverscan = 4;
+
+    internal int FirstMountedRow => CanVirtualizeRows ? _firstMountedRow : 0;
+
+    internal int LastMountedRowExclusive => CanVirtualizeRows ? _lastMountedRowExclusive : _rows.Length;
+
+    internal bool RenderVirtualSpacers => CanVirtualizeRows
+        && (FirstMountedRow > 0 || LastMountedRowExclusive < _rows.Length);
+
+    internal double TopSpacerHeight => RenderVirtualSpacers ? _rowHeightIndex.PrefixSum(FirstMountedRow) : 0;
+
+    internal double BottomSpacerHeight => RenderVirtualSpacers
+        ? _rowHeightIndex.TotalHeight - _rowHeightIndex.PrefixSum(LastMountedRowExclusive)
+        : 0;
+
+    private void SetMountedRange(int first, int lastExclusive)
+    {
+        var count = _rows.Length;
+        _firstMountedRow = Math.Clamp(first, 0, count);
+        _lastMountedRowExclusive = Math.Clamp(Math.Max(_firstMountedRow, lastExclusive), 0, count);
+    }
+
+    private void EnsureMountedForFocus(int rowIndex)
+    {
+        if (!CanVirtualizeRows || rowIndex >= FirstMountedRow && rowIndex < LastMountedRowExclusive) return;
+        SetMountedRange(
+            Math.Max(0, rowIndex - VirtualRowOverscan),
+            Math.Min(_rows.Length, rowIndex + VirtualRowOverscan + 1));
     }
 
     private bool TimelineLayoutInputsChanged()
@@ -630,6 +701,28 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             if (TimeScale == TimelineScale.Day) _scrollPending = true;
         }
 
+        if (_jsModule is not null)
+        {
+            if (CanVirtualizeRows && !_virtualizationRegistered)
+            {
+                try
+                {
+                    _virtualizationRef ??= DotNetObjectReference.Create(new TimelineVirtualizationInterop(this));
+                    await _jsModule.InvokeVoidAsync(
+                        "registerTimelineVirtualization", _timeAreaScrollContainer, _virtualizationRef);
+                    _virtualizationRegistered = true;
+                }
+                catch (JSException) { /* Non-fatal; no JS environment. */ }
+                catch (InvalidOperationException) { /* No JS runtime in tests. */ }
+            }
+            else if (!CanVirtualizeRows && _virtualizationRegistered)
+            {
+                try { await _jsModule.InvokeVoidAsync("unregisterTimelineVirtualization", _timeAreaScrollContainer); }
+                catch (JSException) { /* Best-effort cleanup. */ }
+                _virtualizationRegistered = false;
+            }
+        }
+
         if (_scrollPending && _jsModule is not null && TimeScale == TimelineScale.Day)
         {
             _scrollPending = false;
@@ -650,6 +743,11 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         if (_focusMovePending && _jsModule is not null)
         {
             _focusMovePending = false;
+            if (CanVirtualizeRows)
+            {
+                try { await _jsModule.InvokeVoidAsync("suspendTimelineVirtualization", _timeAreaScrollContainer); }
+                catch (JSException) { /* Non-fatal; no JS environment. */ }
+            }
             await SchedulerViewPrimitives.TryFocusActiveGridCellAsync(_jsModule, _timeAreaScrollContainer);
         }
     }
@@ -657,6 +755,13 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// <inheritdoc/>
     public override async ValueTask DisposeAsync()
     {
+        if (_jsModule is not null && _virtualizationRegistered)
+        {
+            try { await _jsModule.InvokeVoidAsync("unregisterTimelineVirtualization", _timeAreaScrollContainer); }
+            catch (JSDisconnectedException) { /* Circuit gone. */ }
+            catch (JSException) { /* Best-effort cleanup. */ }
+        }
+        _virtualizationRef?.Dispose();
         if (_jsModule is not null)
         {
             try { await _jsModule.DisposeAsync(); }
@@ -664,6 +769,63 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             catch (JSException) { /* Best-effort cleanup. */ }
         }
         await base.DisposeAsync();
+    }
+
+    private async Task<TimelineVirtualizationResult> UpdateTimelineVirtualViewportAsync(TimelineVirtualViewport viewport)
+    {
+        if (!CanVirtualizeRows || _rows.Length == 0)
+        {
+            return new TimelineVirtualizationResult(false, 0);
+        }
+
+        var anchorRow = _rowHeightIndex.FindRow(viewport.ScrollTop);
+        var anchorOffset = viewport.ScrollTop - _rowHeightIndex.PrefixSum(anchorRow);
+        var heightsChanged = false;
+        if (viewport.RowHeights is not null)
+        {
+            foreach (var measurement in viewport.RowHeights)
+            {
+                heightsChanged |= _rowHeightIndex.Update(measurement.RowIndex, measurement.Height);
+            }
+        }
+
+        var adjustment = heightsChanged
+            ? _rowHeightIndex.PrefixSum(anchorRow) + anchorOffset - viewport.ScrollTop
+            : 0;
+        var range = viewport.IsBounded
+            ? _rowHeightIndex.GetRange(viewport.ScrollTop + adjustment, viewport.ClientHeight, VirtualRowOverscan)
+            : (First: 0, LastExclusive: _rows.Length);
+        var changed = range.First != FirstMountedRow || range.LastExclusive != LastMountedRowExclusive;
+        if (changed)
+        {
+            SetMountedRange(range.First, range.LastExclusive);
+            await InvokeAsync(StateHasChanged);
+        }
+
+        return new TimelineVirtualizationResult(changed, adjustment);
+    }
+
+    private sealed class TimelineVirtualViewport
+    {
+        public bool IsBounded { get; set; }
+        public double ScrollTop { get; set; }
+        public double ClientHeight { get; set; }
+        public IReadOnlyList<TimelineVirtualRowMeasurement>? RowHeights { get; set; }
+    }
+
+    private sealed class TimelineVirtualRowMeasurement
+    {
+        public int RowIndex { get; set; }
+        public double Height { get; set; }
+    }
+
+    private sealed record TimelineVirtualizationResult(bool RenderedRangeChanged, double ScrollAdjustment);
+
+    private sealed class TimelineVirtualizationInterop(CaleeSchedulerTimelineView<TEvent> owner)
+    {
+        [JSInvokable]
+        public Task<TimelineVirtualizationResult> UpdateTimelineVirtualViewport(TimelineVirtualViewport viewport) =>
+            owner.UpdateTimelineVirtualViewportAsync(viewport);
     }
 
     // ----- Internal accessors used by the .razor markup -------------------------------
@@ -964,12 +1126,14 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
                 if (_rows.Length > 0)
                 {
                     _focusedRowIndex = Math.Min(_rows.Length - 1, _focusedRowIndex + 1);
+                    EnsureMountedForFocus(_focusedRowIndex);
                     _focusMovePending = true;
                     StateHasChanged();
                 }
                 break;
             case "ArrowUp":
                 _focusedRowIndex = Math.Max(0, _focusedRowIndex - 1);
+                EnsureMountedForFocus(_focusedRowIndex);
                 _focusMovePending = true;
                 StateHasChanged();
                 break;
@@ -1226,6 +1390,7 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
 
         var newTimeIdx = Math.Clamp(origTimeIdx + _keyboardMovePhantomTimeOffset, 0, timeAxisMax);
         var newLaneIdx = Math.Clamp(origLaneIdx + _keyboardMovePhantomLaneOffset, 0, _rows.Length - 1);
+        EnsureMountedForFocus(newLaneIdx);
         var newLaneId = _rows[newLaneIdx].LaneId;
 
         DateTimeOffset newStart;

@@ -113,6 +113,7 @@ main {
 .calee-demo-scheduler-frame > .calee-scheduler-week-view,
 .calee-demo-scheduler-frame > .calee-scheduler-day-view,
 .calee-demo-scheduler-frame > .calee-scheduler-month-view,
+.calee-demo-scheduler-frame > .calee-scheduler-timeline,
 .calee-demo-scheduler-frame > .calee-scheduler-resource-view {
     height: 680px;
 }

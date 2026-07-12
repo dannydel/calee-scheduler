@@ -424,10 +424,9 @@ async function auditKeyboardInteractions() {
         const initialCell = page.locator('[role="gridcell"][tabindex="0"]').first();
         await initialCell.focus();
         await page.keyboard.press('?');
-        const closeButton = page.getByRole('button', { name: 'Close' });
         await closeButton.waitFor({ state: 'visible', timeout: 5000 });
         await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Close', null, { timeout: 5000 });
-        const helpFocus = true;
+        const helpFocus = await closeButton.evaluate(el => document.activeElement === el);
         await page.keyboard.press('Escape');
         await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 });
         const helpRestored = await page.evaluate(() =>

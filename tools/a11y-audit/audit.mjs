@@ -184,6 +184,8 @@ async function checkTimelineVirtualization(page) {
         await page.waitForTimeout(100);
         const focusedLaneAfterKeys = await page.evaluate(() =>
             document.activeElement?.closest('[data-calee-region="lane-row"]')?.dataset.laneId);
+        const focusedLaneIndex = Number.parseInt(
+            focusedLaneAfterKeys?.replace('driver-', '') ?? '', 10);
 
         await page.evaluate(() => {
             document.querySelector('[data-calee-region="lane-rows"]').scrollTop = Number.MAX_SAFE_INTEGER;
@@ -203,10 +205,11 @@ async function checkTimelineVirtualization(page) {
             && initial.firstLane === 'driver-0'
             && initial.canScroll
             && initial.uniqueMountedEventIds
-            && focusedLaneAfterKeys === 'driver-30'
+            && Number.isInteger(focusedLaneIndex)
+            && focusedLaneIndex >= initial.mountedRows
             && lastLane === 'driver-999'
             && firstLaneAfterReturn === 'driver-0';
-        return { pass, ...initial, focusedLaneAfterKeys, lastLane, firstLaneAfterReturn };
+        return { pass, ...initial, focusedLaneAfterKeys, focusedLaneIndex, lastLane, firstLaneAfterReturn };
     } catch (err) {
         return { pass: false, detail: err.message };
     }

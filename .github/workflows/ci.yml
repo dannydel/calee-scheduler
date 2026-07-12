@@ -61,6 +61,15 @@ jobs:
           --logger "trx;LogFileName=test-results.trx"
           --results-directory TestResults/
 
+      - name: Performance regression guard
+        env:
+          CALEE_LAYOUT_MEDIAN_THRESHOLD_MS: '100'
+        run: >
+          dotnet test Calee.Scheduler.Tests/Calee.Scheduler.Tests.csproj
+          --configuration Release
+          --no-build
+          --filter "Category=Performance"
+
       - name: Pack
         run: >
           dotnet pack Calee.Scheduler/Calee.Scheduler.csproj

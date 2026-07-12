@@ -346,6 +346,11 @@ function _cleanup(handle) {
         state.highlight.parentNode.removeChild(state.highlight);
     }
 
+    // Restore grouped Month bar segments that yielded to the composite ghost.
+    for (const source of state.groupedDragSources || []) {
+        source.element.style.opacity = source.opacity;
+    }
+
     // Restore the body cursor.
     document.body.style.cursor = state.priorBodyCursor ?? '';
 }
@@ -430,8 +435,35 @@ function _updateLaneRowHighlight(state, dxSnapped, dySnapped, originalRect) {
 }
 
 /**
- * Update the drop-target highlight for day-cell mode (Month view).
- * Deferred to issue #11 (Month view drag-to-move); no-ops in the meantime.
+ * Resolve the nearest Month day cell to a viewport point. Containment wins;
+ * outside the grid, the nearest cell edge wins so preview and drop clamp together.
+ */
+function _nearestMonthCell(cells, x, y) {
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const cell of cells) {
+        const rect = cell.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            return cell;
+        }
+
+        const dx = Math.max(rect.left - x, 0, x - rect.right);
+        const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+        const distance = dx * dx + dy * dy;
+        if (distance < nearestDistance) {
+            nearest = cell;
+            nearestDistance = distance;
+        }
+    }
+    return nearest;
+}
+
+/**
+ * Update the drop-target highlight for day-cell mode (Month view). Month rows
+ * can have different heights, so targeting is based on the rendered cell rects,
+ * not grid-height / six. A multi-day event is split into one highlight segment
+ * per week row, matching the bar layout.
  *
  * @param {object} state The drag state.
  * @param {number} dxSnapped Snapped horizontal delta in pixels.
@@ -441,25 +473,50 @@ function _updateLaneRowHighlight(state, dxSnapped, dySnapped, originalRect) {
 function _updateDayCellHighlight(state, dxSnapped, dySnapped, originalRect) {
     if (!state.highlight || !state.highlightContainer) return;
 
-    var gridRect = state.highlightContainer.getBoundingClientRect();
-    var firstWeekRow = state.highlightContainer.querySelector('.calee-scheduler-month-week-row');
-    if (!firstWeekRow) return;
+    const cells = [...state.highlightContainer.querySelectorAll('[data-calee-region="month-cell"]')];
+    const sourceCellIndex = Number.parseInt(state.sourceCellIndex, 10);
+    const eventStartCellIndex = Number.parseInt(state.eventStartCellIndex, 10);
+    if (cells.length === 0 || !Number.isInteger(sourceCellIndex) || !Number.isInteger(eventStartCellIndex)) return;
 
-    var headerHeight = firstWeekRow.getBoundingClientRect().top - gridRect.top;
-    var gridContentHeight = gridRect.height - headerHeight;
-    var cellWidth = gridRect.width / state.columnCount;
-    var cellHeight = gridContentHeight / state.rowCount;
+    // Use the translated segment's leading edge. Its center would incorrectly
+    // anchor a bar that spans several columns to a middle day.
+    const targetX = originalRect.left + dxSnapped + Math.min(4, originalRect.width / 2);
+    const targetY = originalRect.top + dySnapped + originalRect.height / 2;
+    const grabbedTarget = _nearestMonthCell(cells, targetX, targetY);
+    if (!grabbedTarget) return;
 
-    var targetLeft = (originalRect.left - gridRect.left) + dxSnapped;
-    var targetTop = (originalRect.top - gridRect.top) + dySnapped - headerHeight;
+    const grabbedTargetIndex = Number.parseInt(grabbedTarget.dataset.caleeCellIndex, 10);
+    if (!Number.isInteger(grabbedTargetIndex)) return;
 
-    var colIndex = Math.max(0, Math.min(state.columnCount - 1, Math.round(targetLeft / cellWidth)));
-    var rowIndex = Math.max(0, Math.min(state.rowCount - 1, Math.round(targetTop / cellHeight)));
+    const targetStartIndex = Math.max(0, Math.min(cells.length - 1,
+        eventStartCellIndex + grabbedTargetIndex - sourceCellIndex));
+    const durationDays = Math.max(1, state.eventDurationDays || 1);
+    const targetEndIndex = Math.min(cells.length - 1, targetStartIndex + durationDays - 1);
+    const cellsByIndex = new Map(cells.map(cell => [Number.parseInt(cell.dataset.caleeCellIndex, 10), cell]));
+    const gridRect = state.highlightContainer.getBoundingClientRect();
 
-    state.highlight.style.left = (colIndex * cellWidth) + 'px';
-    state.highlight.style.top = (headerHeight + rowIndex * cellHeight) + 'px';
-    state.highlight.style.width = cellWidth + 'px';
-    state.highlight.style.height = cellHeight + 'px';
+    state.highlight.replaceChildren();
+    let cursor = targetStartIndex;
+    while (cursor <= targetEndIndex) {
+        const rowEnd = Math.min(targetEndIndex, Math.floor(cursor / state.columnCount) * state.columnCount + state.columnCount - 1);
+        const first = cellsByIndex.get(cursor);
+        const last = cellsByIndex.get(rowEnd);
+        if (!first || !last) break;
+
+        const firstRect = first.getBoundingClientRect();
+        const lastRect = last.getBoundingClientRect();
+        const segment = document.createElement('div');
+        segment.classList.add('calee-scheduler-drop-target-highlight-segment');
+        segment.style.position = 'absolute';
+        segment.style.left = (firstRect.left - gridRect.left + state.highlightContainer.scrollLeft) + 'px';
+        segment.style.top = (firstRect.top - gridRect.top + state.highlightContainer.scrollTop) + 'px';
+        segment.style.width = (lastRect.right - firstRect.left) + 'px';
+        segment.style.height = firstRect.height + 'px';
+        state.highlight.appendChild(segment);
+        cursor = rowEnd + 1;
+    }
+
+    state.lastHighlightCell = cellsByIndex.get(targetStartIndex) || null;
     state.highlight.style.display = '';
 }
 
@@ -554,10 +611,14 @@ function _updateAgendaGroupHighlight(state) {
  * @param {'slot-band'|'lane-row'|'day-cell'|'agenda-group'} [options.highlightMode] The shape of the highlight (issue #13; 'agenda-group' added in issue #30).
  * @param {number} [options.eventDurationPixels] For move: the event's height/width in pixels (issue #13).
  * @param {number} [options.eventDurationSlots] For move: the event's duration in slots (issue #13).
- * @param {number} [options.eventDurationDays] For Week/Timeline move: the event's duration in days (issue #13).
+ * @param {number} [options.eventDurationDays] For Week/Timeline/Month move: the event's duration in days (issue #13).
+ * @param {number} [options.eventStartCellIndex] For Month move: linear cell index of the event anchor.
+ * @param {string} [options.ghostGroupKey] For Month bars: data-calee-drag-group value whose segments form one ghost.
  * @param {number} [options.columnCount] For Week view: the number of visible day columns (issue #13).
  * @param {number} [options.rowCount] For Timeline view: the number of lane rows (issue #13).
  * @param {number} [options.slotCount] For Day/Week/Timeline: the number of time slots (issue #13).
+ * @param {number} [options.pointerStartX] Viewport X from pointer-down for exact move/resize deltas.
+ * @param {number} [options.pointerStartY] Viewport Y from pointer-down for exact move/resize deltas.
  * @returns {string} A handle the C# side stores to call abortDrag.
  */
 export function startDrag(elementRef, options) {
@@ -577,9 +638,15 @@ export function startDrag(elementRef, options) {
     const eventDurationPixels = options.eventDurationPixels || 0;
     const eventDurationSlots = options.eventDurationSlots || 0;
     const eventDurationDays = options.eventDurationDays || 0;
+    const eventStartCellIndex = options.eventStartCellIndex ?? -1;
+    const ghostGroupKey = options.ghostGroupKey || null;
     const columnCount = options.columnCount || 1;
     const rowCount = options.rowCount || 1;
     const slotCount = options.slotCount || 0;
+    const hasPointerStart = typeof options.pointerStartX === 'number'
+        && typeof options.pointerStartY === 'number';
+    const pointerStartX = hasPointerStart ? options.pointerStartX : null;
+    const pointerStartY = hasPointerStart ? options.pointerStartY : null;
     if (mode !== 'move' && mode !== 'resize-end' && mode !== 'create-region') {
         throw new Error(`startDrag: unknown mode '${mode}'.`);
     }
@@ -623,6 +690,8 @@ export function startDrag(elementRef, options) {
     // pointer-down position with zero initial extent along the configured axis;
     // mid-drag we grow it along that axis as the cursor moves.
     let ghost;
+    let groupedGhostParts = [];
+    let groupedDragSources = [];
     if (mode === 'create-region') {
         // Fresh ghost; sits at the anchor with cross-axis matching `elementRef`'s
         // extent (or one slice of it when crossAxisIndex + crossAxisDivisions are
@@ -664,7 +733,41 @@ export function startDrag(elementRef, options) {
             ghost.style.width = '1px';
             ghost.style.height = crossSize + 'px';
         }
-    } else {
+    } else if (ghostGroupKey && highlightContainer) {
+        const groupElements = [...highlightContainer.querySelectorAll('[data-calee-drag-group]')]
+            .filter(element => element.dataset.caleeDragGroup === ghostGroupKey);
+        if (groupElements.length > 1) {
+            groupedDragSources = groupElements.map(element => ({
+                element,
+                opacity: element.style.opacity,
+            }));
+            ghost = document.createElement('div');
+            ghost.style.position = 'fixed';
+            ghost.style.left = '0';
+            ghost.style.top = '0';
+            ghost.style.width = '0';
+            ghost.style.height = '0';
+            ghost.style.overflow = 'visible';
+            ghost.style.transform = 'translate(0px, 0px)';
+
+            for (const element of groupElements) {
+                const partRect = element.getBoundingClientRect();
+                const part = element.cloneNode(true);
+                part.removeAttribute('id');
+                part.style.position = 'absolute';
+                part.style.left = partRect.left + 'px';
+                part.style.top = partRect.top + 'px';
+                part.style.width = partRect.width + 'px';
+                part.style.height = partRect.height + 'px';
+                part.style.margin = '0';
+                part.style.pointerEvents = 'none';
+                ghost.appendChild(part);
+                groupedGhostParts.push(part);
+            }
+        }
+    }
+
+    if (!ghost) {
         ghost = elementRef.cloneNode(true);
         ghost.removeAttribute('id');
         ghost.style.position = 'fixed';
@@ -676,6 +779,8 @@ export function startDrag(elementRef, options) {
         ghost.style.transform = 'translate(0px, 0px)';
     }
     ghost.classList.add(ghostClass || 'calee-scheduler-drag-ghost');
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.inert = true;
     ghost.style.margin = '0';
     ghost.style.pointerEvents = 'none';
     // Visual defaults — applied inline so they survive Blazor's CSS isolation
@@ -687,8 +792,18 @@ export function startDrag(elementRef, options) {
     ghost.style.opacity = '0.7';
     ghost.style.zIndex = '1000';
     ghost.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
+    for (const part of groupedGhostParts) {
+        part.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
+    }
     ghost.style.transition = 'none';
     document.body.appendChild(ghost);
+
+    // A composite ghost already represents the whole cross-week event. Hide the
+    // original segments without removing them from layout so the event does not
+    // appear to occupy three or four rows during the drag.
+    for (const source of groupedDragSources) {
+        source.element.style.opacity = '0';
+    }
 
     // Build the highlight element (issue #13). The highlight is appended to the grid
     // container (not <body>) so it scrolls with the grid and stays in the same
@@ -698,6 +813,10 @@ export function startDrag(elementRef, options) {
     if (highlightContainer && highlightMode) {
         highlight = document.createElement('div');
         highlight.classList.add('calee-scheduler-drop-target-highlight');
+        if (highlightMode === 'day-cell') {
+            highlight.classList.add('calee-scheduler-drop-target-highlight--month');
+            highlight.style.inset = '0';
+        }
         highlight.style.position = 'absolute';
         highlight.style.pointerEvents = 'none';
         highlightContainer.appendChild(highlight);
@@ -741,15 +860,18 @@ export function startDrag(elementRef, options) {
         eventDurationPixels,
         eventDurationSlots,
         eventDurationDays,
+        eventStartCellIndex,
+        sourceCellIndex: elementRef.dataset.caleeCellIndex ?? -1,
         columnCount,
         rowCount,
         slotCount,
-        // For create-region the anchor IS the pointer-down position (supplied by C#).
-        // For move/resize-end the anchor is the source element's center; the first
-        // pointermove re-binds startX/Y to the real cursor position so the delta math
-        // is exact regardless of where inside the chip the user pressed.
-        startX: mode === 'create-region' ? anchorX : (rect.left + rect.width / 2),
-        startY: mode === 'create-region' ? anchorY : (rect.top + rect.height / 2),
+        groupedDragSources,
+        // C# supplies the actual pointer-down viewport coordinates for move/resize.
+        // The element center remains a compatibility fallback for direct callers.
+        startX: mode === 'create-region' ? anchorX
+            : (hasPointerStart ? pointerStartX : rect.left + rect.width / 2),
+        startY: mode === 'create-region' ? anchorY
+            : (hasPointerStart ? pointerStartY : rect.top + rect.height / 2),
         // For snap-on-drop, the snap is applied to the *delta*. The ghost's
         // visual position during the drag is unsnapped (per plan §5.1 #4).
         snapPixelsX: snapPixelsX || 0,
@@ -791,31 +913,23 @@ export function startDrag(elementRef, options) {
         lastPointerX: mode === 'create-region' ? anchorX : (rect.left + rect.width / 2),
         lastPointerY: mode === 'create-region' ? anchorY : (rect.top + rect.height / 2),
         lastHighlightGroup: null,
-        // Track whether startX/Y has been initialized from the first move event.
-        // For create-region we treat the anchor as already-initialized (the
-        // pointerdown position was passed in directly); other modes use the
-        // first pointermove.
-        startInitialized: mode === 'create-region',
+        // Compatibility callers that omit pointerStartX/Y still initialize on the
+        // first move. Production component paths always supply the pointer-down origin.
+        startInitialized: mode === 'create-region' || hasPointerStart,
     };
     _activeDrags.set(handle, state);
 
     const onPointerMove = (ev) => {
-        // First move: record the actual pointer start position + bind pointer capture.
-        // Skipped for create-region — its anchor was supplied at start time.
+        // Compatibility fallback: callers without pointer-down coordinates initialize
+        // their origin here. Production paths already have an exact origin.
         if (!state.startInitialized) {
             state.startInitialized = true;
             state.startX = ev.clientX;
             state.startY = ev.clientY;
-            state.pointerId = ev.pointerId;
-            if (typeof elementRef.setPointerCapture === 'function') {
-                try {
-                    elementRef.setPointerCapture(ev.pointerId);
-                    state.captureTarget = elementRef;
-                } catch { /* best-effort */ }
-            }
-        } else if (state.mode === 'create-region' && state.pointerId === -1) {
-            // create-region: bind pointer capture on the first move so the OS keeps
-            // routing events to us even when the cursor leaves elementRef's hit-box.
+        }
+
+        // Bind pointer capture on the first move for every drag mode.
+        if (state.pointerId === -1) {
             state.pointerId = ev.pointerId;
             if (typeof elementRef.setPointerCapture === 'function') {
                 try {
@@ -943,6 +1057,9 @@ export function startDrag(elementRef, options) {
             }
             matched = matched || state.lastHighlightGroup || null;
             payload.targetKey = matched ? matched.getAttribute('data-calee-date') : null;
+        } else if (state.highlightMode === 'day-cell') {
+            payload.targetKey = state.lastHighlightCell
+                ? state.lastHighlightCell.getAttribute('data-calee-date') : null;
         }
 
         const ref = state.dotnetRef;

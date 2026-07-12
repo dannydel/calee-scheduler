@@ -163,6 +163,11 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
 
     // Per-row layout (parallel to the row list, including the trailing unassigned row when shown).
     private RowLayout[] _rows = Array.Empty<RowLayout>();
+    private EventGeometrySnapshot<TEvent>? _layoutEventSnapshot;
+    private (DateTimeOffset Start, DateTimeOffset End, TimelineScale Scale,
+        int StartHour, int EndHour, int SlotMinutes, int MaxOverlapColumns,
+        bool ShowUnassignedRow, TimeZoneInfo TimeZone)? _lastLayoutInputs;
+    private LaneInput[] _lastLayoutLanes = Array.Empty<LaneInput>();
 
     // Per-row VisibleEventSets own their own Id→TEvent lookups (see RowLayout.Set);
     // click handlers route through TypedFor, which walks rows. Lanes are bounded and
@@ -306,9 +311,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             case TimelineScale.Day:
                 {
                     var localDate = CurrentDate.Date;
-                    var offset = ResolvedTimeZone.GetUtcOffset(localDate);
-                    _rangeStart = new DateTimeOffset(localDate, offset);
-                    _rangeEndExclusive = _rangeStart.AddDays(1);
+                    _rangeStart = SchedulerViewPrimitives.MidnightInZone(localDate, ResolvedTimeZone);
+                    _rangeEndExclusive = SchedulerViewPrimitives.MidnightInZone(localDate.AddDays(1), ResolvedTimeZone);
                     _dayBounds = new[] { (_rangeStart, _rangeEndExclusive) };
                     break;
                 }
@@ -339,7 +343,15 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         // pins.
         ClearAcknowledgedPins();
 
-        ComputeLayout();
+        var filtered = GetFilteredEvents();
+        if (TimelineLayoutInputsChanged()
+            || _layoutEventSnapshot is null
+            || !_layoutEventSnapshot.Matches(filtered, LaneKey))
+        {
+            ComputeLayout(filtered);
+            _layoutEventSnapshot = EventGeometrySnapshot<TEvent>.Capture(filtered, LaneKey);
+            CaptureTimelineLayoutInputs();
+        }
 
         // FR-23.
         if (_lastRangeStart != _rangeStart || _lastRangeEnd != _rangeEndExclusive)
@@ -357,9 +369,9 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// so multi-day timed events stay as a single block per FR-09e). The engine runs once
     /// per row using horizontal-time interpretation.
     /// </summary>
-    private void ComputeLayout()
+    private void ComputeLayout(IReadOnlyList<TEvent>? filteredEvents = null)
     {
-        var filtered = GetFilteredEvents();
+        var filtered = filteredEvents ?? GetFilteredEvents();
 
         // Bucket events by lane Id. Events whose LaneKey is null or unknown go to
         // the unassigned bucket.
@@ -432,7 +444,67 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
 
         // Clamp focus to current row count.
         if (_focusedRowIndex >= _rows.Length) _focusedRowIndex = Math.Max(0, _rows.Length - 1);
+
+        PruneEventRefs();
     }
+
+    private bool TimelineLayoutInputsChanged()
+    {
+        var current = (_rangeStart, _rangeEndExclusive, TimeScale, _resolvedStartHour,
+            _resolvedEndHour, _resolvedSlotMinutes, _resolvedMaxOverlapColumns,
+            ShowUnassignedRow, ResolvedTimeZone);
+        if (_lastLayoutInputs != current || _lastLayoutLanes.Length != Lanes.Count) return true;
+
+        for (var i = 0; i < Lanes.Count; i++)
+        {
+            var previous = _lastLayoutLanes[i];
+            var currentLane = Lanes[i];
+            if (!ReferenceEquals(previous.Lane, currentLane)
+                || !string.Equals(previous.Id, currentLane.Id, StringComparison.Ordinal)
+                || !string.Equals(previous.Name, currentLane.Name, StringComparison.Ordinal)
+                || !string.Equals(previous.Color, currentLane.Color, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void CaptureTimelineLayoutInputs()
+    {
+        _lastLayoutInputs = (_rangeStart, _rangeEndExclusive, TimeScale, _resolvedStartHour,
+            _resolvedEndHour, _resolvedSlotMinutes, _resolvedMaxOverlapColumns,
+            ShowUnassignedRow, ResolvedTimeZone);
+        _lastLayoutLanes = new LaneInput[Lanes.Count];
+        for (var i = 0; i < Lanes.Count; i++)
+        {
+            var lane = Lanes[i];
+            _lastLayoutLanes[i] = new LaneInput(lane, lane.Id, lane.Name, lane.Color);
+        }
+    }
+
+    private void PruneEventRefs()
+    {
+        if (_eventRefsByEventId.Count == 0) return;
+
+        var renderedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in _rows)
+        {
+            foreach (var positioned in row.Layout.Positioned) renderedIds.Add(positioned.Event.Id);
+        }
+
+        List<string>? stale = null;
+        foreach (var id in _eventRefsByEventId.Keys)
+        {
+            if (renderedIds.Contains(id)) continue;
+            stale ??= new List<string>();
+            stale.Add(id);
+        }
+        if (stale is null) return;
+        foreach (var id in stale) _eventRefsByEventId.Remove(id);
+    }
+
+    private readonly record struct LaneInput(ILane Lane, string Id, string Name, string? Color);
 
     /// <summary>
     /// Build a single lane row by handing the row's bucketed events to a
@@ -467,7 +539,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         // IReadOnlyList&lt;EventChunk&lt;TEvent&gt;&gt; flows into the engine via IReadOnlyList covariance.
         var layout = engine.Layout(
             chunksForLayout,
-            _rangeStart, _rangeEndExclusive, startHour, endHour, _resolvedMaxOverlapColumns);
+            _rangeStart, _rangeEndExclusive, startHour, endHour, _resolvedMaxOverlapColumns,
+            ResolvedTimeZone);
 
         return new RowLayout(
             LaneId: laneId,
@@ -775,8 +848,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     {
         var startMinutes = _resolvedStartHour * 60 + slotIndex * _resolvedSlotMinutes;
         var endMinutes = startMinutes + _resolvedSlotMinutes;
-        var start = _rangeStart.AddMinutes(startMinutes);
-        var end = _rangeStart.AddMinutes(endMinutes);
+        var start = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, startMinutes, ResolvedTimeZone);
+        var end = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, endMinutes, ResolvedTimeZone);
         await OnSlotClicked.InvokeAsync(new SchedulerSlot(start, end, _rows[rowIndex].LaneId));
         await BlurActiveEventChipAsync();
     }
@@ -1158,7 +1231,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         DateTimeOffset newStart;
         if (TimeScale == TimelineScale.Day)
         {
-            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
+            var visibleStart = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
             newStart = visibleStart.AddMinutes(newTimeIdx * _resolvedSlotMinutes);
         }
         else
@@ -1210,7 +1284,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         DateTimeOffset newStart;
         if (TimeScale == TimelineScale.Day)
         {
-            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
+            var visibleStart = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
             newStart = visibleStart.AddMinutes(newTimeIdx * _resolvedSlotMinutes);
         }
         else
@@ -1578,8 +1653,10 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         DateTimeOffset newStart;
         if (TimeScale == TimelineScale.Day)
         {
-            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
-            var visibleEnd = _rangeStart.AddHours(_resolvedEndHour);
+            var visibleStart = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
+            var visibleEnd = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedEndHour * 60, ResolvedTimeZone);
             var origStartMinutes = (ev.Start - visibleStart).TotalMinutes;
             var minutesPerPx = (_resolvedEndHour - _resolvedStartHour) * 60.0 / gridWidthPx;
             var newStartPxInGrid = (origStartMinutes / minutesPerPx) + payload.DeltaXPx;
@@ -1834,8 +1911,10 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         DateTimeOffset newEnd;
         if (TimeScale == TimelineScale.Day)
         {
-            var visibleStart = _rangeStart.AddHours(_resolvedStartHour);
-            var visibleEnd = _rangeStart.AddHours(_resolvedEndHour);
+            var visibleStart = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
+            var visibleEnd = SchedulerViewPrimitives.TimeInZone(
+                _rangeStart.Date, _resolvedEndHour * 60, ResolvedTimeZone);
             var origEndMinutes = (ev.End - visibleStart).TotalMinutes;
             var minutesPerPx = (_resolvedEndHour - _resolvedStartHour) * 60.0 / gridWidthPx;
             var newEndPxInGrid = (origEndMinutes / minutesPerPx) + payload.DeltaXPx;
@@ -2071,8 +2150,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
 
             var startMinutes = _resolvedStartHour * 60 + startSlot * _resolvedSlotMinutes;
             var endMinutes = _resolvedStartHour * 60 + endSlot * _resolvedSlotMinutes;
-            start = _rangeStart.AddMinutes(startMinutes);
-            end = _rangeStart.AddMinutes(endMinutes);
+            start = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, startMinutes, ResolvedTimeZone);
+            end = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, endMinutes, ResolvedTimeZone);
         }
         else
         {
@@ -2154,8 +2233,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             var bandEndMinutes = _resolvedEndHour * 60;
             var endMinutes = Math.Min(startMinutes + durationMinutes, bandEndMinutes);
 
-            start = _rangeStart.AddMinutes(startMinutes);
-            end = _rangeStart.AddMinutes(endMinutes);
+            start = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, startMinutes, ResolvedTimeZone);
+            end = SchedulerViewPrimitives.TimeInZone(_rangeStart.Date, endMinutes, ResolvedTimeZone);
         }
         else
         {

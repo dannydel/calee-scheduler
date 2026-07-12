@@ -479,13 +479,8 @@ public class CaleeSchedulerYearViewTests
             .Add(c => c.Date, todayInTz));
 
         var todayCells = cut.FindAll("[data-calee-region='year-day-cell'][aria-current='date']");
-        // The displayed year contains exactly one cell whose date == "today in TZ" in
-        // the displayed month's grid AND in the prev/next month's leading/trailing
-        // grid blocks, BUT the in-month vs muted distinction does not affect aria-
-        // current. We assert that at least one cell carries it (today exists once per
-        // year in the in-month rendering, may appear additionally in adjacent muted
-        // rows when "today" happens to fall on a leading/trailing edge).
-        Assert.True(todayCells.Count >= 1, "Today cell should be present with aria-current='date'");
+        var todayCell = Assert.Single(todayCells);
+        Assert.DoesNotContain("calee-scheduler-year-cell--muted", todayCell.ClassList);
     }
 
     // ────────────────────────────────────────────────────────────────────────

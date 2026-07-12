@@ -185,12 +185,11 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
             {
                 var d = gridStartDate.AddDays(i);
                 var date = DateOnly.FromDateTime(d);
-                var offset = ResolvedTimeZone.GetUtcOffset(d);
-                var startOfDay = new DateTimeOffset(d, offset);
+                var startOfDay = SchedulerViewPrimitives.MidnightInZone(d, ResolvedTimeZone);
                 cells[i] = new DayCell(
                     Date: date,
                     Start: startOfDay,
-                    End: startOfDay.AddDays(1),
+                    End: SchedulerViewPrimitives.MidnightInZone(d.AddDays(1), ResolvedTimeZone),
                     InMonth: d.Year == _displayedYear && d.Month == monthNumber);
             }
             _months[m] = new MonthLayout(monthNumber, firstOfMonth, cells);

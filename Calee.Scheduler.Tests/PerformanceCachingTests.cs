@@ -1,0 +1,133 @@
+using Bunit;
+using Calee.Scheduler.Components;
+using Calee.Scheduler.Contracts;
+using Calee.Scheduler.Extensions;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Calee.Scheduler.Tests;
+
+public class PerformanceCachingTests
+{
+    private static readonly TimeZoneInfo TZ = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+    private static readonly DateTimeOffset Anchor = new(2026, 5, 19, 0, 0, 0, TimeSpan.FromHours(-4));
+
+    [Fact]
+    public void Day_UnchangedInputsReuseGeometry_AndInPlaceMutationInvalidatesIt()
+    {
+        using var context = NewContext();
+        var ev = new MutableEvent("a", "A", Anchor.AddHours(9), Anchor.AddHours(10));
+        var events = new List<MutableEvent> { ev };
+        var cut = RenderDay(context, events);
+        var initialLayout = cut.Instance.PositionedEvents;
+
+        SetDayParameters(cut, events);
+        Assert.Same(initialLayout, cut.Instance.PositionedEvents);
+
+        ev.Start = Anchor.AddHours(11);
+        ev.End = Anchor.AddHours(12);
+        SetDayParameters(cut, events);
+
+        Assert.NotSame(initialLayout, cut.Instance.PositionedEvents);
+        Assert.Equal(30, Assert.Single(cut.Instance.PositionedEvents).TimeStartPercent, 6);
+    }
+
+    [Fact]
+    public void Day_FilterClosureChangesInvalidateGeometry_AndStaleRefsArePruned()
+    {
+        using var context = NewContext();
+        var include = true;
+        Func<MutableEvent, bool> filter = _ => include;
+        var events = new List<MutableEvent>
+        {
+            new("a", "A", Anchor.AddHours(9), Anchor.AddHours(10)),
+        };
+        var cut = context.Render<CaleeSchedulerDayView<MutableEvent>>(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events)
+            .Add(component => component.EventFilter, filter));
+
+        Assert.Contains("a", cut.Instance.EventRefsByEventId.Keys);
+
+        include = false;
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events)
+            .Add(component => component.EventFilter, filter));
+
+        Assert.Empty(cut.Instance.PositionedEvents);
+        Assert.Empty(cut.Instance.EventRefsByEventId);
+    }
+
+    [Fact]
+    public void Timeline_LaneProjectionClosureChangeInvalidatesGeometry()
+    {
+        using var context = NewContext();
+        var laneId = "a";
+        Func<MutableEvent, string?> laneKey = _ => laneId;
+        var lanes = new ILane[] { new Lane("a", "A"), new Lane("b", "B") };
+        var events = new List<MutableEvent>
+        {
+            new("event", "Event", Anchor.AddHours(9), Anchor.AddHours(10)),
+        };
+        var cut = context.Render<CaleeSchedulerTimelineView<MutableEvent>>(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Lanes, lanes)
+            .Add(component => component.LaneKey, laneKey)
+            .Add(component => component.Events, events));
+
+        Assert.Single(cut.Instance.Row(0).Layout.Positioned);
+        Assert.Empty(cut.Instance.Row(1).Layout.Positioned);
+
+        laneId = "b";
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Lanes, lanes)
+            .Add(component => component.LaneKey, laneKey)
+            .Add(component => component.Events, events));
+
+        Assert.Empty(cut.Instance.Row(0).Layout.Positioned);
+        Assert.Single(cut.Instance.Row(1).Layout.Positioned);
+    }
+
+    private static BunitContext NewContext()
+    {
+        var context = new BunitContext();
+        context.Services.AddCaleeScheduler();
+        context.JSInterop.Mode = JSRuntimeMode.Loose;
+        return context;
+    }
+
+    private static IRenderedComponent<CaleeSchedulerDayView<MutableEvent>> RenderDay(
+        BunitContext context,
+        IReadOnlyList<MutableEvent> events) =>
+        context.Render<CaleeSchedulerDayView<MutableEvent>>(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+
+    private static void SetDayParameters(
+        IRenderedComponent<CaleeSchedulerDayView<MutableEvent>> component,
+        IReadOnlyList<MutableEvent> events) =>
+        component.Render(parameters => parameters
+            .Add(view => view.TimeZone, TZ)
+            .Add(view => view.Date, Anchor)
+            .Add(view => view.Events, events));
+
+    private sealed class MutableEvent(
+        string id,
+        string title,
+        DateTimeOffset start,
+        DateTimeOffset end) : ICalendarEvent
+    {
+        public string Id { get; set; } = id;
+        public string Title { get; set; } = title;
+        public DateTimeOffset Start { get; set; } = start;
+        public DateTimeOffset End { get; set; } = end;
+        public bool IsAllDay { get; set; }
+        public string? Color { get; set; }
+    }
+}

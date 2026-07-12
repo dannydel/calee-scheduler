@@ -60,18 +60,23 @@ internal sealed class VisibleEventSet<TEvent> where TEvent : ICalendarEvent
         var allDay = new List<TEvent>();
         var timedChunks = new List<EventChunk<TEvent>>();
         _lookup = new Dictionary<string, TEvent>(StringComparer.Ordinal);
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var ev in events)
         {
+            if (!seenIds.Add(ev.Id))
+            {
+                throw new ArgumentException(
+                    $"Events contains duplicate event Id '{ev.Id}'. Event Id values must be unique within the rendered event set.",
+                    nameof(events));
+            }
+
             if (ev.End <= rangeStart || ev.Start >= rangeEndExclusive)
             {
                 continue;
             }
 
-            // Last-write-wins for duplicate ids. Don't throw; logging is the caller's concern.
-            // Only events that actually appear in this set (touched the range) populate the lookup,
-            // so FindById's contract — "no event with that Id is in this set" — holds.
-            _lookup[ev.Id] = ev;
+            _lookup.Add(ev.Id, ev);
 
             if (ev.IsAllDay)
             {
@@ -167,8 +172,8 @@ internal sealed class VisibleEventSet<TEvent> where TEvent : ICalendarEvent
         var day = firstDay;
         while (day <= lastDayInclusive)
         {
-            var dayStart = MidnightInZone(day, timeZone);
-            var dayEnd = MidnightInZone(day.AddDays(1), timeZone);
+            var dayStart = SchedulerViewPrimitives.MidnightInZone(day, timeZone);
+            var dayEnd = SchedulerViewPrimitives.MidnightInZone(day.AddDays(1), timeZone);
 
             // Intersect the event's full span (not just the effective span) with the day,
             // so clip flags reflect whether the original event extends past the day edge.
@@ -192,10 +197,4 @@ internal sealed class VisibleEventSet<TEvent> where TEvent : ICalendarEvent
     private static DateTime ToLocalDate(DateTimeOffset instant, TimeZoneInfo tz) =>
         TimeZoneInfo.ConvertTime(instant, tz).Date;
 
-    /// <summary>Local midnight of <paramref name="date"/> in <paramref name="tz"/>, as a DateTimeOffset.</summary>
-    private static DateTimeOffset MidnightInZone(DateTime date, TimeZoneInfo tz)
-    {
-        var offset = tz.GetUtcOffset(date);
-        return new DateTimeOffset(date, offset);
-    }
 }

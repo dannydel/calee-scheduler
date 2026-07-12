@@ -294,6 +294,36 @@ public class EventLayoutEngineTests
     }
 
     [Fact]
+    public void Layout_OptimizedSweep_MatchesNaiveReferenceAcrossRandomizedInputs()
+    {
+        var random = new Random(0xCA1EE);
+        for (var scenario = 0; scenario < 200; scenario++)
+        {
+            var count = random.Next(1, 25);
+            var events = new List<ICalendarEvent>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var startMinutes = random.Next(0, 20 * 60);
+                var durationMinutes = random.Next(0, 240);
+                events.Add(Event(
+                    $"{scenario:D3}-{i:D2}",
+                    Day.AddMinutes(startMinutes),
+                    Day.AddMinutes(startMinutes + durationMinutes)));
+            }
+
+            var expected = NaiveStackGeometry(events);
+            var actual = Layout(events).Positioned.ToDictionary(p => p.Event.Id, StringComparer.Ordinal);
+
+            Assert.Equal(expected.Count, actual.Count);
+            foreach (var (id, geometry) in expected)
+            {
+                Assert.Equal(geometry.StackIndex, actual[id].StackIndex);
+                Assert.Equal(geometry.StackCount, actual[id].StackCount);
+            }
+        }
+    }
+
+    [Fact]
     public void Layout_EventSpanningEntireVisibleBand_BothClipFlagsSet()
     {
         // An event that starts before rangeStartHour and ends after rangeEndHour should
@@ -547,5 +577,56 @@ public class EventLayoutEngineTests
         Assert.Equal(3, EventLayoutEngine.InverseLaneRow(10_000, 400, 4));
         // Negative Y clamps to lane 0.
         Assert.Equal(0, EventLayoutEngine.InverseLaneRow(-50, 400, 4));
+    }
+
+    private static Dictionary<string, (int StackIndex, int StackCount)> NaiveStackGeometry(
+        IReadOnlyList<ICalendarEvent> input)
+    {
+        var events = input
+            .OrderBy(e => e.Start)
+            .ThenBy(e => e.End)
+            .ThenBy(e => e.Id, StringComparer.Ordinal)
+            .ToArray();
+        var stackEnds = new List<DateTimeOffset>();
+        var stackIndices = new int[events.Length];
+
+        for (var i = 0; i < events.Length; i++)
+        {
+            var assigned = -1;
+            for (var slot = 0; slot < stackEnds.Count; slot++)
+            {
+                if (stackEnds[slot] > events[i].Start) continue;
+                assigned = slot;
+                stackEnds[slot] = events[i].End;
+                break;
+            }
+            if (assigned < 0)
+            {
+                assigned = stackEnds.Count;
+                stackEnds.Add(events[i].End);
+            }
+            stackIndices[i] = assigned;
+        }
+
+        var result = new Dictionary<string, (int, int)>(events.Length, StringComparer.Ordinal);
+        for (var i = 0; i < events.Length; i++)
+        {
+            var current = events[i];
+            var instants = events
+                .Where(other => other.Start == current.Start
+                    || (other.Start > current.Start && other.Start < current.End))
+                .Select(other => other.Start)
+                .Distinct();
+            var maxConcurrency = 1;
+            foreach (var instant in instants)
+            {
+                var concurrency = events.Count(other =>
+                    other.Start <= instant
+                    && (instant < other.End || (other.Start == other.End && other.Start == instant)));
+                maxConcurrency = Math.Max(maxConcurrency, concurrency);
+            }
+            result[current.Id] = (stackIndices[i], maxConcurrency);
+        }
+        return result;
     }
 }

@@ -245,17 +245,16 @@ public class VisibleEventSetTests
     }
 
     [Fact]
-    public void Duplicate_Id_Last_Wins_In_Lookup()
+    public void Duplicate_Id_Throws_Actionable_ArgumentException()
     {
-        // Two events with the same Id — the second overwrites the first in the lookup.
         var first = Timed("dup", TueMidnight.AddHours(9), TueMidnight.AddHours(10));
         var second = Timed("dup", TueMidnight.AddHours(11), TueMidnight.AddHours(12));
 
-        var set = Build(new[] { first, second }, EventSplitMode.PerDay);
+        var ex = Assert.Throws<ArgumentException>(() =>
+            Build(new[] { first, second }, EventSplitMode.PerDay));
 
-        Assert.Same(second, set.FindById("dup"));
-        // Both events still produce chunks visually — soft-degradation, not exclusion.
-        Assert.Equal(2, set.TimedChunks.Count);
+        Assert.Equal("events", ex.ParamName);
+        Assert.Contains("dup", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

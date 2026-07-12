@@ -392,10 +392,8 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             });
             // Compute the day's [midnight, next-midnight) bounds in ResolvedTimeZone for the
             // header's drill-down callback.
-            var dayDate = date.ToDateTime(TimeOnly.MinValue);
-            var dayOffset = ResolvedTimeZone.GetUtcOffset(dayDate);
-            var dayStart = new DateTimeOffset(dayDate, dayOffset);
-            var dayEnd = dayStart.AddDays(1);
+            var dayStart = SchedulerViewPrimitives.MidnightInZone(date, ResolvedTimeZone);
+            var dayEnd = SchedulerViewPrimitives.MidnightInZone(date.AddDays(1), ResolvedTimeZone);
             groups[g] = new DateGroup(date, dayStart, dayEnd, bucket.ToArray());
         }
 
@@ -978,8 +976,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     /// <summary>Midnight of the supplied date, expressed in the configured <see cref="SchedulerComponentBase{TEvent}.ResolvedTimeZone"/>.</summary>
     private DateTimeOffset ToZonedMidnight(DateOnly date)
     {
-        var midnight = date.ToDateTime(TimeOnly.MinValue);
-        return new DateTimeOffset(midnight, ResolvedTimeZone.GetUtcOffset(midnight));
+        return SchedulerViewPrimitives.MidnightInZone(date, ResolvedTimeZone);
     }
 
     /// <summary>

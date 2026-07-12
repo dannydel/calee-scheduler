@@ -159,6 +159,11 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     // Frozen-by-construction pre-processed view of the filtered events:
     // owns all-day classification, multi-day per-day chunk splitting, and Id→TEvent lookup.
     private VisibleEventSet<TEvent> _visibleEvents = VisibleEventSet<TEvent>.Empty;
+    private EventGeometrySnapshot<TEvent>? _layoutEventSnapshot;
+    private (int StartHour, int EndHour, int SlotMinutes, int MaxOverlapColumns,
+        TimeZoneInfo TimeZone)? _lastLayoutInputs;
+    private (DateTimeOffset Start, DateTimeOffset End)[] _lastLayoutDays =
+        Array.Empty<(DateTimeOffset, DateTimeOffset)>();
 
     // Roving-tabindex anchor for the slot grid: column and row coordinates. The grid is a
     // single tab stop from the consumer's perspective (NFR-06).
@@ -264,7 +269,15 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // engine sees only still-relevant pins.
         ClearAcknowledgedPins();
 
-        ComputeLayout();
+        var filtered = GetFilteredEvents();
+        if (WeekLayoutInputsChanged()
+            || _layoutEventSnapshot is null
+            || !_layoutEventSnapshot.Matches(filtered))
+        {
+            ComputeLayout(filtered);
+            _layoutEventSnapshot = EventGeometrySnapshot<TEvent>.Capture(filtered);
+            CaptureWeekLayoutInputs();
+        }
 
         // FR-23: fire OnRangeChanged when the visible range changes.
         if (_lastRangeStart != WeekStart || _lastRangeEnd != WeekEndExclusive)
@@ -309,12 +322,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// Recompute the all-day bars, per-day timed chunks, and the per-day layout for the
     /// current parameter set. Materialized here so the render path is read-only.
     /// </summary>
-    private void ComputeLayout()
+    private void ComputeLayout(IReadOnlyList<TEvent>? filtered = null)
     {
         // VisibleEventSet owns the filter→classify→split→lookup pipeline. PerDay split mode
         // gives us one chunk per visible day a multi-day timed event touches.
         _visibleEvents = new VisibleEventSet<TEvent>(
-            GetFilteredEvents(),
+            filtered ?? GetFilteredEvents(),
             WeekStart,
             WeekEndExclusive,
             ResolvedTimeZone,
@@ -392,8 +405,52 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
                 _weekDays[i].End,
                 _resolvedStartHour,
                 _resolvedEndHour,
-                _resolvedMaxOverlapColumns);
+                _resolvedMaxOverlapColumns,
+                ResolvedTimeZone);
         }
+
+        PruneEventRefs();
+    }
+
+    private bool WeekLayoutInputsChanged()
+    {
+        var current = (_resolvedStartHour, _resolvedEndHour, _resolvedSlotMinutes,
+            _resolvedMaxOverlapColumns, ResolvedTimeZone);
+        if (_lastLayoutInputs != current || _lastLayoutDays.Length != _weekDays.Count) return true;
+
+        for (var i = 0; i < _weekDays.Count; i++)
+        {
+            if (_lastLayoutDays[i] != _weekDays[i]) return true;
+        }
+        return false;
+    }
+
+    private void CaptureWeekLayoutInputs()
+    {
+        _lastLayoutInputs = (_resolvedStartHour, _resolvedEndHour, _resolvedSlotMinutes,
+            _resolvedMaxOverlapColumns, ResolvedTimeZone);
+        _lastLayoutDays = _weekDays.ToArray();
+    }
+
+    private void PruneEventRefs()
+    {
+        if (_eventRefsByEventId.Count == 0) return;
+
+        var renderedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var dayLayout in _layoutPerDay)
+        {
+            foreach (var positioned in dayLayout.Positioned) renderedIds.Add(positioned.Event.Id);
+        }
+
+        List<string>? stale = null;
+        foreach (var id in _eventRefsByEventId.Keys)
+        {
+            if (renderedIds.Contains(id)) continue;
+            stale ??= new List<string>();
+            stale.Add(id);
+        }
+        if (stale is null) return;
+        foreach (var id in stale) _eventRefsByEventId.Remove(id);
     }
 
     /// <inheritdoc/>
@@ -781,8 +838,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     {
         var startMinutes = _resolvedStartHour * 60 + slotIndex * _resolvedSlotMinutes;
         var endMinutes = startMinutes + _resolvedSlotMinutes;
-        var start = _weekDays[colIndex].Start.AddMinutes(startMinutes);
-        var end = _weekDays[colIndex].Start.AddMinutes(endMinutes);
+        var start = SchedulerViewPrimitives.TimeInZone(_weekDays[colIndex].Start.Date, startMinutes, ResolvedTimeZone);
+        var end = SchedulerViewPrimitives.TimeInZone(_weekDays[colIndex].Start.Date, endMinutes, ResolvedTimeZone);
         await OnSlotClicked.InvokeAsync(new SchedulerSlot(start, end));
         await BlurActiveEventChipAsync();
     }
@@ -1084,7 +1141,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var newSlotIdx = Math.Clamp(origSlotIdx + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
 
         var targetDayStart = _weekDays[newDayIdx].Start;
-        var visibleStart = targetDayStart.AddHours(_resolvedStartHour);
+        var visibleStart = SchedulerViewPrimitives.TimeInZone(
+            targetDayStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
         var newStart = visibleStart.AddMinutes(newSlotIdx * slotMinutes);
         var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
         var newEnd = newStart + duration;
@@ -1105,7 +1163,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var newSlotIdx = Math.Clamp(origSlotIdx + _keyboardMovePhantomSlotOffset, 0, SlotCount - 1);
 
         var targetDayStart = _weekDays[newDayIdx].Start;
-        var visibleStart = targetDayStart.AddHours(_resolvedStartHour);
+        var visibleStart = SchedulerViewPrimitives.TimeInZone(
+            targetDayStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
         var newStartLocal = visibleStart.AddMinutes(newSlotIdx * slotMinutes);
         var duration = _keyboardMoveOriginalEnd - _keyboardMoveOriginalStart;
         var newEndLocal = newStartLocal + duration;
@@ -1515,8 +1574,10 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var targetDayStart = _weekDays[newColIndex].Start;
         var daysMoved = (targetDayStart.Date - originDayDate).Days;
 
-        var targetVisibleStart = targetDayStart.AddHours(_resolvedStartHour);
-        var targetVisibleEnd = targetDayStart.AddHours(_resolvedEndHour);
+        var targetVisibleStart = SchedulerViewPrimitives.TimeInZone(
+            targetDayStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
+        var targetVisibleEnd = SchedulerViewPrimitives.TimeInZone(
+            targetDayStart.Date, _resolvedEndHour * 60, ResolvedTimeZone);
 
         var snappedOnTargetDay = EventLayoutEngine.InverseY(
             pixelY: newStartPxInGrid,
@@ -1785,8 +1846,10 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         // purely vertical (snapPixelsX = 0 above so DeltaXPx is unsnapped, but we don't
         // use it).
         var origDayStart = _weekDays[originColIndex].Start;
-        var visibleStart = origDayStart.AddHours(_resolvedStartHour);
-        var visibleEnd = origDayStart.AddHours(_resolvedEndHour);
+        var visibleStart = SchedulerViewPrimitives.TimeInZone(
+            origDayStart.Date, _resolvedStartHour * 60, ResolvedTimeZone);
+        var visibleEnd = SchedulerViewPrimitives.TimeInZone(
+            origDayStart.Date, _resolvedEndHour * 60, ResolvedTimeZone);
 
         // Minutes-from-band-start, measured as elapsed time from the origin chunk's own
         // visibleStart — NOT via ev.End.TimeOfDay. Unlike ev.Start (used in
@@ -1983,8 +2046,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var dayStart = _weekDays[anchorColIndex].Start;
         var startMinutes = _resolvedStartHour * 60 + startSlot * _resolvedSlotMinutes;
         var endMinutes = _resolvedStartHour * 60 + endSlot * _resolvedSlotMinutes;
-        var start = dayStart.AddMinutes(startMinutes);
-        var end = dayStart.AddMinutes(endMinutes);
+        var start = SchedulerViewPrimitives.TimeInZone(dayStart.Date, startMinutes, ResolvedTimeZone);
+        var end = SchedulerViewPrimitives.TimeInZone(dayStart.Date, endMinutes, ResolvedTimeZone);
 
         // Issue #8 — fail-closed: if the swept region touches a blocked day, the
         // create does not fire. Week's drag is column-locked (lane axis locked to the
@@ -2037,8 +2100,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         var bandEndMinutes = _resolvedEndHour * 60;
         var endMinutes = Math.Min(startMinutes + durationMinutes, bandEndMinutes);
 
-        var start = dayStart.AddMinutes(startMinutes);
-        var end = dayStart.AddMinutes(endMinutes);
+        var start = SchedulerViewPrimitives.TimeInZone(dayStart.Date, startMinutes, ResolvedTimeZone);
+        var end = SchedulerViewPrimitives.TimeInZone(dayStart.Date, endMinutes, ResolvedTimeZone);
 
         // Issue #8 — fail-closed: no-op on a blocked day (no phantom, no OnEventCreated).
         if (CreateSpanTouchesBlockedDay(start, end)) return Task.CompletedTask;

@@ -102,7 +102,9 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
 
     /// <summary>
     /// Events to render. <see langword="null"/> is treated as empty per PRD §4.6
-    /// (soft-degradation), with a debug-level log if a logger is available.
+    /// (soft-degradation), with a debug-level log if a logger is available. Event
+    /// <see cref="ICalendarEvent.Id"/> values must be unique after <see cref="EventFilter"/>
+    /// is applied; duplicates raise an <see cref="ArgumentException"/> before rendering.
     /// </summary>
     [Parameter]
     public IReadOnlyList<TEvent>? Events { get; set; }
@@ -2300,6 +2302,7 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
 
         if (EventFilter is null)
         {
+            EnsureUniqueEventIds(Events);
             return Events;
         }
 
@@ -2313,7 +2316,24 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
             }
         }
 
+        EnsureUniqueEventIds(filtered);
         return filtered;
+    }
+
+    private static void EnsureUniqueEventIds(IReadOnlyList<TEvent> events)
+    {
+        if (events.Count < 2) return;
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < events.Count; i++)
+        {
+            var id = events[i].Id;
+            if (seen.Add(id)) continue;
+
+            throw new ArgumentException(
+                $"Events contains duplicate event Id '{id}'. Event Id values must be unique within the rendered event set.",
+                nameof(Events));
+        }
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 #nullable enable
+using System.Globalization;
 using Calee.Scheduler.Contracts;
 using Calee.Scheduler.Internal;
 using Microsoft.AspNetCore.Components;
@@ -96,13 +97,19 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
 
     // Cache the consumer's TEvent by Id so click handlers can fire with the original reference.
     private Dictionary<string, TEvent> _eventLookup = new();
+    private EventGeometrySnapshot<TEvent>? _layoutEventSnapshot;
+    private (DateTimeOffset Start, DateTimeOffset End, DayOfWeek FirstDayOfWeek,
+        int MaxEventsPerDay, TimeZoneInfo TimeZone)? _lastLayoutInputs;
 
     /// <summary>
-    /// Per-event element refs the drag layer uses as the ghost source. Keyed by event id
-    /// so chips and bars whose position changes between renders still resolve to their
-    /// captured DOM element.
+    /// Per-event chip refs the drag layer uses as the ghost source. Multi-row bars use
+    /// segment-specific refs below because one event id can map to several DOM elements.
     /// </summary>
     private readonly Dictionary<string, ElementReference> _eventRefsByEventId = new(StringComparer.Ordinal);
+
+    // A multi-day event can render once per week row. Keying those refs only by
+    // event id makes the last segment overwrite the element the user grabbed.
+    private readonly Dictionary<string, ElementReference> _barRefsBySegmentKey = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Optimistic pins for in-flight or just-completed drag-to-move and keyboard-move
@@ -179,7 +186,17 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         // so the engine sees only still-relevant pins.
         ClearAcknowledgedPins();
 
-        ComputeLayout();
+        var filtered = GetFilteredEvents();
+        var layoutInputs = (GridStart, GridEndExclusive, _resolvedFirstDayOfWeek,
+            _resolvedMaxEventsPerDay, ResolvedTimeZone);
+        if (_lastLayoutInputs != layoutInputs
+            || _layoutEventSnapshot is null
+            || !_layoutEventSnapshot.Matches(filtered))
+        {
+            ComputeLayout(filtered);
+            _layoutEventSnapshot = EventGeometrySnapshot<TEvent>.Capture(filtered);
+            _lastLayoutInputs = layoutInputs;
+        }
 
         if (_lastRangeStart != GridStart || _lastRangeEnd != GridEndExclusive)
         {
@@ -207,9 +224,8 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         for (var i = 0; i < 42; i++)
         {
             var d = gridStartDate.AddDays(i);
-            var offset = ResolvedTimeZone.GetUtcOffset(d);
-            var start = new DateTimeOffset(d, offset);
-            var end = start.AddDays(1);
+            var start = SchedulerViewPrimitives.MidnightInZone(d, ResolvedTimeZone);
+            var end = SchedulerViewPrimitives.MidnightInZone(d.AddDays(1), ResolvedTimeZone);
             _gridCells[i] = (start, end);
         }
     }
@@ -219,9 +235,9 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// then assign cell-lane positions so bars line up across cells and chips fill
     /// below them. Computes overflow counts per cell.
     /// </summary>
-    private void ComputeLayout()
+    private void ComputeLayout(IReadOnlyList<TEvent>? filteredEvents = null)
     {
-        var filtered = GetFilteredEvents();
+        var filtered = filteredEvents ?? GetFilteredEvents();
         _eventLookup = new Dictionary<string, TEvent>(filtered.Count);
 
         // Populate event lookup from the consumer's original list so click handlers
@@ -278,6 +294,47 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         for (var i = 0; i < 42; i++)
         {
             _cellLayouts[i] = BuildCellLayout(i, chipsPerCell[i]);
+        }
+
+        PruneEventRefs();
+    }
+
+    private void PruneEventRefs()
+    {
+        var renderedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var cell in _cellLayouts)
+        {
+            foreach (var chip in cell.VisibleChips) renderedIds.Add(chip.Id);
+        }
+
+        List<string>? stale = null;
+        foreach (var id in _eventRefsByEventId.Keys)
+        {
+            if (renderedIds.Contains(id)) continue;
+            stale ??= new List<string>();
+            stale.Add(id);
+        }
+        if (stale is not null)
+        {
+            foreach (var id in stale) _eventRefsByEventId.Remove(id);
+        }
+
+        var renderedBarKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in _barsPerWeekRow)
+        {
+            foreach (var bar in row) renderedBarKeys.Add(BarRefKey(bar));
+        }
+
+        stale = null;
+        foreach (var key in _barRefsBySegmentKey.Keys)
+        {
+            if (renderedBarKeys.Contains(key)) continue;
+            stale ??= new List<string>();
+            stale.Add(key);
+        }
+        if (stale is not null)
+        {
+            foreach (var key in stale) _barRefsBySegmentKey.Remove(key);
         }
     }
 
@@ -341,6 +398,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
 
             _barsPerWeekRow[row].Add(new BarSegment(
                 Event: ev,
+                RowIndex: row,
                 LeftColIndex: leftCol,
                 RightColIndex: rightCol,
                 ClipLeft: clipLeft,
@@ -495,6 +553,10 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <summary>The date displayed in the corner of the cell.</summary>
     internal int CellDayNumber(int cellIndex) => _gridCells[cellIndex].Start.Day;
 
+    /// <summary>The cell date in the invariant form used by pointer-drop interop.</summary>
+    internal string CellIsoDate(int cellIndex) =>
+        _gridCells[cellIndex].Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// Accessible name for the cell: "Wednesday, May 20, 2026" — or the blocked-day
     /// label (issue #8) when the cell's day is blocked.
@@ -561,6 +623,28 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         // -1 means no covering bar → 0 lanes reserved.
         return maxLane + 1;
     }
+
+    /// <summary>
+    /// Maximum number of vertical event lines painted in any cell in a week row.
+    /// The overflow action is a real fourth line when the three-item budget is full.
+    /// </summary>
+    internal int VisibleLineCountForWeekRow(int rowIndex)
+    {
+        var max = 0;
+        for (var col = 0; col < ColumnCount; col++)
+        {
+            var layout = _cellLayouts[rowIndex * ColumnCount + col];
+            var count = BarLaneCountForCell(rowIndex, col)
+                + layout.VisibleChips.Count
+                + (layout.OverflowCount > 0 ? 1 : 0);
+            max = Math.Max(max, count);
+        }
+        return max;
+    }
+
+    /// <summary>Stable DOM-reference key for one rendered week-row segment.</summary>
+    internal static string BarRefKey(BarSegment bar) =>
+        $"{bar.Event.Id}\u001f{bar.RowIndex}\u001f{bar.LeftColIndex}";
 
     /// <summary>Returns the underlying TEvent for an ICalendarEvent (so click handlers receive the consumer's reference).</summary>
     internal TEvent? TypedForId(string id) =>
@@ -1063,6 +1147,9 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <summary>The dictionary the .razor template binds for element refs.</summary>
     internal Dictionary<string, ElementReference> EventRefsByEventId => _eventRefsByEventId;
 
+    /// <summary>Segment-specific bar refs used by Month pointer dragging.</summary>
+    internal Dictionary<string, ElementReference> BarRefsBySegmentKey => _barRefsBySegmentKey;
+
     // ----- Drag-to-move ------------------------------------------------------------------
 
     /// <summary>
@@ -1077,22 +1164,22 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
         if (!_eventLookup.TryGetValue(ev.Id, out var typed)) return;
         if (!_eventRefsByEventId.TryGetValue(typed.Id, out var sourceRef)) return;
 
-        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
-        var snapPixelsX = cellWidth > 0 ? cellWidth : 0;
-        var snapPixelsY = cellHeight > 0 ? cellHeight : 0;
+        var eventStartCellIndex = FindCellIndexForEvent(typed);
+        if (eventStartCellIndex < 0) return;
 
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
             DragMode.Move,
-            snapPixelsX: snapPixelsX,
-            snapPixelsY: snapPixelsY,
+            snapPixelsX: 0,
+            snapPixelsY: 0,
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleMoveDropAsync(typed, payload),
             onCancel: static () => Task.CompletedTask,
             highlightContainer: _monthGridRef,
             highlightMode: "day-cell",
             eventDurationDays: 1,
+            eventStartCellIndex: eventStartCellIndex,
             columnCount: ColumnCount,
             rowCount: WeekRowCount);
     }
@@ -1108,25 +1195,26 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
 
         var ev = bar.Event;
         if (!_eventLookup.TryGetValue(ev.Id, out var typed)) return;
-        if (!_eventRefsByEventId.TryGetValue(typed.Id, out var sourceRef)) return;
+        if (!_barRefsBySegmentKey.TryGetValue(BarRefKey(bar), out var sourceRef)) return;
 
-        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
-        var snapPixelsX = cellWidth > 0 ? cellWidth : 0;
-        var snapPixelsY = cellHeight > 0 ? cellHeight : 0;
-        var eventDurationDays = bar.RightColIndex - bar.LeftColIndex + 1;
+        var eventStartCellIndex = FindCellIndexForEvent(typed);
+        if (eventStartCellIndex < 0) return;
+        var eventDurationDays = EventCellSpan(typed);
 
         await BeginDragOnPointerAsync(
             e,
             sourceRef,
             DragMode.Move,
-            snapPixelsX: snapPixelsX,
-            snapPixelsY: snapPixelsY,
+            snapPixelsX: 0,
+            snapPixelsY: 0,
             ghostClass: "calee-scheduler-event--ghost",
             onDrop: payload => HandleMoveDropAsync(typed, payload),
             onCancel: static () => Task.CompletedTask,
             highlightContainer: _monthGridRef,
             highlightMode: "day-cell",
             eventDurationDays: eventDurationDays,
+            eventStartCellIndex: eventStartCellIndex,
+            ghostGroupKey: typed.Id,
             columnCount: ColumnCount,
             rowCount: WeekRowCount);
     }
@@ -1139,24 +1227,22 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// </summary>
     private async Task HandleMoveDropAsync(TEvent ev, DropPayload payload)
     {
-        var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
-        if (cellWidth <= 0) cellWidth = 100.0;
-        if (cellHeight <= 0) cellHeight = 100.0;
-
         var originalCellIndex = FindCellIndexForEvent(ev);
         if (originalCellIndex < 0) return;
 
-        var colShift = cellWidth > 0
-            ? (int)Math.Round(payload.DeltaXPx / cellWidth, MidpointRounding.AwayFromZero)
-            : 0;
-        var rowShift = cellHeight > 0
-            ? (int)Math.Round(payload.DeltaYPx / cellHeight, MidpointRounding.AwayFromZero)
-            : 0;
+        var newCellIndex = FindDropTargetCell(payload.TargetKey);
+        if (newCellIndex < 0)
+        {
+            var (cellWidth, cellHeight) = await GetMonthGridCellSizePxAsync();
+            if (cellWidth <= 0) cellWidth = 100.0;
+            if (cellHeight <= 0) cellHeight = 100.0;
 
-        if (colShift == 0 && rowShift == 0) return;
+            var colShift = (int)Math.Round(payload.DeltaXPx / cellWidth, MidpointRounding.AwayFromZero);
+            var rowShift = (int)Math.Round(payload.DeltaYPx / cellHeight, MidpointRounding.AwayFromZero);
+            newCellIndex = Math.Clamp(originalCellIndex + colShift + rowShift * ColumnCount, 0, _gridCells.Length - 1);
+        }
 
-        var rawTarget = originalCellIndex + colShift + rowShift * 7;
-        var newCellIndex = Math.Clamp(rawTarget, 0, _gridCells.Length - 1);
+        if (newCellIndex == originalCellIndex) return;
 
         var originalCellStart = _gridCells[originalCellIndex].Start;
         var timeOfDayOffset = ev.Start - originalCellStart;
@@ -1183,6 +1269,39 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
             ComputeLayout();
             StateHasChanged();
         }
+    }
+
+    private int FindDropTargetCell(string? targetKey)
+    {
+        if (!DateOnly.TryParseExact(
+                targetKey,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var targetDate))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < _gridCells.Length; i++)
+        {
+            if (DateOnly.FromDateTime(_gridCells[i].Start.Date) == targetDate) return i;
+        }
+        return -1;
+    }
+
+    private int EventCellSpan(ICalendarEvent ev)
+    {
+        var first = -1;
+        var last = -1;
+        for (var i = 0; i < _gridCells.Length; i++)
+        {
+            var (start, end) = _gridCells[i];
+            if (ev.End <= start || ev.Start >= end) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        return first < 0 ? 1 : last - first + 1;
     }
 
     /// <summary>
@@ -1361,6 +1480,7 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// A multi-day event's bar segment within a single week row of the visible grid.
     /// </summary>
     /// <param name="Event">The original consumer event reference (used for click handling).</param>
+    /// <param name="RowIndex">Zero-based week-row index containing this segment.</param>
     /// <param name="LeftColIndex">Inclusive leftmost column index this segment covers (0..6).</param>
     /// <param name="RightColIndex">Inclusive rightmost column index this segment covers (0..6).</param>
     /// <param name="ClipLeft">True when the event extends past the segment's left edge
@@ -1370,11 +1490,16 @@ public partial class CaleeSchedulerMonthView<TEvent> : SchedulerStatefulComponen
     /// <param name="LaneIndex">Assigned lane index within the week row (0-based, lower = topmost).</param>
     internal sealed record BarSegment(
         ICalendarEvent Event,
+        int RowIndex,
         int LeftColIndex,
         int RightColIndex,
         bool ClipLeft,
         bool ClipRight,
-        int LaneIndex);
+        int LaneIndex)
+    {
+        /// <summary>Linear index of the first grid cell covered by this segment.</summary>
+        internal int StartCellIndex => RowIndex * 7 + LeftColIndex;
+    }
 
     /// <summary>
     /// Per-cell render-time layout: which bar lanes pass through, which chips fit, and the

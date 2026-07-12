@@ -50,8 +50,12 @@
         @for (var r = 0; r < WeekRowCount; r++)
         {
             var row = r;
+            var visibleLineCount = VisibleLineCountForWeekRow(row);
 
-            <div class="calee-scheduler-month-week-row" role="row">
+            <div class="calee-scheduler-month-week-row"
+                 role="row"
+                 data-calee-week-row="@row"
+                 style="@($"--calee-scheduler-month-row-visible-line-count: {visibleLineCount};")">
 
                 @* Day cells (the bottom layer). Each cell's chip area is pushed down by
                    the bars that actually cover *that* cell's column — cells in the same
@@ -80,6 +84,8 @@
 
                     <div class="@cellClasses"
                          data-calee-region="month-cell"
+                         data-calee-cell-index="@cellIndex"
+                         data-calee-date="@CellIsoDate(cellIndex)"
                          role="gridcell"
                          tabindex="@(isTabbable ? 0 : -1)"
                          aria-current="@(isToday ? "date" : null)"
@@ -127,6 +133,7 @@
                                         class="@chipClasses"
                                         style="@style"
                                         data-calee-region="event"
+                                        data-calee-cell-index="@cellIndex"
                                         data-calee-drag-handle="@(dragEnabled ? "move" : null)"
                                         role="button"
                                         aria-roledescription="@(AllowDragToMove ? "draggable event" : null)"
@@ -216,12 +223,14 @@
                                         class="@barClasses"
                                         style="@style"
                                         data-calee-region="event"
+                                        data-calee-cell-index="@bar.StartCellIndex"
+                                        data-calee-drag-group="@bar.Event.Id"
                                         data-calee-drag-handle="@(dragEnabled ? "move" : null)"
                                         aria-roledescription="@(AllowDragToMove ? "draggable event" : null)"
                                         aria-label="@BarAccessibleName(bar)"
                                         aria-selected="@(barIsSelected ? "true" : null)"
                                         tabindex="0"
-                                        @ref="_eventRefsByEventId[bar.Event.Id]"
+                                        @ref="_barRefsBySegmentKey[BarRefKey(bar)]"
                                         @onclick="@(EventCallback.Factory.Create<MouseEventArgs>(this, e => HandleEventClickAsync(clickTarget, e)))"
                                         @onclick:stopPropagation="true"
                                         @onkeydown="@((KeyboardEventArgs e) => HandleEventKeyDownAsync(e, clickTarget))"

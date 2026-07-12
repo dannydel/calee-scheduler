@@ -246,6 +246,28 @@ async function auditKeyboardInteractions() {
     let failures = [];
 
     try {
+        // -- Year view: exactly one canonical current-date cell --
+        process.stdout.write('aria-current uniqueness (Year) ... ');
+        await page.goto(BASE_URL + '/year', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[data-calee-region="year-day-cell"]', { timeout: 10000 });
+        const currentDateState = await page.evaluate(() => {
+            const current = [...document.querySelectorAll(
+                '[data-calee-region="year-day-cell"][aria-current="date"]')];
+            return {
+                count: current.length,
+                muted: current.some(cell => cell.classList.contains('calee-scheduler-year-cell--muted')),
+            };
+        });
+        if (currentDateState.count !== 1) {
+            failures.push(`Year aria-current: expected exactly 1 current date, found ${currentDateState.count}`);
+            console.log('FAIL');
+        } else if (currentDateState.muted) {
+            failures.push('Year aria-current: current date was assigned to a muted adjacent-month cell');
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
         // -- Day view: keyboard resize (Shift+ArrowUp) --
         process.stdout.write('keyboard resize (Day) ... ');
         await page.goto(BASE_URL + '/day', { waitUntil: 'networkidle', timeout: 15000 });
@@ -318,6 +340,137 @@ async function auditKeyboardInteractions() {
             console.log('FAIL');
         } else {
             console.log('PASS');
+        }
+
+        // -- Month view: dense-row geometry and cross-week drag preview --
+        process.stdout.write('dense row geometry (Month) ... ');
+        await page.goto(BASE_URL + '/month', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForSelector('[aria-label^="Board meeting,"]', { timeout: 10000 });
+
+        const denseRowGeometry = await page.evaluate(() => {
+            const event = document.querySelector('[aria-label^="Board meeting,"]');
+            const cell = event?.closest('[data-calee-region="month-cell"]');
+            const overflow = cell?.querySelector('.calee-scheduler-month-overflow-chip');
+            if (!cell || !overflow) return null;
+            const cellRect = cell.getBoundingClientRect();
+            const overflowRect = overflow.getBoundingClientRect();
+            return {
+                clippedPixels: Math.max(0, overflowRect.bottom - cellRect.bottom),
+                targetHeight: overflowRect.height,
+            };
+        });
+
+        if (!denseRowGeometry) {
+            failures.push('Month dense row: fixture cell or overflow action was not found');
+            console.log('FAIL');
+        } else if (denseRowGeometry.clippedPixels > 0.5) {
+            failures.push(`Month dense row: overflow action clipped by ${denseRowGeometry.clippedPixels.toFixed(2)}px`);
+            console.log('FAIL');
+        } else if (denseRowGeometry.targetHeight < 24) {
+            failures.push(`Month dense row: overflow action target height ${denseRowGeometry.targetHeight.toFixed(2)}px < 24px`);
+            console.log('FAIL');
+        } else {
+            console.log('PASS');
+        }
+
+        process.stdout.write('cross-week drag preview (Month) ... ');
+        const launchSegments = await page.$$('[data-calee-drag-group="m-launch"]');
+        if (launchSegments.length !== 2) {
+            failures.push(`Month cross-week drag: expected 2 source segments, found ${launchSegments.length}`);
+            console.log('FAIL');
+        } else {
+            await launchSegments[0].hover();
+            const box = await launchSegments[0].boundingBox();
+            if (!box) {
+                failures.push('Month cross-week drag: could not measure the first segment');
+                console.log('FAIL');
+            } else {
+                await page.mouse.down();
+                await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 4, { steps: 4 });
+                await page.waitForTimeout(100);
+
+                const preview = await page.evaluate(() => {
+                    const ghost = document.querySelector('.calee-scheduler-event--ghost');
+                    const ghostSegments = ghost
+                        ? ghost.querySelectorAll('[data-calee-drag-group="m-launch"]').length : 0;
+                    const grid = document.querySelector('.calee-scheduler-month-grid');
+                    const originals = grid
+                        ? [...grid.querySelectorAll('[data-calee-drag-group="m-launch"]')] : [];
+                    const highlights = [...document.querySelectorAll('.calee-scheduler-drop-target-highlight-segment')];
+                    const rowTops = new Set(highlights.map(segment => Math.round(segment.getBoundingClientRect().top)));
+                    return {
+                        ghostSegments,
+                        sourceHidden: originals.length === 2
+                            && originals.every(element => getComputedStyle(element).opacity === '0'),
+                        highlightSegments: highlights.length,
+                        highlightedRows: rowTops.size,
+                    };
+                });
+
+                await page.keyboard.press('Escape');
+                await page.mouse.up();
+                const sourceRestored = await page.evaluate(() => {
+                    const grid = document.querySelector('.calee-scheduler-month-grid');
+                    const originals = grid
+                        ? [...grid.querySelectorAll('[data-calee-drag-group="m-launch"]')] : [];
+                    return originals.length === 2
+                        && originals.every(element => getComputedStyle(element).opacity !== '0');
+                });
+
+                if (preview.ghostSegments !== 2) {
+                    failures.push(`Month cross-week drag: ghost contains ${preview.ghostSegments} segments instead of 2`);
+                    console.log('FAIL');
+                } else if (!preview.sourceHidden) {
+                    failures.push('Month cross-week drag: original segments remained visible behind the composite ghost');
+                    console.log('FAIL');
+                } else if (preview.highlightSegments !== 2 || preview.highlightedRows !== 2) {
+                    failures.push(`Month cross-week drag: target preview was ${preview.highlightSegments} segment(s) across ${preview.highlightedRows} row(s)`);
+                    console.log('FAIL');
+                } else if (!sourceRestored) {
+                    failures.push('Month cross-week drag: original segments were not restored after cancel');
+                    console.log('FAIL');
+                } else {
+                    console.log('PASS');
+                }
+            }
+        }
+
+        // -- Month view: a single pointermove must preserve the full pointer-down delta --
+        process.stdout.write('single-move pointer drag (Month) ... ');
+        await page.goto(BASE_URL + '/month', { waitUntil: 'networkidle', timeout: 15000 });
+        const singleMoveChip = page.locator('[aria-label^="Board meeting,"]').first();
+        await singleMoveChip.waitFor({ state: 'visible', timeout: 10000 });
+        await singleMoveChip.hover();
+        const singleMoveBox = await singleMoveChip.boundingBox();
+        const singleMoveOrigin = await singleMoveChip.evaluate(element => {
+            const cell = element.closest('[data-calee-region="month-cell"]');
+            return cell ? Number.parseInt(cell.dataset.caleeCellIndex, 10) : -1;
+        });
+        const singleMoveCellWidth = await singleMoveChip.evaluate(element =>
+            element.closest('[data-calee-region="month-cell"]')?.getBoundingClientRect().width ?? 0);
+
+        if (!singleMoveBox || singleMoveOrigin < 0 || singleMoveCellWidth <= 0) {
+            failures.push('Month single-move drag: could not resolve source geometry');
+            console.log('FAIL');
+        } else {
+            await page.mouse.down();
+            await page.waitForTimeout(50);
+            await page.mouse.move(
+                singleMoveBox.x + singleMoveBox.width / 2 + singleMoveCellWidth,
+                singleMoveBox.y + singleMoveBox.height / 2);
+            await page.mouse.up();
+            await page.waitForTimeout(300);
+
+            const singleMoveTarget = await page.locator('[aria-label^="Board meeting,"]').first().evaluate(element => {
+                const cell = element.closest('[data-calee-region="month-cell"]');
+                return cell ? Number.parseInt(cell.dataset.caleeCellIndex, 10) : -1;
+            });
+            if (singleMoveTarget !== singleMoveOrigin + 1) {
+                failures.push(`Month single-move drag: expected cell ${singleMoveOrigin + 1}, landed on ${singleMoveTarget}`);
+                console.log('FAIL');
+            } else {
+                console.log('PASS');
+            }
         }
 
         // -- Month view: pointer drag-to-move --

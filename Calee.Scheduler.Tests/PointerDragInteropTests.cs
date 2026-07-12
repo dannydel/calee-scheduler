@@ -73,7 +73,9 @@ public class PointerDragInteropTests
                 ghostClass: "my-ghost",
                 onDrop: _ => Task.CompletedTask,
                 onCancel: () => Task.CompletedTask,
-                resizeAxis: ResizeAxis.Y);
+                resizeAxis: ResizeAxis.Y,
+                pointerStartViewportX: 123,
+                pointerStartViewportY: 456);
 
             // Module handler captures the actual InvokeAsync<string>("startDrag", elementRef, options).
             var invocation = moduleHandler.Invocations["startDrag"].Single();
@@ -97,6 +99,8 @@ public class PointerDragInteropTests
             Assert.Equal("OnCancelAsync", ReadString("onCancelMethodName"));
             Assert.Equal(12, ReadDouble("snapPixelsX"));
             Assert.Equal(34, ReadDouble("snapPixelsY"));
+            Assert.Equal(123, ReadDouble("pointerStartX"));
+            Assert.Equal(456, ReadDouble("pointerStartY"));
 
             // The dotnetRef property is a DotNetObjectReference<PointerDragInterop>; we don't
             // unwrap the value, just verify it's present and the right shape.

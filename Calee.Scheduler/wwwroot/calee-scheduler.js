@@ -910,8 +910,8 @@ export function startDrag(elementRef, options) {
         // height list has no uniform pixel divisor, so delta-snapping can't target
         // it); initialized to the anchor so a drop with no move still has a
         // coordinate. Harmless for every other highlight mode, which ignores it.
-        lastPointerX: mode === 'create-region' ? anchorX : (rect.left + rect.width / 2),
-        lastPointerY: mode === 'create-region' ? anchorY : (rect.top + rect.height / 2),
+        lastPointerX: mode === 'create-region' ? anchorX : (hasPointerStart ? pointerStartX : (rect.left + rect.width / 2)),
+        lastPointerY: mode === 'create-region' ? anchorY : (hasPointerStart ? pointerStartY : (rect.top + rect.height / 2)),
         lastHighlightGroup: null,
         // Compatibility callers that omit pointerStartX/Y still initialize on the
         // first move. Production component paths always supply the pointer-down origin.

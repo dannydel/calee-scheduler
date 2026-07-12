@@ -400,6 +400,24 @@ async function auditKeyboardInteractions() {
             console.log('PASS');
         }
 
+        process.stdout.write('toolbar radio ArrowLeft and wrap (root) ... ');
+        await page.keyboard.press('ArrowLeft');
+        await page.waitForFunction((initial) => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            return radios[initial.checkedIndex]?.getAttribute('aria-checked') === 'true'
+                && document.activeElement === radios[initial.checkedIndex];
+        }, initialToolbarState, { timeout: 5000 });
+        await page.locator('[data-calee-region="toolbar-view-button"]').first().focus();
+        await page.keyboard.press('ArrowLeft');
+        await page.waitForFunction(() => {
+            const radios = [...document.querySelectorAll('[data-calee-region="toolbar-view-button"]')];
+            const last = radios.at(-1);
+            return last?.getAttribute('aria-checked') === 'true'
+                && document.activeElement === last
+                && radios.filter(radio => radio.getAttribute('tabindex') === '0').length === 1;
+        }, null, { timeout: 5000 });
+        console.log('PASS');
+
         // -- Day view: shortcut help focus and Escape restoration (issue #41) --
         process.stdout.write('shortcut help focus and Escape (Day) ... ');
         await page.goto(BASE_URL + '/day', { waitUntil: 'networkidle', timeout: 15000 });
@@ -408,7 +426,8 @@ async function auditKeyboardInteractions() {
         await page.keyboard.press('?');
         const closeButton = page.getByRole('button', { name: 'Close' });
         await closeButton.waitFor({ state: 'visible', timeout: 5000 });
-        const helpFocus = await page.evaluate(() => document.activeElement?.textContent?.trim() === 'Close');
+        await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Close', null, { timeout: 5000 });
+        const helpFocus = true;
         await page.keyboard.press('Escape');
         await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 5000 });
         const helpRestored = await page.evaluate(() =>

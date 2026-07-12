@@ -96,6 +96,11 @@
     align-items: stretch;
 }
 
+.calee-scheduler-timeline-virtual-spacer {
+    flex: 0 0 auto;
+    pointer-events: none;
+}
+
 .calee-scheduler-timeline-label {
     width: var(--calee-scheduler-timeline-label-width);
     flex-shrink: 0;

@@ -73,6 +73,134 @@ export function scrollToHourHorizontal(container, hourOffsetFromLeft) {
     container.scrollLeft = Math.max(0, targetPx - halfWidth);
 }
 
+// ---------------------------------------------------------------------------
+// Timeline lane virtualization. The Timeline component owns the height index;
+// this bridge owns browser observation, rAF coalescing, and listener cleanup.
+// ---------------------------------------------------------------------------
+
+const _timelineVirtualizations = new WeakMap();
+
+function _timelineMeasurements(container) {
+    return Array.from(container.querySelectorAll('[data-calee-virtual-row]'))
+        .map(row => ({
+            rowIndex: Number(row.dataset.caleeVirtualRow),
+            height: row.getBoundingClientRect().height
+        }))
+        .filter(row => Number.isInteger(row.rowIndex) && row.rowIndex >= 0 && row.height > 0);
+}
+
+function _observeTimelineRows(state) {
+    const mountedRows = new Set(state.container.querySelectorAll('[data-calee-virtual-row]'));
+    for (const row of state.observedRows) {
+        if (!mountedRows.has(row)) {
+            state.resizeObserver.unobserve(row);
+            state.observedRows.delete(row);
+        }
+    }
+    for (const row of mountedRows) {
+        if (!state.observedRows.has(row)) {
+            state.resizeObserver.observe(row);
+            state.observedRows.add(row);
+        }
+    }
+}
+
+function _scheduleTimelineViewport(state) {
+    if (state.frame || performance.now() < state.suspendedUntil) return;
+    state.frame = requestAnimationFrame(async () => {
+        state.frame = 0;
+        if (state.inFlight) {
+            state.queued = true;
+            return;
+        }
+
+        state.inFlight = true;
+        try {
+            _observeTimelineRows(state);
+            const container = state.container;
+            const result = await state.dotNetRef.invokeMethodAsync('UpdateTimelineVirtualViewport', {
+                isBounded: container.scrollHeight > container.clientHeight + 1,
+                scrollTop: container.scrollTop,
+                clientHeight: container.clientHeight,
+                rowHeights: _timelineMeasurements(container)
+            });
+
+            if (result && Math.abs(result.scrollAdjustment || 0) > 0.01) {
+                requestAnimationFrame(() => {
+                    container.scrollTop += result.scrollAdjustment;
+                });
+            }
+        } catch (error) {
+            // Disposal/view switches may race a queued animation frame.
+            if (_timelineVirtualizations.has(state.container)) {
+                console.warn('[calee-scheduler] timeline virtualization update failed:', error);
+            }
+        } finally {
+            state.inFlight = false;
+            if (state.queued) {
+                state.queued = false;
+                _scheduleTimelineViewport(state);
+            }
+        }
+    });
+}
+
+/** Register a measured, coalesced vertical viewport bridge for Timeline rows. */
+export function registerTimelineVirtualization(container, dotNetRef) {
+    if (!container || !dotNetRef) return;
+    unregisterTimelineVirtualization(container);
+
+    const state = {
+        container,
+        dotNetRef,
+        frame: 0,
+        inFlight: false,
+        queued: false,
+        suspendedUntil: 0,
+        resizeObserver: null,
+        mutationObserver: null,
+        onScroll: null,
+        observedRows: new Set()
+    };
+    state.onScroll = () => _scheduleTimelineViewport(state);
+    state.resizeObserver = new ResizeObserver(() => _scheduleTimelineViewport(state));
+    state.mutationObserver = new MutationObserver(() => {
+        _observeTimelineRows(state);
+        _scheduleTimelineViewport(state);
+    });
+    container.addEventListener('scroll', state.onScroll, { passive: true });
+    state.resizeObserver.observe(container);
+    state.mutationObserver.observe(container, { childList: true, subtree: true });
+    _timelineVirtualizations.set(container, state);
+    _scheduleTimelineViewport(state);
+}
+
+/** Requests a fresh Timeline measurement after consumer template layout changes. */
+export function measureTimelineRows(container) {
+    const state = container ? _timelineVirtualizations.get(container) : null;
+    if (state) _scheduleTimelineViewport(state);
+}
+
+/** Briefly suppresses observer feedback while focus-induced native scrolling settles. */
+export function suspendTimelineVirtualization(container) {
+    const state = container ? _timelineVirtualizations.get(container) : null;
+    if (!state) return;
+    state.suspendedUntil = performance.now() + 100;
+    setTimeout(() => _scheduleTimelineViewport(state), 110);
+}
+
+/** Removes every Timeline virtualization observer and listener for a container. */
+export function unregisterTimelineVirtualization(container) {
+    const state = container ? _timelineVirtualizations.get(container) : null;
+    if (!state) return;
+    if (state.frame) cancelAnimationFrame(state.frame);
+    state.container.removeEventListener('scroll', state.onScroll);
+    state.resizeObserver.disconnect();
+    state.mutationObserver.disconnect();
+    state.observedRows.clear();
+    _timelineVirtualizations.delete(container);
+}
+
 /**
  * Move focus to the supplied element (a no-op if null).
  *

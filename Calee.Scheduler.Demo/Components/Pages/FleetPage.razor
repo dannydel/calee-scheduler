@@ -9,7 +9,7 @@
                      Title="Fleet"
                      Intro="A Timeline view: rows are lanes — drivers, vehicles, rooms, anything you schedule against — and the X-axis is time. An event whose LaneKey doesn't resolve to a row lands in a trailing unassigned bucket; all-day events render as a banner strip on the row label, not in the time grid." />
 
-    <div class="calee-demo-scheduler-frame">
+    <div class="calee-demo-scheduler-frame" style="@(IsStressFixture ? "height: 680px;" : null)">
         <CaleeSchedulerTimelineView TEvent="SchedulerSeed.FleetEvent"
                                     @ref="_view"
                                     TimeZone="@SchedulerSeed.DefaultTimeZone"
@@ -21,9 +21,10 @@
                                     EndHour="@_endHour"
                                     SlotDurationMinutes="30"
                                     ShowUnassignedRow="true"
-                                    AllowDragToMove="true"
+                                    EnableLaneVirtualization="@IsStressFixture"
+                                    AllowDragToMove="@(!IsStressFixture)"
                                     AllowDragToResize="true"
-                                    AllowDragToCreate="true"
+                                    AllowDragToCreate="@(!IsStressFixture)"
                                     AllowDoubleClickToCreate="true"
                                     AllowMultiSelect="true"
                                     AllowDelete="true"
@@ -95,10 +96,48 @@
     private int _startHour = 7;
     private int _endHour = 19;
 
-    protected override void OnInitialized()
+    [SupplyParameterFromQuery(Name = "lanes")]
+    public int? LaneCount { get; set; }
+
+    private int? _loadedLaneCount;
+
+    private bool IsStressFixture => LaneCount is not null;
+
+    protected override void OnParametersSet()
     {
+        var laneCount = LaneCount is null ? 3 : Math.Clamp(LaneCount.Value, 1, 1_000);
+        if (_loadedLaneCount == laneCount) return;
+
+        _loadedLaneCount = laneCount;
         var now = DateTimeOffset.UtcNow;
-        _events = SchedulerSeed.GetFleetEvents(now, SchedulerSeed.DefaultTimeZone).ToList();
+        if (LaneCount is null)
+        {
+            _drivers = SchedulerSeed.GetDrivers();
+            _events = SchedulerSeed.GetFleetEvents(now, SchedulerSeed.DefaultTimeZone).ToList();
+            return;
+        }
+
+        var local = TimeZoneInfo.ConvertTime(now, SchedulerSeed.DefaultTimeZone);
+        var dayStart = new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset);
+        _drivers = Enumerable.Range(0, laneCount)
+            .Select(i => (ILane)new Lane($"driver-{i}", $"Driver {i + 1}"))
+            .ToArray();
+        _events = Enumerable.Range(0, laneCount)
+            .Select(i => new SchedulerSeed.FleetEvent(
+                $"stress-{i}",
+                $"Route {i + 1}",
+                dayStart.AddHours(7 + i % 12),
+                dayStart.AddHours(8 + i % 12),
+                $"driver-{i}"))
+            .ToList();
+
+        // Sparse all-day content exercises variable lane heights without turning the
+        // fixture into a template benchmark.
+        for (var i = 0; i < laneCount; i += 125)
+        {
+            _events.Add(new SchedulerSeed.FleetEvent(
+                $"stress-all-day-{i}", "On call", dayStart, dayStart.AddDays(1), $"driver-{i}", IsAllDay: true));
+        }
     }
 
     private void HandleMoved(EventMoveContext ctx)

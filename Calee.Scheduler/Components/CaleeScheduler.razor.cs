@@ -101,6 +101,13 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     [Parameter]
     public EventCallback<TimelineScale> TimelineScaleChanged { get; set; }
 
+    /// <summary>
+    /// Enables opt-in vertical lane-row virtualization when the Timeline view is active.
+    /// Disabled by default for 1.x rendering compatibility.
+    /// </summary>
+    [Parameter]
+    public bool EnableTimelineVirtualization { get; set; }
+
     // ----- Toolbar control -----------------------------------------------------------
 
     /// <summary>

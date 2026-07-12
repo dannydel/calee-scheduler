@@ -53,6 +53,7 @@ const ROUTES = [
     { path: '/year',   waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowDown', 'ArrowRight', 'ArrowDown'] } },
     { path: '/agenda', waitFor: '[data-calee-region="agenda"]', focusCheck: { keys: ['ArrowDown', 'ArrowDown'] } },
     { path: '/fleet',  waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown'] } },
+    { path: '/fleet?lanes=1000', waitFor: '[role="grid"]', timelineVirtualizationCheck: true },
 ];
 
 /**
@@ -160,6 +161,57 @@ async function checkMonthBarLabelContainment(page) {
     });
 }
 
+async function checkTimelineVirtualization(page) {
+    try {
+        await page.locator('[data-calee-region="lane-row"]').first().waitFor({ state: 'attached', timeout: 5000 });
+        const initial = await page.evaluate(() => {
+            const container = document.querySelector('[data-calee-region="lane-rows"]');
+            const eventIds = [...document.querySelectorAll('[data-calee-event-id]')]
+                .map(event => event.dataset.caleeEventId);
+            return {
+                logicalRows: document.querySelector('[role="grid"]')?.getAttribute('aria-rowcount'),
+                mountedRows: document.querySelectorAll('[data-calee-region="lane-row"]').length,
+                elements: document.querySelectorAll('.calee-scheduler-timeline *').length,
+                firstLane: document.querySelector('[data-calee-region="lane-row"]')?.dataset.laneId,
+                canScroll: !!container && container.scrollHeight > container.clientHeight + 1,
+                uniqueMountedEventIds: new Set(eventIds).size === eventIds.length,
+            };
+        });
+
+        const rovingCell = page.locator('[role="gridcell"][tabindex="0"]').first();
+        await rovingCell.focus();
+        for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
+        await page.waitForTimeout(100);
+        const focusedLaneAfterKeys = await page.evaluate(() =>
+            document.activeElement?.closest('[data-calee-region="lane-row"]')?.dataset.laneId);
+
+        await page.evaluate(() => {
+            document.querySelector('[data-calee-region="lane-rows"]').scrollTop = Number.MAX_SAFE_INTEGER;
+        });
+        await page.waitForTimeout(150);
+        const lastLane = await page.locator('[data-calee-region="lane-row"]').last().getAttribute('data-lane-id');
+
+        await page.evaluate(() => {
+            document.querySelector('[data-calee-region="lane-rows"]').scrollTop = 0;
+        });
+        await page.waitForTimeout(150);
+        const firstLaneAfterReturn = await page.locator('[data-calee-region="lane-row"]').first().getAttribute('data-lane-id');
+
+        const pass = initial.logicalRows === '1001'
+            && initial.mountedRows < 30
+            && initial.elements < 1000
+            && initial.firstLane === 'driver-0'
+            && initial.canScroll
+            && initial.uniqueMountedEventIds
+            && focusedLaneAfterKeys === 'driver-30'
+            && lastLane === 'driver-999'
+            && firstLaneAfterReturn === 'driver-0';
+        return { pass, ...initial, focusedLaneAfterKeys, lastLane, firstLaneAfterReturn };
+    } catch (err) {
+        return { pass: false, detail: err.message };
+    }
+}
+
 async function auditOnce() {
     await probeServer();
 
@@ -239,11 +291,19 @@ async function auditOnce() {
                 }
             }
 
+            let timelineVirtualizationCheck;
+            if (route.timelineVirtualizationCheck) {
+                process.stdout.write(`  timeline-virtualization ${route.path} ... `);
+                timelineVirtualizationCheck = await checkTimelineVirtualization(page);
+                console.log(timelineVirtualizationCheck.pass ? 'PASS' : 'FAIL');
+            }
+
             results.push({
                 viewport: vp.name,
                 route: route.path,
                 violations,
                 ...(focusCheck ? { focusCheck } : {}),
+                ...(timelineVirtualizationCheck ? { timelineVirtualizationCheck } : {}),
                 ...(overflowCheck ? { overflowCheck } : {}),
                 ...(monthBarLabelCheck ? { monthBarLabelCheck } : {}),
             });
@@ -257,6 +317,8 @@ async function auditOnce() {
     const focusFailures = results.filter(r => r.focusCheck && !r.focusCheck.pass).length;
     const overflowFailures = results.filter(r => r.overflowCheck && r.overflowCheck.overflow).length;
     const monthBarLabelFailures = results.filter(r => r.monthBarLabelCheck && !r.monthBarLabelCheck.pass).length;
+    const timelineVirtualizationFailures = results.filter(
+        r => r.timelineVirtualizationCheck && !r.timelineVirtualizationCheck.pass).length;
 
     const report = {
         timestamp: new Date().toISOString(),
@@ -271,6 +333,7 @@ async function auditOnce() {
         overflowFailures,
         monthBarLabelChecksRun: results.filter(r => r.monthBarLabelCheck).length,
         monthBarLabelFailures,
+        timelineVirtualizationFailures,
     };
 
     const outPath = join(__dirname, 'report.json');
@@ -281,7 +344,8 @@ async function auditOnce() {
     console.log(`overflow checks: ${report.overflowChecksRun} run, ${overflowFailures} failed`);
     console.log(`Month bar label checks: ${report.monthBarLabelChecksRun} run, ${monthBarLabelFailures} failed`);
 
-    if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0 || monthBarLabelFailures > 0 || results.some(r => r.error)) {
+    if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0
+        || monthBarLabelFailures > 0 || timelineVirtualizationFailures > 0 || results.some(r => r.error)) {
         process.exit(1);
     }
 }

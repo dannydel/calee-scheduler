@@ -31,11 +31,13 @@
     <div class="calee-scheduler-timeline-grid"
          role="grid"
          aria-label="Timeline view grid"
+         aria-rowcount="@(CanVirtualizeRows ? Rows.Count + 1 : null)"
          tabindex="-1"
          @onkeydown="HandleGridKeyDownAsync">
 
         @* (1) Time-axis tick row at the top. Spans the lane-label gutter + the time area. *@
-        <div class="calee-scheduler-timeline-tick-row" role="row">
+        <div class="calee-scheduler-timeline-tick-row" role="row"
+             aria-rowindex="@(CanVirtualizeRows ? 1 : null)">
             <div class="calee-scheduler-timeline-label-gutter" aria-hidden="true"></div>
             <div class="@timeGutterClasses" data-calee-region="time-gutter">
                 @if (TimeScale == TimelineScale.Day)
@@ -81,7 +83,14 @@
              data-calee-region="lane-rows"
              @ref="_timeAreaScrollContainer">
 
-            @for (var i = 0; i < Rows.Count; i++)
+            @if (RenderVirtualSpacers && TopSpacerHeight > 0)
+            {
+                <div class="calee-scheduler-timeline-virtual-spacer"
+                     aria-hidden="true"
+                     style="@($"height: {TopSpacerHeight:F2}px;")"></div>
+            }
+
+            @for (var i = FirstMountedRow; i < LastMountedRowExclusive; i++)
             {
                 var rowIndex = i;
                 var row = Rows[rowIndex];
@@ -92,7 +101,9 @@
 
                 <div class="calee-scheduler-timeline-row"
                      role="row"
+                     aria-rowindex="@(CanVirtualizeRows ? rowIndex + 2 : null)"
                      data-calee-region="@rowDataRegion"
+                     data-calee-virtual-row="@(CanVirtualizeRows ? rowIndex.ToString() : null)"
                      data-lane-id="@row.LaneId">
 
                     @* 2a. Lane label area + banner strip. *@
@@ -297,6 +308,7 @@
                                         class="@classes"
                                         style="@style"
                                         data-calee-region="event"
+                                        data-calee-event-id="@(CanVirtualizeRows ? eventId : null)"
                                         data-calee-drag-handle="@(dragEnabled ? "move" : null)"
                                         aria-label="@EventAccessibleName(displayEv, row.LaneName)"
                                         aria-roledescription="@ariaRoleDesc"
@@ -383,6 +395,13 @@
                         }
                     </div>
                 </div>
+            }
+
+            @if (RenderVirtualSpacers && BottomSpacerHeight > 0)
+            {
+                <div class="calee-scheduler-timeline-virtual-spacer"
+                     aria-hidden="true"
+                     style="@($"height: {BottomSpacerHeight:F2}px;")"></div>
             }
         </div>
     </div>

@@ -114,12 +114,9 @@
                             {
                                 var typed = TypedForId(chip.Id);
                                 var consumerClass = typed is not null ? ClassFor(typed) : null;
-                                var styleParts = new List<string>();
-                                if (chip.Color is not null)
-                                {
-                                    styleParts.Add($"--calee-scheduler-event-color: {chip.Color}");
-                                }
-                                var style = styleParts.Count == 0 ? null : string.Join("; ", styleParts) + ";";
+                                var style = chip.Color is null
+                                    ? null
+                                    : $"--calee-scheduler-event-color: {chip.Color};";
                                 var chipIsSelected = IsEventSelected(chip.Id);
                                 var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == chip.Id;
                                 var chipClasses = "calee-scheduler-month-chip"
@@ -196,17 +193,11 @@
                             var widthCols = bar.RightColIndex - bar.LeftColIndex + 1;
                             var leftPct = (double)bar.LeftColIndex / ColumnCount * 100.0;
                             var widthPct = (double)widthCols / ColumnCount * 100.0;
-                            var styleParts = new List<string>
-                            {
-                                $"left: {leftPct:F4}%",
-                                $"width: {widthPct:F4}%",
-                                $"--calee-scheduler-month-bar-lane-index: {bar.LaneIndex}"
-                            };
-                            if (bar.Event.Color is not null)
-                            {
-                                styleParts.Add($"--calee-scheduler-event-color: {bar.Event.Color}");
-                            }
-                            var style = string.Join("; ", styleParts) + ";";
+                            var style = $"left: {leftPct:F4}%; width: {widthPct:F4}%; "
+                                + $"--calee-scheduler-month-bar-lane-index: {bar.LaneIndex};"
+                                + (bar.Event.Color is null
+                                    ? string.Empty
+                                    : $" --calee-scheduler-event-color: {bar.Event.Color};");
                             var barIsSelected = IsEventSelected(bar.Event.Id);
                             var isInKeyboardMoveMode = _keyboardMoveMode && _keyboardMoveEventId == bar.Event.Id;
                             var barClasses = "calee-scheduler-month-bar"

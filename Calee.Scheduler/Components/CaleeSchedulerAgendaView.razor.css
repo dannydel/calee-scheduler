@@ -79,6 +79,11 @@
     border-bottom: 1px solid var(--calee-scheduler-grid-line-color, #e4e4e7);
 }
 
+.calee-scheduler-agenda-virtual-spacer {
+    flex: 0 0 auto;
+    pointer-events: none;
+}
+
 .calee-scheduler-agenda-group:last-child {
     border-bottom: none;
 }

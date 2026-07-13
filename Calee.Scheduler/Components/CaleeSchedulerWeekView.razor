@@ -32,6 +32,8 @@
 }
 
 <div class="calee-scheduler-week" @attributes="AdditionalAttributes">
+    <div class="calee-scheduler-week-canvas"
+         style="@($"min-width: max(100%, {MinimumCanvasWidthPixels}px);")">
 
     @* (1) Day header row — ColumnCount columns, FR-04 + today highlight per FR-07 visual + NFR-06.
        The header sits outside the role="grid" hour-grid below and is not part of any
@@ -101,16 +103,10 @@
                 var widthCols = bar.LastColIndex - bar.FirstColIndex + 1;
                 var leftPct = (double)bar.FirstColIndex / ColumnCount * 100.0;
                 var widthPct = (double)widthCols / ColumnCount * 100.0;
-                var styleParts = new List<string>
-                {
-                    $"left: {leftPct:F4}%",
-                    $"width: {widthPct:F4}%"
-                };
-                if (bar.Event.Color is not null)
-                {
-                    styleParts.Add($"--calee-scheduler-event-color: {bar.Event.Color}");
-                }
-                var style = string.Join("; ", styleParts) + ";";
+                var style = $"left: {leftPct:F4}%; width: {widthPct:F4}%;"
+                    + (bar.Event.Color is null
+                        ? string.Empty
+                        : $" --calee-scheduler-event-color: {bar.Event.Color};");
                 var barIsSelected = IsEventSelected(bar.Event.Id);
                 var classes = "calee-scheduler-all-day-event"
                     + (bar.ClipLeft ? " calee-scheduler-all-day-event--clip-left" : string.Empty)
@@ -234,18 +230,11 @@
                             ICalendarEvent displayEv = (typed is not null && GetOptimisticPin(typed.Id) is not null)
                                 ? pe.Event
                                 : UnwrapForFormatting(pe);
-                            var styleParts = new List<string>
-                            {
-                                $"top: {pe.TimeStartPercent:F4}%",
-                                $"height: {pe.TimeSpanPercent:F4}%",
-                                $"left: {stackLeft:F4}%",
-                                $"width: {stackWidth:F4}%"
-                            };
-                            if (displayEv.Color is not null)
-                            {
-                                styleParts.Add($"--calee-scheduler-event-color: {displayEv.Color}");
-                            }
-                            var style = string.Join("; ", styleParts) + ";";
+                            var style = $"top: {pe.TimeStartPercent:F4}%; height: {pe.TimeSpanPercent:F4}%; "
+                                + $"left: {stackLeft:F4}%; width: {stackWidth:F4}%;"
+                                + (displayEv.Color is null
+                                    ? string.Empty
+                                    : $" --calee-scheduler-event-color: {displayEv.Color};");
                             var clipTop = ClippedTop(pe);
                             var clipBot = ClippedBottom(pe);
                             var isSelected = IsEventSelected(displayEv.Id);
@@ -390,24 +379,28 @@
                     @for (var c = 0; c < ColumnCount; c++)
                     {
                         var col = c;
+                        var isOccupied = IsSlotOccupied(col, row);
                         var isTabbable = IsSlotTabbable(col, row);
                         var cellLeft = col * 100.0 / ColumnCount;
                         var cellWidth = 100.0 / ColumnCount;
-                        // Issue #8 — a blocked day suppresses create affordances
-                        // fail-closed: no create-affordance cursor cue, no
-                        // double-click/drag-create wiring. OnSlotClicked is untouched.
+                        // Blocked days suppress create affordances. Occupied slots suppress
+                        // every background interaction so the event remains the only target.
                         var colBlocked = IsColumnBlocked(col);
-                        var createEnabled = AllowDragToCreate && !colBlocked;
-                        var doubleClickEnabled = AllowDoubleClickToCreate && !colBlocked;
+                        var createEnabled = AllowDragToCreate && !colBlocked && !isOccupied;
+                        var doubleClickEnabled = AllowDoubleClickToCreate && !colBlocked && !isOccupied;
+                        EventCallback<MouseEventArgs> clickCallback = isOccupied
+                            ? default
+                            : EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleSlotClickAsync(col, row));
                         var slotExtraClass = (createEnabled ? " calee-scheduler-slot--create-affordance" : string.Empty)
-                            + (colBlocked ? " calee-scheduler-day-blocked" : string.Empty);
+                            + (colBlocked ? " calee-scheduler-day-blocked" : string.Empty)
+                            + (isOccupied ? " calee-scheduler-slot--occupied" : string.Empty);
                         <div role="gridcell"
                              class="@("calee-scheduler-slot" + slotExtraClass)"
                              style="@($"left: {cellLeft:F4}%; width: {cellWidth:F4}%;")"
-                             tabindex="@(isTabbable ? 0 : -1)"
-                             aria-label="@SlotAccessibleName(col, row)"
-                             aria-disabled="@(colBlocked ? "true" : null)"
-                             @onclick="@(() => HandleSlotClickAsync(col, row))"
+                             tabindex="@(isOccupied ? null : isTabbable ? "0" : "-1")"
+                             aria-label="@(isOccupied ? null : SlotAccessibleName(col, row))"
+                             aria-disabled="@(colBlocked || isOccupied ? "true" : null)"
+                             @onclick="@clickCallback"
                              @ondblclick="@(doubleClickEnabled ? EventCallback.Factory.Create<MouseEventArgs>(this, _ => HandleDoubleClickCreateAsync(col, row)) : default)"
                              @onpointerdown="@(createEnabled ? EventCallback.Factory.Create<PointerEventArgs>(this, e => OnGridPointerDownAsync(e, col, row)) : default)">
                         </div>
@@ -443,4 +436,5 @@
         </div>
     }
 
+    </div>
 </div>

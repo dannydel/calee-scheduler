@@ -103,6 +103,13 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     public int AgendaDays { get; set; } = 7;
 
     /// <summary>
+    /// Enables measured date-group virtualization. Disabled by default for 1.x rendering
+    /// compatibility. Virtualization is suspended while pointer dragging is enabled.
+    /// </summary>
+    [Parameter]
+    public bool EnableVirtualization { get; set; }
+
+    /// <summary>
     /// The post-clamp resolved value of <see cref="AgendaDays"/> after
     /// <c>OnParametersSet</c>. Always in <c>[1, 90]</c>.
     /// </summary>
@@ -140,6 +147,8 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     // DateGroup carries the events anchored on that date in render order. Empty days
     // are not included (the locked design decision from §5.3 Q16).
     private DateGroup[] _groups = Array.Empty<DateGroup>();
+    private EventGeometrySnapshot<TEvent>? _groupEventSnapshot;
+    private (DateTimeOffset Start, DateTimeOffset End, int Days, TimeZoneInfo TimeZone)? _groupInputs;
 
     // Roving-tabindex anchor: a flat row index into the per-render visible-rows list
     // (skipping headers — headers are non-interactive landmarks per ADR-0009). -1 means
@@ -151,6 +160,8 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private DateTimeOffset? _lastRangeEnd;
 
     private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<AgendaVirtualizationInterop>? _virtualizationRef;
+    private bool _virtualizationRegistered;
 
     // The scrollable list wrapper (role="group") — queried by focusActiveGridCell
     // (issue #19) to find the currently-tabbable row.
@@ -181,6 +192,14 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     // tabindex swap has actually rendered) to move real browser focus onto the
     // newly-active row.
     private bool _focusMovePending;
+    private readonly VirtualRowHeightIndex _groupHeightIndex = new(120);
+    private int _firstMountedGroup;
+    private int _lastMountedGroupExclusive;
+    private bool _wasVirtualizingGroups;
+
+    private bool CanVirtualizeGroups => EnableVirtualization && !AllowDragToMove;
+    private const int InitialMountedGroupCount = 12;
+    private const int VirtualGroupOverscan = 2;
 
     /// <inheritdoc/>
     protected override void OnParametersSet()
@@ -213,6 +232,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
         ClearAcknowledgedPins();
         ComputeGroups();
+        SyncVirtualGroupRange();
         ClampFocus();
 
         if (_lastRangeStart != _windowStart || _lastRangeEnd != _windowEndExclusive)
@@ -274,25 +294,28 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     private void ComputeGroups()
     {
         var filtered = GetFilteredEvents();
+        if (!AllowDragToMove) _rowRefsByEventId.Clear();
+
+        var inputs = (_windowStart, _windowEndExclusive, _agendaDays, ResolvedTimeZone);
+        // A stateful filter can close over external values. Its output has no reliable
+        // revision signal, so only reuse groups when filtering is absent.
+        if (EventFilter is null
+            && _optimisticPin.Count == 0
+            && _groupInputs == inputs
+            && _groupEventSnapshot is not null
+            && _groupEventSnapshot.Matches(filtered))
+        {
+            return;
+        }
 
         // Issue #30 — typed lookup for keyboard/pointer move commit + cancel
         // resolution. Populated even on the empty path below so TypedForId never
         // sees a stale dictionary from a prior render.
-        _eventLookup = new Dictionary<string, TEvent>(filtered.Count, StringComparer.Ordinal);
-        foreach (var e in filtered) _eventLookup[e.Id] = e;
-
-        // Drop ref-capture entries for events no longer in the filtered set so the
-        // dictionary can't grow unbounded across the component's lifetime. Rows about
-        // to render re-populate their own entries via @ref.
-        if (_rowRefsByEventId.Count > 0)
-        {
-            var stale = _rowRefsByEventId.Keys.Where(id => !_eventLookup.ContainsKey(id)).ToList();
-            foreach (var id in stale) _rowRefsByEventId.Remove(id);
-        }
-
         if (filtered.Count == 0)
         {
+            _eventLookup = new Dictionary<string, TEvent>(StringComparer.Ordinal);
             _groups = Array.Empty<DateGroup>();
+            CaptureGroupSnapshot(filtered, inputs);
             return;
         }
 
@@ -304,7 +327,8 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         // Materialize each TEvent into a row carrying its anchor date and the typed
         // reference for click callbacks. Pinned-from-before events anchor to the
         // window's first day rather than their actual start date.
-        var rows = new List<EventRow>(filtered.Count);
+        var rows = new List<EventRow>(Math.Min(filtered.Count, _agendaDays * 8));
+        var eventLookup = new Dictionary<string, TEvent>(StringComparer.Ordinal);
         for (var i = 0; i < filtered.Count; i++)
         {
             var ev = filtered[i];
@@ -341,6 +365,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             // skip — defensive, the half-open check above already covered it but the
             // explicit clamp is documentation.
             if (anchorDate > windowLastDateInclusive) continue;
+            eventLookup[ev.Id] = ev;
 
             // Order key inside a group: all-day events first (sort key 0), then timed
             // events keyed by their effective start instant. Within the same key,
@@ -359,12 +384,15 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
 
         if (rows.Count == 0)
         {
+            _eventLookup = eventLookup;
+            PruneRowRefs();
             _groups = Array.Empty<DateGroup>();
+            CaptureGroupSnapshot(filtered, inputs);
             return;
         }
 
         // Bucket into per-date lists; preserve insertion order via the rows iteration.
-        var bucketsByDate = new Dictionary<DateOnly, List<EventRow>>(capacity: rows.Count);
+        var bucketsByDate = new Dictionary<DateOnly, List<EventRow>>(capacity: _agendaDays);
         foreach (var row in rows)
         {
             if (!bucketsByDate.TryGetValue(row.AnchorDate, out var bucket))
@@ -398,6 +426,39 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         }
 
         _groups = groups;
+        _eventLookup = eventLookup;
+        PruneRowRefs();
+        CaptureGroupSnapshot(filtered, inputs);
+    }
+
+    private void CaptureGroupSnapshot(
+        IReadOnlyList<TEvent> filtered,
+        (DateTimeOffset Start, DateTimeOffset End, int Days, TimeZoneInfo TimeZone) inputs)
+    {
+        _groupInputs = inputs;
+        _groupEventSnapshot = EventFilter is null && _optimisticPin.Count == 0
+            ? EventGeometrySnapshot<TEvent>.Capture(filtered)
+            : null;
+    }
+
+    private void PruneRowRefs()
+    {
+        if (!AllowDragToMove)
+        {
+            _rowRefsByEventId.Clear();
+            return;
+        }
+        if (_rowRefsByEventId.Count == 0) return;
+
+        List<string>? stale = null;
+        foreach (var id in _rowRefsByEventId.Keys)
+        {
+            if (_eventLookup.ContainsKey(id)) continue;
+            stale ??= new List<string>();
+            stale.Add(id);
+        }
+        if (stale is null) return;
+        foreach (var id in stale) _rowRefsByEventId.Remove(id);
     }
 
     /// <summary>
@@ -418,12 +479,89 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
         }
     }
 
+    private void SyncVirtualGroupRange()
+    {
+        if (_groupHeightIndex.Count != _groups.Length) _groupHeightIndex.Reset(_groups.Length);
+        if (!CanVirtualizeGroups)
+        {
+            SetMountedGroupRange(0, _groups.Length);
+        }
+        else if (!_wasVirtualizingGroups || _lastMountedGroupExclusive == 0)
+        {
+            SetMountedGroupRange(0, Math.Min(_groups.Length, InitialMountedGroupCount));
+        }
+        else
+        {
+            SetMountedGroupRange(_firstMountedGroup, _lastMountedGroupExclusive);
+        }
+        _wasVirtualizingGroups = CanVirtualizeGroups;
+    }
+
+    private void SetMountedGroupRange(int first, int lastExclusive)
+    {
+        _firstMountedGroup = Math.Clamp(first, 0, _groups.Length);
+        _lastMountedGroupExclusive = Math.Clamp(
+            Math.Max(_firstMountedGroup, lastExclusive), 0, _groups.Length);
+    }
+
+    internal int FirstMountedGroup => CanVirtualizeGroups ? _firstMountedGroup : 0;
+    internal int LastMountedGroupExclusive => CanVirtualizeGroups ? _lastMountedGroupExclusive : _groups.Length;
+    internal bool RenderVirtualSpacers => CanVirtualizeGroups
+        && (FirstMountedGroup > 0 || LastMountedGroupExclusive < _groups.Length);
+    internal double TopSpacerHeight => RenderVirtualSpacers
+        ? _groupHeightIndex.PrefixSum(FirstMountedGroup) : 0;
+    internal double BottomSpacerHeight => RenderVirtualSpacers
+        ? _groupHeightIndex.TotalHeight - _groupHeightIndex.PrefixSum(LastMountedGroupExclusive) : 0;
+
+    internal int RowsBeforeGroup(int groupIndex)
+    {
+        var total = 0;
+        for (var i = 0; i < groupIndex; i++) total += _groups[i].Rows.Length;
+        return total;
+    }
+
+    private void RequestFocusMove()
+    {
+        if (CanVirtualizeGroups && _focusedRowIndex >= 0)
+        {
+            var (groupIndex, _) = ResolveFlatIndex(_focusedRowIndex);
+            if (groupIndex >= 0
+                && (groupIndex < FirstMountedGroup || groupIndex >= LastMountedGroupExclusive))
+            {
+                SetMountedGroupRange(
+                    Math.Max(0, groupIndex - VirtualGroupOverscan),
+                    Math.Min(_groups.Length, groupIndex + VirtualGroupOverscan + 1));
+            }
+        }
+        _focusMovePending = true;
+        StateHasChanged();
+    }
+
     /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             _jsModule = await SchedulerViewPrimitives.TryLoadJsModuleAsync(JSRuntime);
+        }
+
+        if (_jsModule is not null && CanVirtualizeGroups && !_virtualizationRegistered)
+        {
+            try
+            {
+                _virtualizationRef ??= DotNetObjectReference.Create(new AgendaVirtualizationInterop(this));
+                await _jsModule.InvokeVoidAsync(
+                    "registerAgendaVirtualization", _agendaListRef, _virtualizationRef);
+                _virtualizationRegistered = true;
+            }
+            catch (JSException) { /* Non-fatal. */ }
+            catch (InvalidOperationException) { /* No JS runtime in tests. */ }
+        }
+        else if (_jsModule is not null && !CanVirtualizeGroups && _virtualizationRegistered)
+        {
+            try { await _jsModule.InvokeVoidAsync("unregisterAgendaVirtualization", _agendaListRef); }
+            catch (JSException) { /* Best-effort cleanup. */ }
+            _virtualizationRegistered = false;
         }
 
         // Issue #19 — move real browser focus onto the newly-active row after a
@@ -439,6 +577,13 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     /// <inheritdoc/>
     public override async ValueTask DisposeAsync()
     {
+        if (_jsModule is not null && _virtualizationRegistered)
+        {
+            try { await _jsModule.InvokeVoidAsync("unregisterAgendaVirtualization", _agendaListRef); }
+            catch (JSDisconnectedException) { /* Circuit gone. */ }
+            catch (JSException) { /* Best-effort cleanup. */ }
+        }
+        _virtualizationRef?.Dispose();
         if (_jsModule is not null)
         {
             try { await _jsModule.DisposeAsync(); }
@@ -446,6 +591,64 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
             catch (JSException) { /* Best-effort cleanup. */ }
         }
         await base.DisposeAsync();
+    }
+
+    private async Task<AgendaVirtualizationResult> UpdateAgendaVirtualViewportAsync(
+        AgendaVirtualViewport viewport)
+    {
+        if (!CanVirtualizeGroups || _groups.Length == 0) return new(false, 0);
+
+        var anchor = _groupHeightIndex.FindRow(viewport.ScrollTop);
+        var anchorOffset = viewport.ScrollTop - _groupHeightIndex.PrefixSum(anchor);
+        var heightsChanged = false;
+        if (viewport.GroupHeights is not null)
+        {
+            foreach (var measurement in viewport.GroupHeights)
+            {
+                heightsChanged |= _groupHeightIndex.Update(
+                    measurement.GroupIndex, measurement.Height);
+            }
+        }
+
+        var adjustment = heightsChanged
+            ? _groupHeightIndex.PrefixSum(anchor) + anchorOffset - viewport.ScrollTop
+            : 0;
+        var range = viewport.IsBounded
+            ? _groupHeightIndex.GetRange(
+                viewport.ScrollTop + adjustment, viewport.ClientHeight, VirtualGroupOverscan)
+            : (First: 0, LastExclusive: _groups.Length);
+        if (range.First == FirstMountedGroup
+            && range.LastExclusive == LastMountedGroupExclusive)
+        {
+            return new(false, adjustment);
+        }
+
+        SetMountedGroupRange(range.First, range.LastExclusive);
+        await InvokeAsync(StateHasChanged);
+        return new(true, adjustment);
+    }
+
+    private sealed class AgendaVirtualViewport
+    {
+        public bool IsBounded { get; set; }
+        public double ScrollTop { get; set; }
+        public double ClientHeight { get; set; }
+        public IReadOnlyList<AgendaVirtualMeasurement>? GroupHeights { get; set; }
+    }
+
+    private sealed class AgendaVirtualMeasurement
+    {
+        public int GroupIndex { get; set; }
+        public double Height { get; set; }
+    }
+
+    private sealed record AgendaVirtualizationResult(bool Changed, double ScrollAdjustment);
+
+    private sealed class AgendaVirtualizationInterop(CaleeSchedulerAgendaView<TEvent> owner)
+    {
+        [JSInvokable]
+        public Task<AgendaVirtualizationResult> UpdateAgendaVirtualViewport(
+            AgendaVirtualViewport viewport) => owner.UpdateAgendaVirtualViewportAsync(viewport);
     }
 
     // ----- Accessors used by the .razor markup -------------------------------------
@@ -550,8 +753,11 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
     internal string RowAccessibleName(EventRow row)
     {
         var time = FormatRowTime(row);
-        return $"{row.EventRef.Title}, {time}";
+        return RowAccessibleName(row, time);
     }
+
+    private static string RowAccessibleName(EventRow row, string time) =>
+        $"{row.EventRef.Title}, {time}";
 
     /// <summary>Consumer-supplied CSS class for an event (via base helper).</summary>
     internal string? ClassFor(TEvent ev) => GetEventClass(ev);
@@ -740,22 +946,19 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                     var total = TotalRowCount();
                     if (total == 0) return;
                     _focusedRowIndex = Math.Min(total - 1, flatIndex + 1);
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "ArrowUp":
                 {
                     _focusedRowIndex = Math.Max(0, flatIndex - 1);
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "Home":
                 {
                     _focusedRowIndex = 0;
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "End":
@@ -763,8 +966,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                     var total = TotalRowCount();
                     if (total == 0) return;
                     _focusedRowIndex = total - 1;
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "PageDown":
@@ -781,8 +983,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                         var total = TotalRowCount();
                         _focusedRowIndex = total - 1;
                     }
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "PageUp":
@@ -798,8 +999,7 @@ public partial class CaleeSchedulerAgendaView<TEvent> : SchedulerStatefulCompone
                     {
                         _focusedRowIndex = 0;
                     }
-                    _focusMovePending = true;
-                    StateHasChanged();
+                    RequestFocusMove();
                     break;
                 }
             case "Enter":

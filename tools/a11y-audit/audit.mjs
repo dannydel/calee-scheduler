@@ -52,6 +52,7 @@ const ROUTES = [
     { path: '/month',  waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown'] } },
     { path: '/year',   waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowDown', 'ArrowRight', 'ArrowDown'] } },
     { path: '/agenda', waitFor: '[data-calee-region="agenda"]', focusCheck: { keys: ['ArrowDown', 'ArrowDown'] } },
+    { path: '/agenda?virtualize=true', waitFor: '[data-calee-agenda-virtual-group]', agendaVirtualizationCheck: true },
     { path: '/fleet',  waitFor: '[role="grid"]', focusCheck: { keys: ['ArrowRight', 'ArrowDown'] } },
     { path: '/fleet?lanes=1000', waitFor: '[role="grid"]', timelineVirtualizationCheck: true },
 ];
@@ -86,6 +87,31 @@ async function checkRovingFocus(page, keys) {
     } catch (err) {
         return { pass: false, detail: `focus check threw: ${err.message}` };
     }
+}
+
+async function checkAgendaVirtualization(page) {
+    const list = page.locator('[data-calee-region="agenda-list"]');
+    const initialGroups = await page.locator('[data-calee-agenda-virtual-group]').count();
+    const initialElements = await page.locator('[data-calee-region="agenda"] *').count();
+    await list.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await page.locator('[data-calee-agenda-virtual-group="89"]').waitFor({ timeout: 5000 });
+    const endGroups = await page.locator('[data-calee-agenda-virtual-group]').count();
+    await list.evaluate(element => { element.scrollTop = 0; });
+    await page.locator('[data-calee-agenda-virtual-group="0"]').waitFor({ timeout: 5000 });
+
+    const firstRow = page.locator('[role="listitem"][tabindex="0"]').first();
+    await firstRow.focus();
+    await page.keyboard.press('End');
+    const focusMoved = await page.evaluate(sel => document.activeElement?.matches(sel) ?? false,
+        '[role="listitem"][tabindex="0"]');
+
+    return {
+        pass: initialGroups <= 12 && endGroups <= 12 && initialElements < 600 && focusMoved,
+        initialGroups,
+        endGroups,
+        initialElements,
+        focusMoved,
+    };
 }
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
@@ -301,12 +327,20 @@ async function auditOnce() {
                 console.log(timelineVirtualizationCheck.pass ? 'PASS' : 'FAIL');
             }
 
+            let agendaVirtualizationCheck;
+            if (route.agendaVirtualizationCheck) {
+                process.stdout.write(`  agenda-virtualization ${route.path} ... `);
+                agendaVirtualizationCheck = await checkAgendaVirtualization(page);
+                console.log(agendaVirtualizationCheck.pass ? 'PASS' : 'FAIL');
+            }
+
             results.push({
                 viewport: vp.name,
                 route: route.path,
                 violations,
                 ...(focusCheck ? { focusCheck } : {}),
                 ...(timelineVirtualizationCheck ? { timelineVirtualizationCheck } : {}),
+                ...(agendaVirtualizationCheck ? { agendaVirtualizationCheck } : {}),
                 ...(overflowCheck ? { overflowCheck } : {}),
                 ...(monthBarLabelCheck ? { monthBarLabelCheck } : {}),
             });
@@ -322,6 +356,8 @@ async function auditOnce() {
     const monthBarLabelFailures = results.filter(r => r.monthBarLabelCheck && !r.monthBarLabelCheck.pass).length;
     const timelineVirtualizationFailures = results.filter(
         r => r.timelineVirtualizationCheck && !r.timelineVirtualizationCheck.pass).length;
+    const agendaVirtualizationFailures = results.filter(
+        r => r.agendaVirtualizationCheck && !r.agendaVirtualizationCheck.pass).length;
 
     const report = {
         timestamp: new Date().toISOString(),
@@ -337,6 +373,7 @@ async function auditOnce() {
         monthBarLabelChecksRun: results.filter(r => r.monthBarLabelCheck).length,
         monthBarLabelFailures,
         timelineVirtualizationFailures,
+        agendaVirtualizationFailures,
     };
 
     const outPath = join(__dirname, 'report.json');
@@ -348,7 +385,8 @@ async function auditOnce() {
     console.log(`Month bar label checks: ${report.monthBarLabelChecksRun} run, ${monthBarLabelFailures} failed`);
 
     if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0
-        || monthBarLabelFailures > 0 || timelineVirtualizationFailures > 0 || results.some(r => r.error)) {
+        || monthBarLabelFailures > 0 || timelineVirtualizationFailures > 0
+        || agendaVirtualizationFailures > 0 || results.some(r => r.error)) {
         process.exit(1);
     }
 }
@@ -424,6 +462,7 @@ async function auditKeyboardInteractions() {
         const initialCell = page.locator('[role="gridcell"][tabindex="0"]').first();
         await initialCell.focus();
         await page.keyboard.press('?');
+        const closeButton = page.getByRole('button', { name: 'Close' });
         await closeButton.waitFor({ state: 'visible', timeout: 5000 });
         await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Close', null, { timeout: 5000 });
         const helpFocus = await closeButton.evaluate(el => document.activeElement === el);

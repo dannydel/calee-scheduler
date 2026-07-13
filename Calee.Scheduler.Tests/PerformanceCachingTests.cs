@@ -93,6 +93,67 @@ public class PerformanceCachingTests
         Assert.Single(cut.Instance.Row(1).Layout.Positioned);
     }
 
+    [Fact]
+    public void Agenda_UnchangedInputsReuseGroups_And_Exclude_OffWindow_Lookups()
+    {
+        using var context = NewContext();
+        var visible = new MutableEvent("visible", "Visible", Anchor.AddHours(9), Anchor.AddHours(10));
+        var future = new MutableEvent("future", "Future", Anchor.AddDays(30), Anchor.AddDays(30).AddHours(1));
+        var events = new List<MutableEvent> { visible, future };
+        var cut = context.Render<CaleeSchedulerAgendaView<MutableEvent>>(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+        var initialGroups = cut.Instance.Groups;
+
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+
+        Assert.Same(initialGroups, cut.Instance.Groups);
+        Assert.NotNull(cut.Instance.TypedForId("visible"));
+        Assert.Null(cut.Instance.TypedForId("future"));
+
+        visible.Start = Anchor.AddHours(11);
+        visible.End = Anchor.AddHours(12);
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+
+        Assert.NotSame(initialGroups, cut.Instance.Groups);
+    }
+
+    [Fact]
+    public void Year_UnchangedInputsReuseMonths_AndInPlaceMutationInvalidatesDensity()
+    {
+        using var context = NewContext();
+        var ev = new MutableEvent("event", "Event", Anchor.AddHours(9), Anchor.AddHours(10));
+        var events = new List<MutableEvent> { ev };
+        var cut = context.Render<CaleeSchedulerYearView<MutableEvent>>(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+        var initialMonths = cut.Instance.Months;
+
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+
+        Assert.Same(initialMonths, cut.Instance.Months);
+
+        ev.Start = Anchor.AddDays(1).AddHours(9);
+        ev.End = Anchor.AddDays(1).AddHours(10);
+        cut.Render(parameters => parameters
+            .Add(component => component.TimeZone, TZ)
+            .Add(component => component.Date, Anchor)
+            .Add(component => component.Events, events));
+
+        Assert.NotSame(initialMonths, cut.Instance.Months);
+    }
+
     private static BunitContext NewContext()
     {
         var context = new BunitContext();

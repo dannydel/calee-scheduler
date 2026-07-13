@@ -101,16 +101,10 @@
                 var widthCols = bar.LastColIndex - bar.FirstColIndex + 1;
                 var leftPct = (double)bar.FirstColIndex / ColumnCount * 100.0;
                 var widthPct = (double)widthCols / ColumnCount * 100.0;
-                var styleParts = new List<string>
-                {
-                    $"left: {leftPct:F4}%",
-                    $"width: {widthPct:F4}%"
-                };
-                if (bar.Event.Color is not null)
-                {
-                    styleParts.Add($"--calee-scheduler-event-color: {bar.Event.Color}");
-                }
-                var style = string.Join("; ", styleParts) + ";";
+                var style = $"left: {leftPct:F4}%; width: {widthPct:F4}%;"
+                    + (bar.Event.Color is null
+                        ? string.Empty
+                        : $" --calee-scheduler-event-color: {bar.Event.Color};");
                 var barIsSelected = IsEventSelected(bar.Event.Id);
                 var classes = "calee-scheduler-all-day-event"
                     + (bar.ClipLeft ? " calee-scheduler-all-day-event--clip-left" : string.Empty)
@@ -234,18 +228,11 @@
                             ICalendarEvent displayEv = (typed is not null && GetOptimisticPin(typed.Id) is not null)
                                 ? pe.Event
                                 : UnwrapForFormatting(pe);
-                            var styleParts = new List<string>
-                            {
-                                $"top: {pe.TimeStartPercent:F4}%",
-                                $"height: {pe.TimeSpanPercent:F4}%",
-                                $"left: {stackLeft:F4}%",
-                                $"width: {stackWidth:F4}%"
-                            };
-                            if (displayEv.Color is not null)
-                            {
-                                styleParts.Add($"--calee-scheduler-event-color: {displayEv.Color}");
-                            }
-                            var style = string.Join("; ", styleParts) + ";";
+                            var style = $"top: {pe.TimeStartPercent:F4}%; height: {pe.TimeSpanPercent:F4}%; "
+                                + $"left: {stackLeft:F4}%; width: {stackWidth:F4}%;"
+                                + (displayEv.Color is null
+                                    ? string.Empty
+                                    : $" --calee-scheduler-event-color: {displayEv.Color};");
                             var clipTop = ClippedTop(pe);
                             var clipBot = ClippedBottom(pe);
                             var isSelected = IsEventSelected(displayEv.Id);

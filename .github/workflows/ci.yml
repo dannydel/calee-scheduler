@@ -63,7 +63,8 @@ jobs:
 
       - name: Performance regression guard
         env:
-          CALEE_LAYOUT_MEDIAN_THRESHOLD_MS: '100'
+          CALEE_LAYOUT_MEDIAN_THRESHOLD_MS: '10'
+          CALEE_AGENDA_MEDIAN_THRESHOLD_MS: '250'
         run: >
           dotnet test Calee.Scheduler.Tests/Calee.Scheduler.Tests.csproj
           --configuration Release

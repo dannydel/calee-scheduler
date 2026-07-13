@@ -103,6 +103,8 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
 
     // The twelve months of the displayed year (1..12). Computed once and reused.
     private MonthLayout[] _months = Array.Empty<MonthLayout>();
+    private EventGeometrySnapshot<TEvent>? _densityEventSnapshot;
+    private (int Year, DayOfWeek FirstDay, TimeZoneInfo TimeZone)? _densityInputs;
 
     // Roving-tabindex anchor for the grid. Stored as (monthIndex, cellIndex within month's
     // 6-week × 7-day matrix). monthIndex is 0..11; cellIndex is 0..41. -1/-1 = no focus yet.
@@ -140,9 +142,21 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
         _resolvedFirstDayOfWeek = FirstDayOfWeek ?? opts.DefaultFirstDayOfWeek;
 
         _displayedYear = CurrentDate.Year;
-        ComputeYearRange();
-        ComputeMonths();
-        ComputeDensity();
+        var filtered = GetFilteredEvents();
+        var inputs = (_displayedYear, _resolvedFirstDayOfWeek, ResolvedTimeZone);
+        if (EventFilter is not null
+            || _densityInputs != inputs
+            || _densityEventSnapshot is null
+            || !_densityEventSnapshot.Matches(filtered))
+        {
+            ComputeYearRange();
+            ComputeMonths();
+            ComputeDensity(filtered);
+            _densityInputs = inputs;
+            _densityEventSnapshot = EventFilter is null
+                ? EventGeometrySnapshot<TEvent>.Capture(filtered)
+                : null;
+        }
         ClampFocus();
 
         if (_lastRangeStart != YearStart || _lastRangeEnd != YearEndExclusive)
@@ -215,9 +229,8 @@ public partial class CaleeSchedulerYearView<TEvent> : SchedulerStatefulComponent
     /// next year) are skipped at the top of the loop; the engine never sees them.
     /// </para>
     /// </remarks>
-    private void ComputeDensity()
+    private void ComputeDensity(IReadOnlyList<TEvent> filtered)
     {
-        var filtered = GetFilteredEvents();
         _densityByDate = new Dictionary<DateOnly, int>(filtered.Count == 0 ? 0 : 64);
 
         if (filtered.Count == 0) return;

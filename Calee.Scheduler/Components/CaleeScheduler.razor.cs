@@ -230,6 +230,13 @@ public partial class CaleeScheduler<TEvent> : SchedulerStatefulComponentBase<TEv
     public int AgendaDays { get; set; } = 7;
 
     /// <summary>
+    /// Enables measured date-group virtualization while the Agenda view is active.
+    /// Disabled by default for source- and rendering-compatible 1.x behavior.
+    /// </summary>
+    [Parameter]
+    public bool EnableAgendaVirtualization { get; set; }
+
+    /// <summary>
     /// Whether the Year entry appears in the toolbar's view switcher. Defaults to
     /// <see langword="true"/>; set <see langword="false"/> to hide the Year button
     /// (and keep <c>view.year</c> out of the toolbar UI). The

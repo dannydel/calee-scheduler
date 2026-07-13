@@ -201,6 +201,69 @@ export function unregisterTimelineVirtualization(container) {
     _timelineVirtualizations.delete(container);
 }
 
+const _agendaVirtualizations = new WeakMap();
+
+function _scheduleAgendaViewport(state) {
+    if (state.frame || state.inFlight) return;
+    state.frame = requestAnimationFrame(async () => {
+        state.frame = 0;
+        state.inFlight = true;
+        try {
+            const groups = [...state.container.querySelectorAll('[data-calee-agenda-virtual-group]')];
+            const result = await state.dotNetRef.invokeMethodAsync('UpdateAgendaVirtualViewport', {
+                isBounded: state.container.scrollHeight > state.container.clientHeight + 1,
+                scrollTop: state.container.scrollTop,
+                clientHeight: state.container.clientHeight,
+                groupHeights: groups.map(group => ({
+                    groupIndex: Number(group.dataset.caleeAgendaVirtualGroup),
+                    height: group.getBoundingClientRect().height
+                })).filter(group => Number.isInteger(group.groupIndex) && group.height > 0)
+            });
+            if (result && Math.abs(result.scrollAdjustment || 0) > 0.01) {
+                requestAnimationFrame(() => { state.container.scrollTop += result.scrollAdjustment; });
+            }
+        } finally {
+            state.inFlight = false;
+            if (state.queued) {
+                state.queued = false;
+                _scheduleAgendaViewport(state);
+            }
+        }
+    });
+}
+
+export function registerAgendaVirtualization(container, dotNetRef) {
+    if (!container || !dotNetRef) return;
+    unregisterAgendaVirtualization(container);
+    const state = {
+        container,
+        dotNetRef,
+        frame: 0,
+        inFlight: false,
+        queued: false,
+        onScroll: null,
+        observer: null
+    };
+    state.onScroll = () => {
+        if (state.inFlight) state.queued = true;
+        else _scheduleAgendaViewport(state);
+    };
+    state.observer = new MutationObserver(() => _scheduleAgendaViewport(state));
+    container.addEventListener('scroll', state.onScroll, { passive: true });
+    state.observer.observe(container, { childList: true, subtree: true });
+    _agendaVirtualizations.set(container, state);
+    _scheduleAgendaViewport(state);
+}
+
+export function unregisterAgendaVirtualization(container) {
+    const state = container ? _agendaVirtualizations.get(container) : null;
+    if (!state) return;
+    if (state.frame) cancelAnimationFrame(state.frame);
+    state.container.removeEventListener('scroll', state.onScroll);
+    state.observer.disconnect();
+    _agendaVirtualizations.delete(container);
+}
+
 /**
  * Move focus to the supplied element (a no-op if null).
  *

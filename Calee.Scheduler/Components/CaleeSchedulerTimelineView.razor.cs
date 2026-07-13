@@ -42,6 +42,11 @@ namespace Calee.Scheduler.Components;
 public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulComponentBase<TEvent>, IAsyncDisposable
     where TEvent : ICalendarEvent
 {
+    private static readonly LayoutResult EmptyLayout = new(
+        Array.Empty<PositionedEvent>(),
+        Array.Empty<ICalendarEvent>(),
+        Array.Empty<ICalendarEvent>(),
+        Array.Empty<OverlapOverflowBlock>());
     /// <summary>
     /// Lanes whose events should be grouped into rows, in the supplied order.
     /// Required (PRD §4.6); null hard-fails. An empty list is acceptable — the view
@@ -592,6 +597,18 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         int? startHour,
         int? endHour)
     {
+        if (rowEvents.Count == 0)
+        {
+            return new RowLayout(
+                LaneId: laneId,
+                LaneName: laneName,
+                LaneColor: laneColor,
+                Set: VisibleEventSet<TEvent>.Empty,
+                AllDay: Array.Empty<TEvent>(),
+                Layout: EmptyLayout,
+                IsUnassigned: isUnassigned);
+        }
+
         var rowSet = new VisibleEventSet<TEvent>(
             rowEvents, _rangeStart, _rangeEndExclusive, ResolvedTimeZone, EventSplitMode.Continuous);
 

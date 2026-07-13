@@ -62,9 +62,10 @@
                                   @ref="_view"
                                   TimeZone="@SchedulerSeed.DefaultTimeZone"
                                   @bind-Date="_anchor"
-                                  AgendaDays="@_agendaDays"
+                                  AgendaDays="@EffectiveAgendaDays"
                                   Events="@_events"
-                                  AllowDragToMove="true"
+                                  EnableVirtualization="@Virtualize"
+                                  AllowDragToMove="@(!Virtualize)"
                                   OnEventMoved="HandleEventMoved"
                                   AllowCommandPalette="true"
                                   OnEventClicked="HandleEventClicked"
@@ -109,6 +110,10 @@
                       OnClose="@(() => _paletteVisible = false)" />
 
 @code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "virtualize")]
+    public bool Virtualize { get; set; }
+
     /// <summary>Agenda fixtures anchored relative to the visible window.</summary>
     private List<CalendarEvent> _events = new();
 
@@ -120,6 +125,7 @@
 
     /// <summary>Selected window length — toggled via the radios above the list.</summary>
     private int _agendaDays = 7;
+    private int EffectiveAgendaDays => Virtualize ? 90 : _agendaDays;
 
     /// <summary>Last drill-down event description — surfaced in the inline log below the list.</summary>
     private string? _lastDrillMessage;
@@ -159,12 +165,19 @@
 
     protected override void OnInitialized()
     {
-        _events = SchedulerSeed.GetAgendaSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
+        _events = Virtualize
+            ? BuildVirtualizationFixture()
+            : SchedulerSeed.GetAgendaSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
         _lastSeededAnchorDate = TimeZoneInfo.ConvertTime(_anchor, SchedulerSeed.DefaultTimeZone).Date;
     }
 
     protected override void OnParametersSet()
     {
+        if (Virtualize)
+        {
+            if (_events.Count != 2_000) _events = BuildVirtualizationFixture();
+            return;
+        }
         // Re-seed when the anchor's date changes — the seed is window-relative,
         // so prev/next reveals fresh fixtures.
         var anchorDate = TimeZoneInfo.ConvertTime(_anchor, SchedulerSeed.DefaultTimeZone).Date;
@@ -173,6 +186,20 @@
             _events = SchedulerSeed.GetAgendaSeed(_anchor, SchedulerSeed.DefaultTimeZone).ToList();
             _lastSeededAnchorDate = anchorDate;
         }
+    }
+
+    private List<CalendarEvent> BuildVirtualizationFixture()
+    {
+        var date = TimeZoneInfo.ConvertTime(_anchor, SchedulerSeed.DefaultTimeZone).Date;
+        var start = new DateTimeOffset(date, SchedulerSeed.DefaultTimeZone.GetUtcOffset(date));
+        var events = new List<CalendarEvent>(2_000);
+        for (var i = 0; i < 2_000; i++)
+        {
+            var eventStart = start.AddDays(i % 90).AddMinutes(i / 90);
+            events.Add(new CalendarEvent(
+                $"virtual-{i:D4}", $"Virtual event {i}", eventStart, eventStart.AddMinutes(30)));
+        }
+        return events;
     }
 
     // ── Click-popover + edit-dialog state ───────────────────────────────────

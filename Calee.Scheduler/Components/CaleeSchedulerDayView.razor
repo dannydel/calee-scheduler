@@ -198,18 +198,11 @@
                     var stackWidth = 100.0 / Math.Max(1, pe.StackCount);
                     var stackLeft = stackWidth * pe.StackIndex;
                     var consumerEventClass = typed is not null ? GetEventClass(typed) : null;
-                    var styleParts = new List<string>
-                    {
-                        $"top: {pe.TimeStartPercent:F4}%",
-                        $"height: {pe.TimeSpanPercent:F4}%",
-                        $"left: {stackLeft:F4}%",
-                        $"width: {stackWidth:F4}%"
-                    };
-                    if (displayEv.Color is not null)
-                    {
-                        styleParts.Add($"--calee-scheduler-event-color: {displayEv.Color}");
-                    }
-                    var style = string.Join("; ", styleParts) + ";";
+                    var style = $"top: {pe.TimeStartPercent:F4}%; height: {pe.TimeSpanPercent:F4}%; "
+                        + $"left: {stackLeft:F4}%; width: {stackWidth:F4}%;"
+                        + (displayEv.Color is null
+                            ? string.Empty
+                            : $" --calee-scheduler-event-color: {displayEv.Color};");
                     var clipTop = ClippedTop(pe);
                     var clipBot = ClippedBottom(pe);
                     var isSelected = IsEventSelected(displayEv.Id);

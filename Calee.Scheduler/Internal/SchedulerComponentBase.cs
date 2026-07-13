@@ -45,6 +45,7 @@ namespace Calee.Scheduler.Internal;
 public abstract class SchedulerComponentBase<TEvent> : ComponentBase
     where TEvent : ICalendarEvent
 {
+    private readonly HashSet<string> _uniqueEventIds = new(StringComparer.Ordinal);
     /// <summary>
     /// Time zone used to compute "today", day boundaries, and the offset stamped onto
     /// emitted <see cref="SchedulerSlot"/> values. Optional (issue #34) — resolved via a
@@ -2319,15 +2320,16 @@ public abstract class SchedulerComponentBase<TEvent> : ComponentBase
         return filtered;
     }
 
-    private static void EnsureUniqueEventIds(IReadOnlyList<TEvent> events)
+    private void EnsureUniqueEventIds(IReadOnlyList<TEvent> events)
     {
+        _uniqueEventIds.Clear();
         if (events.Count < 2) return;
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        _uniqueEventIds.EnsureCapacity(events.Count);
         for (var i = 0; i < events.Count; i++)
         {
             var id = events[i].Id;
-            if (seen.Add(id)) continue;
+            if (_uniqueEventIds.Add(id)) continue;
 
             throw new ArgumentException(
                 $"Events contains duplicate event Id '{id}'. Event Id values must be unique within the rendered event set.",

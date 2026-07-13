@@ -412,6 +412,74 @@ public class CaleeSchedulerWeekViewTests
     }
 
     [Fact]
+    public async Task Occupied_Slots_Are_Not_Interactive_Targets()
+    {
+        using var ctx = NewContext();
+        SchedulerSlot? captured = null;
+        var busy = Timed("busy", Edt(2026, 5, 17), 8, 9);
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 10)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.AllowDoubleClickToCreate, true)
+            .Add(c => c.AllowDragToCreate, true)
+            .Add(c => c.Events, new[] { busy })
+            .Add(c => c.OnSlotClicked,
+                EventCallback.Factory.Create<SchedulerSlot>(this, s => captured = s)));
+
+        var slotRows = cut.Find("[data-calee-region='hour-grid']")
+            .QuerySelectorAll(".calee-scheduler-slot-row");
+        var occupied = slotRows[0].QuerySelectorAll(".calee-scheduler-slot")[0];
+
+        Assert.Contains("calee-scheduler-slot--occupied", occupied.ClassList);
+        Assert.DoesNotContain("calee-scheduler-slot--create-affordance", occupied.ClassList);
+        Assert.False(occupied.HasAttribute("tabindex"));
+        Assert.False(occupied.HasAttribute("aria-label"));
+        Assert.Equal("true", occupied.GetAttribute("aria-disabled"));
+
+        Assert.Throws<MissingEventHandlerException>(() => occupied.Click());
+        await cut.InvokeAsync(() => cut.Instance.HandleSlotClickAsync(0, 0));
+        Assert.Null(captured);
+
+        var tabbable = slotRows[2].QuerySelectorAll(".calee-scheduler-slot")[0];
+        Assert.Equal("0", tabbable.GetAttribute("tabindex"));
+    }
+
+    [Fact]
+    public async Task Keyboard_Navigation_Skips_Occupied_Slots()
+    {
+        using var ctx = NewContext();
+        SchedulerSlot? captured = null;
+        var busy = Timed("busy", Edt(2026, 5, 17), 8, 9, startMin: 30);
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.StartHour, 8)
+            .Add(c => c.EndHour, 10)
+            .Add(c => c.SlotDurationMinutes, 30)
+            .Add(c => c.Events, new[] { busy })
+            .Add(c => c.OnSlotClicked,
+                EventCallback.Factory.Create<SchedulerSlot>(this, s => captured = s)));
+
+        var grid = cut.Find("[role='grid']");
+        await cut.InvokeAsync(() => grid.KeyDown("ArrowDown"));
+
+        var slotRows = cut.Find("[data-calee-region='hour-grid']")
+            .QuerySelectorAll(".calee-scheduler-slot-row");
+        var tabbable = slotRows[2].QuerySelectorAll(".calee-scheduler-slot")[0];
+        Assert.Equal("0", tabbable.GetAttribute("tabindex"));
+
+        await cut.InvokeAsync(() => grid.KeyDown("Enter"));
+        Assert.NotNull(captured);
+        Assert.Equal(9, captured!.Start.Hour);
+        Assert.Equal(0, captured.Start.Minute);
+    }
+
+    [Fact]
     public void EventFilter_Applies_Across_All_Days()
     {
         using var ctx = NewContext();

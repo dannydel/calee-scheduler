@@ -32,9 +32,17 @@
     flex-direction: column;
     height: 100%;
     min-height: 400px;
+    overflow-x: auto;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     color: #18181b;
     background: #ffffff;
+}
+
+.calee-scheduler-week-canvas {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .calee-scheduler-week-header-row {
@@ -307,6 +315,11 @@
     z-index: 2;
 }
 
+.calee-scheduler-slot--occupied {
+    cursor: default;
+    pointer-events: none;
+}
+
 /* Drag-to-create affordance (FR-24). Matches Day view's rule. */
 .calee-scheduler-slot--create-affordance {
     cursor: cell;
@@ -485,23 +498,15 @@
 /*
  * Responsive layout pass (issue #10). Breakpoint: 640px (see README §8.1).
  *
- * Week is the tight case: 7 day columns at the 80px default min-width plus the
- * 4rem gutter need ~624px and would overflow a 390px page. Rather than
- * introducing a horizontal-scroll container (which would desync the header row
- * from the absolutely-positioned hour-grid columns and fight the JS initial-
- * scroll offset), the day-column min-width floor is lowered to 40px at mobile.
- * 7 × 40px + a compressed 2.75rem gutter ≈ 324px, which fits 390px with room to
- * spare, and the columns stay proportionally fluid via their `flex: 1 1 0`.
- * The weekday label ("MON") and date number remain legible at that width.
+ * Week is the tight case: overlap stacks need each day column to retain enough
+ * width for 24px event and overflow targets. The shared canvas therefore keeps
+ * the header and absolutely-positioned hour grid aligned inside the root's
+ * horizontal scroller instead of compressing targets below WCAG 2.2 AA.
  *
  * All four 4rem gutters (header, all-day, overflow, hour-grid) compress to
  * 2.75rem in lockstep so the columns line up. Hour labels drop to 0.6875rem.
  */
 @media (max-width: 640px) {
-    .calee-scheduler-week {
-        --calee-scheduler-day-column-min-width: 40px;
-    }
-
     .calee-scheduler-week-header-gutter,
     .calee-scheduler-week-allday-gutter,
     .calee-scheduler-week-overflow-gutter,

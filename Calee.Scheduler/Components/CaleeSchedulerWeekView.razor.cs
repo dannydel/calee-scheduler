@@ -409,6 +409,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
                 ResolvedTimeZone);
         }
 
+        EnsureFocusedSlotIsAvailable();
         PruneEventRefs();
     }
 
@@ -540,6 +541,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <see cref="VisibleDays"/> subset (1..7) when supplied.
     /// </summary>
     internal int ColumnCount => _weekDays.Count;
+
+    /// <summary>
+    /// Minimum shared canvas width: the default 4rem gutter plus 80px per visible day.
+    /// Keeping every row on the same canvas preserves alignment while the root scrolls.
+    /// </summary>
+    internal int MinimumCanvasWidthPixels => 64 + ColumnCount * 80;
 
     /// <summary>Convert hour-of-day into a percentage of the visible vertical band.</summary>
     internal double HourToPercent(int hour) =>
@@ -836,6 +843,8 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// when the clicked slot has tabindex=-1.</summary>
     internal async Task HandleSlotClickAsync(int colIndex, int slotIndex)
     {
+        if (IsSlotOccupied(colIndex, slotIndex)) return;
+
         var startMinutes = _resolvedStartHour * 60 + slotIndex * _resolvedSlotMinutes;
         var endMinutes = startMinutes + _resolvedSlotMinutes;
         var start = SchedulerViewPrimitives.TimeInZone(_weekDays[colIndex].Start.Date, startMinutes, ResolvedTimeZone);
@@ -903,28 +912,49 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         switch (e.Key)
         {
             case "ArrowDown":
-                _focusedRowIndex = Math.Min(SlotCount - 1, _focusedRowIndex + 1);
-                _focusMovePending = true;
-                StateHasChanged();
+                MoveFocusedRow(1);
                 break;
             case "ArrowUp":
-                _focusedRowIndex = Math.Max(0, _focusedRowIndex - 1);
-                _focusMovePending = true;
-                StateHasChanged();
+                MoveFocusedRow(-1);
                 break;
             case "ArrowRight":
-                _focusedColumnIndex = Math.Min(ColumnCount - 1, _focusedColumnIndex + 1);
-                _focusMovePending = true;
-                StateHasChanged();
+                MoveFocusedColumn(1);
                 break;
             case "ArrowLeft":
-                _focusedColumnIndex = Math.Max(0, _focusedColumnIndex - 1);
-                _focusMovePending = true;
-                StateHasChanged();
+                MoveFocusedColumn(-1);
                 break;
             case "Enter":
-                await HandleSlotClickAsync(_focusedColumnIndex, _focusedRowIndex);
+                if (!IsSlotOccupied(_focusedColumnIndex, _focusedRowIndex))
+                {
+                    await HandleSlotClickAsync(_focusedColumnIndex, _focusedRowIndex);
+                }
                 break;
+        }
+    }
+
+    private void MoveFocusedRow(int direction)
+    {
+        for (var row = _focusedRowIndex + direction; row >= 0 && row < SlotCount; row += direction)
+        {
+            if (IsSlotOccupied(_focusedColumnIndex, row)) continue;
+
+            _focusedRowIndex = row;
+            _focusMovePending = true;
+            StateHasChanged();
+            return;
+        }
+    }
+
+    private void MoveFocusedColumn(int direction)
+    {
+        for (var col = _focusedColumnIndex + direction; col >= 0 && col < ColumnCount; col += direction)
+        {
+            if (IsSlotOccupied(col, _focusedRowIndex)) continue;
+
+            _focusedColumnIndex = col;
+            _focusMovePending = true;
+            StateHasChanged();
+            return;
         }
     }
 
@@ -1274,9 +1304,82 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
         await BlurActiveAsync();
     }
 
-    /// <summary>Returns true when the supplied (column, row) is the currently-tabbable cell.</summary>
+    /// <summary>Returns true when a positioned event or overlap block intersects the supplied slot.</summary>
+    internal bool IsSlotOccupied(int colIndex, int rowIndex)
+    {
+        if (colIndex < 0 || colIndex >= _layoutPerDay.Length || rowIndex < 0 || rowIndex >= SlotCount)
+        {
+            return false;
+        }
+
+        var slotStart = (double)rowIndex / SlotCount * 100.0;
+        var slotEnd = (double)(rowIndex + 1) / SlotCount * 100.0;
+        var layout = _layoutPerDay[colIndex];
+
+        foreach (var positionedEvent in layout.Positioned)
+        {
+            if (RangesOverlap(
+                slotStart,
+                slotEnd,
+                positionedEvent.TimeStartPercent,
+                positionedEvent.TimeStartPercent + positionedEvent.TimeSpanPercent))
+            {
+                return true;
+            }
+        }
+
+        foreach (var block in layout.OverlapOverflow)
+        {
+            if (RangesOverlap(
+                slotStart,
+                slotEnd,
+                block.TimeStartPercent,
+                block.TimeStartPercent + block.TimeSpanPercent))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool RangesOverlap(double firstStart, double firstEnd, double secondStart, double secondEnd) =>
+        firstStart < secondEnd && secondStart < firstEnd;
+
+    private void EnsureFocusedSlotIsAvailable()
+    {
+        if (ColumnCount == 0 || SlotCount == 0) return;
+
+        _focusedColumnIndex = Math.Clamp(_focusedColumnIndex, 0, ColumnCount - 1);
+        _focusedRowIndex = Math.Clamp(_focusedRowIndex, 0, SlotCount - 1);
+        if (!IsSlotOccupied(_focusedColumnIndex, _focusedRowIndex)) return;
+
+        for (var row = _focusedRowIndex + 1; row < SlotCount; row++)
+        {
+            if (IsSlotOccupied(_focusedColumnIndex, row)) continue;
+
+            _focusedRowIndex = row;
+            return;
+        }
+
+        for (var col = 0; col < ColumnCount; col++)
+        {
+            for (var row = 0; row < SlotCount; row++)
+            {
+                if (IsSlotOccupied(col, row)) continue;
+
+                _focusedColumnIndex = col;
+                _focusedRowIndex = row;
+                return;
+            }
+        }
+    }
+
+    /// <summary>Returns true when the supplied empty (column, row) is the currently-tabbable cell.</summary>
     internal bool IsSlotTabbable(int colIndex, int rowIndex) =>
-        colIndex == _focusedColumnIndex && rowIndex == _focusedRowIndex;
+        colIndex == _focusedColumnIndex
+        && rowIndex == _focusedRowIndex
+        && !IsSlotOccupied(colIndex, rowIndex);
 
     /// <summary>Build the accessible name for a positioned event in the supplied column.</summary>
     internal string EventAccessibleName(PositionedEvent pe, int colIndex)

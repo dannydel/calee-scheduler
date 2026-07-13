@@ -19,6 +19,10 @@
  *   --calee-scheduler-day-column-min-width   Minimum width per day column.
  *                                            Default 80px.
  *
+ * Internal layout variables (set inline by the renderer):
+ *   --calee-scheduler-all-day-lane-count     Number of stacked all-day lanes.
+ *   --calee-scheduler-all-day-lane-index     Lane occupied by one all-day bar.
+ *
  * `var(..., <fallback>)` is used at each consumption site for the shared
  * tokens so the Week view still renders correctly when used standalone
  * (without the root wrapper). Selectors are single-class so consumer
@@ -126,10 +130,9 @@
 .calee-scheduler-week-allday-grid {
     position: relative;
     flex: 1 1 auto;
-    /* Positioning context for the all-day chips; matches the row's 2rem lane so
-       the inset chip resolves to 1.5rem — 24px at the default 16px root font
-       size (SC 2.5.8). */
-    min-height: 2rem;
+    /* Each overlapping bar receives its own 2rem lane. The 0.25rem vertical
+       inset leaves a 1.5rem (24px) target at the default root font size. */
+    min-height: calc(var(--calee-scheduler-all-day-lane-count, 1) * 2rem);
 }
 
 .calee-scheduler-week-allday-cell {
@@ -143,8 +146,8 @@
 .calee-scheduler-all-day-event {
     --calee-scheduler-event-color: var(--calee-scheduler-event-default-color, #4a6ea8);
     position: absolute;
-    top: 0.25rem;
-    bottom: 0.25rem;
+    top: calc(var(--calee-scheduler-all-day-lane-index, 0) * 2rem + 0.25rem);
+    height: 1.5rem;
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;

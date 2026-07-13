@@ -155,6 +155,7 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     // All-day "bars" — each spans 1+ contiguous day columns. Computed once per render.
     private List<AllDayBar> _allDayBars = new();
+    private int _allDayLaneCount = 1;
 
     // Frozen-by-construction pre-processed view of the filtered events:
     // owns all-day classification, multi-day per-day chunk splitting, and Id→TEvent lookup.
@@ -362,8 +363,9 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
             var clipLeft = ev.Start < _weekDays[firstCol].Start;
             var clipRight = ev.End > _weekDays[lastCol].End;
-            _allDayBars.Add(new AllDayBar(ev, firstCol, lastCol, clipLeft, clipRight));
+            _allDayBars.Add(new AllDayBar(ev, firstCol, lastCol, clipLeft, clipRight, LaneIndex: 0));
         }
+        _allDayLaneCount = AssignAllDayLanes(_allDayBars);
 
         // Apply any optimistic-pin overrides (ADR-0006) before per-day bucketing so a
         // pinned event's chunks rebucket to its new day column. ApplyOptimisticPins
@@ -411,6 +413,44 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
         EnsureFocusedSlotIsAvailable();
         PruneEventRefs();
+    }
+
+    /// <summary>
+    /// Greedily assigns horizontally overlapping all-day bars to separate vertical lanes.
+    /// Bars are ordered by their first column so the lowest available lane produces the
+    /// minimum lane count for interval data; event id makes equal starts deterministic.
+    /// </summary>
+    private static int AssignAllDayLanes(List<AllDayBar> bars)
+    {
+        bars.Sort((a, b) =>
+        {
+            var byStart = a.FirstColIndex.CompareTo(b.FirstColIndex);
+            return byStart != 0 ? byStart : string.CompareOrdinal(a.Event.Id, b.Event.Id);
+        });
+
+        var laneRights = new List<int>();
+        for (var i = 0; i < bars.Count; i++)
+        {
+            var bar = bars[i];
+            var laneIndex = 0;
+            while (laneIndex < laneRights.Count && laneRights[laneIndex] >= bar.FirstColIndex)
+            {
+                laneIndex++;
+            }
+
+            if (laneIndex == laneRights.Count)
+            {
+                laneRights.Add(bar.LastColIndex);
+            }
+            else
+            {
+                laneRights[laneIndex] = bar.LastColIndex;
+            }
+
+            bars[i] = bar with { LaneIndex = laneIndex };
+        }
+
+        return Math.Max(1, laneRights.Count);
     }
 
     private bool WeekLayoutInputsChanged()
@@ -673,6 +713,9 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
 
     /// <summary>The all-day bars to render across the all-day row.</summary>
     internal IReadOnlyList<AllDayBar> AllDayBars => _allDayBars;
+
+    /// <summary>Number of vertical lanes required by the all-day bars, with one lane retained when empty.</summary>
+    internal int AllDayLaneCount => _allDayLaneCount;
 
     /// <summary>Positioned timed events for the supplied column.</summary>
     internal IReadOnlyList<PositionedEvent> PositionedEventsFor(int colIndex) =>
@@ -2234,10 +2277,12 @@ public partial class CaleeSchedulerWeekView<TEvent> : SchedulerStatefulComponent
     /// <param name="LastColIndex">Inclusive rightmost column index this bar covers (0..6).</param>
     /// <param name="ClipLeft">True when the event begins before the visible week (left-edge clip).</param>
     /// <param name="ClipRight">True when the event extends past the visible week (right-edge clip).</param>
+    /// <param name="LaneIndex">Zero-based vertical lane assigned to avoid overlapping bars.</param>
     internal sealed record AllDayBar(
         ICalendarEvent Event,
         int FirstColIndex,
         int LastColIndex,
         bool ClipLeft,
-        bool ClipRight);
+        bool ClipRight,
+        int LaneIndex);
 }

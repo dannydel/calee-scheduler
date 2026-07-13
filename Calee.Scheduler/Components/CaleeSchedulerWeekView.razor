@@ -89,7 +89,8 @@
     @* (2) All-day row — one continuous bar per all-day event spanning its covered columns *@
     <div class="@allDayRowClasses" data-calee-region="all-day">
         <div class="calee-scheduler-week-allday-gutter" aria-hidden="true"></div>
-        <div class="calee-scheduler-week-allday-grid">
+        <div class="calee-scheduler-week-allday-grid"
+             style="@($"--calee-scheduler-all-day-lane-count: {AllDayLaneCount};")">
             @* Layered column background — visual anchor for the bars positioned absolutely on top. *@
             @for (var i = 0; i < ColumnCount; i++)
             {
@@ -104,6 +105,7 @@
                 var leftPct = (double)bar.FirstColIndex / ColumnCount * 100.0;
                 var widthPct = (double)widthCols / ColumnCount * 100.0;
                 var style = $"left: {leftPct:F4}%; width: {widthPct:F4}%;"
+                    + $" --calee-scheduler-all-day-lane-index: {bar.LaneIndex};"
                     + (bar.Event.Color is null
                         ? string.Empty
                         : $" --calee-scheduler-event-color: {bar.Event.Color};");

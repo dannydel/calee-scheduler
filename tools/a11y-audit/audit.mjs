@@ -187,6 +187,64 @@ async function checkMonthBarLabelContainment(page) {
     });
 }
 
+/**
+ * Week all-day bars that overlap horizontally must occupy distinct vertical
+ * lanes, and the expanded all-day grid must contain every bar. The composed
+ * root always supplies overlapping all-day fixtures, making this a meaningful
+ * live-browser geometry check rather than a vacuous no-collision assertion.
+ */
+async function checkWeekAllDayStack(page) {
+    return page.evaluate(() => {
+        const tolerance = 0.5;
+        const grid = document.querySelector('.calee-scheduler-week-allday-grid');
+        const bars = [...(grid?.querySelectorAll('.calee-scheduler-all-day-event') ?? [])];
+        if (!grid || bars.length < 2) {
+            return { pass: false, detail: `expected at least 2 all-day bars, found ${bars.length}` };
+        }
+
+        const rects = bars.map(bar => ({
+            name: bar.getAttribute('aria-label') ?? bar.textContent.trim(),
+            rect: bar.getBoundingClientRect(),
+        }));
+        const collisions = [];
+        let overlappingPairCount = 0;
+
+        for (let i = 0; i < rects.length; i++) {
+            for (let j = i + 1; j < rects.length; j++) {
+                const horizontalOverlap = Math.min(rects[i].rect.right, rects[j].rect.right)
+                    - Math.max(rects[i].rect.left, rects[j].rect.left);
+                if (horizontalOverlap <= tolerance) continue;
+
+                overlappingPairCount++;
+                const verticalOverlap = Math.min(rects[i].rect.bottom, rects[j].rect.bottom)
+                    - Math.max(rects[i].rect.top, rects[j].rect.top);
+                if (verticalOverlap > tolerance) {
+                    collisions.push(`${rects[i].name} / ${rects[j].name}`);
+                }
+            }
+        }
+
+        const gridRect = grid.getBoundingClientRect();
+        const escaped = rects.filter(({ rect }) =>
+            rect.top < gridRect.top - tolerance || rect.bottom > gridRect.bottom + tolerance);
+        const laneCount = Number.parseInt(
+            getComputedStyle(grid).getPropertyValue('--calee-scheduler-all-day-lane-count'), 10);
+        const distinctTops = new Set(rects.map(({ rect }) => Math.round(rect.top))).size;
+        const pass = overlappingPairCount > 0
+            && collisions.length === 0
+            && escaped.length === 0
+            && laneCount > 1
+            && distinctTops > 1;
+
+        return {
+            pass,
+            detail: pass
+                ? `${rects.length} bars use ${laneCount} lanes with no collisions`
+                : `pairs=${overlappingPairCount}, collisions=${collisions.join(' | ') || 'none'}, escaped=${escaped.length}, lanes=${laneCount}, tops=${distinctTops}`,
+        };
+    });
+}
+
 async function checkTimelineVirtualization(page) {
     try {
         await page.locator('[data-calee-region="lane-row"]').first().waitFor({ state: 'attached', timeout: 5000 });
@@ -320,6 +378,13 @@ async function auditOnce() {
                 }
             }
 
+            let weekAllDayStackCheck;
+            if (route.path === '/') {
+                process.stdout.write(`  week-all-day-stack-check ${route.path} ... `);
+                weekAllDayStackCheck = await checkWeekAllDayStack(page);
+                console.log(weekAllDayStackCheck.pass ? 'PASS' : `FAIL — ${weekAllDayStackCheck.detail}`);
+            }
+
             let timelineVirtualizationCheck;
             if (route.timelineVirtualizationCheck) {
                 process.stdout.write(`  timeline-virtualization ${route.path} ... `);
@@ -343,6 +408,7 @@ async function auditOnce() {
                 ...(agendaVirtualizationCheck ? { agendaVirtualizationCheck } : {}),
                 ...(overflowCheck ? { overflowCheck } : {}),
                 ...(monthBarLabelCheck ? { monthBarLabelCheck } : {}),
+                ...(weekAllDayStackCheck ? { weekAllDayStackCheck } : {}),
             });
         }
 
@@ -354,6 +420,8 @@ async function auditOnce() {
     const focusFailures = results.filter(r => r.focusCheck && !r.focusCheck.pass).length;
     const overflowFailures = results.filter(r => r.overflowCheck && r.overflowCheck.overflow).length;
     const monthBarLabelFailures = results.filter(r => r.monthBarLabelCheck && !r.monthBarLabelCheck.pass).length;
+    const weekAllDayStackFailures = results.filter(
+        r => r.weekAllDayStackCheck && !r.weekAllDayStackCheck.pass).length;
     const timelineVirtualizationFailures = results.filter(
         r => r.timelineVirtualizationCheck && !r.timelineVirtualizationCheck.pass).length;
     const agendaVirtualizationFailures = results.filter(
@@ -372,6 +440,8 @@ async function auditOnce() {
         overflowFailures,
         monthBarLabelChecksRun: results.filter(r => r.monthBarLabelCheck).length,
         monthBarLabelFailures,
+        weekAllDayStackChecksRun: results.filter(r => r.weekAllDayStackCheck).length,
+        weekAllDayStackFailures,
         timelineVirtualizationFailures,
         agendaVirtualizationFailures,
     };
@@ -383,9 +453,10 @@ async function auditOnce() {
     console.log(`focus checks: ${report.focusChecksRun} run, ${focusFailures} failed`);
     console.log(`overflow checks: ${report.overflowChecksRun} run, ${overflowFailures} failed`);
     console.log(`Month bar label checks: ${report.monthBarLabelChecksRun} run, ${monthBarLabelFailures} failed`);
+    console.log(`Week all-day stack checks: ${report.weekAllDayStackChecksRun} run, ${weekAllDayStackFailures} failed`);
 
     if (report.totalViolations > 0 || focusFailures > 0 || overflowFailures > 0
-        || monthBarLabelFailures > 0 || timelineVirtualizationFailures > 0
+        || monthBarLabelFailures > 0 || weekAllDayStackFailures > 0 || timelineVirtualizationFailures > 0
         || agendaVirtualizationFailures > 0 || results.some(r => r.error)) {
         process.exit(1);
     }

@@ -188,6 +188,40 @@ public class CaleeSchedulerWeekViewTests
     }
 
     [Fact]
+    public void Overlapping_AllDay_Bars_Use_Separate_Lanes_And_Reuse_Available_Lanes()
+    {
+        using var ctx = NewContext();
+
+        var monday = Edt(2026, 5, 18);
+        var events = new[]
+        {
+            AllDay("a-span", monday, monday.AddDays(3)),
+            AllDay("b-overlap", monday.AddDays(1), monday.AddDays(2)),
+            AllDay("c-adjacent", monday.AddDays(3), monday.AddDays(4)),
+        };
+
+        var cut = ctx.Render<CaleeSchedulerWeekView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, Anchor)
+            .Add(c => c.Events, events));
+
+        var bars = cut.Instance.AllDayBars.ToDictionary(bar => bar.Event.Id);
+        Assert.Equal(2, cut.Instance.AllDayLaneCount);
+        Assert.Equal(0, bars["a-span"].LaneIndex);
+        Assert.Equal(1, bars["b-overlap"].LaneIndex);
+        Assert.Equal(0, bars["c-adjacent"].LaneIndex);
+
+        var gridStyle = cut.Find(".calee-scheduler-week-allday-grid").GetAttribute("style") ?? "";
+        Assert.Contains("--calee-scheduler-all-day-lane-count: 2", gridStyle);
+
+        var renderedBars = cut.FindAll(".calee-scheduler-all-day-event");
+        Assert.Contains(renderedBars, bar =>
+            (bar.GetAttribute("style") ?? "").Contains("--calee-scheduler-all-day-lane-index: 0"));
+        Assert.Contains(renderedBars, bar =>
+            (bar.GetAttribute("style") ?? "").Contains("--calee-scheduler-all-day-lane-index: 1"));
+    }
+
+    [Fact]
     public void EventClass_Applied_To_AllDay_Bar()
     {
         using var ctx = NewContext();

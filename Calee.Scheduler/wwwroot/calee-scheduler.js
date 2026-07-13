@@ -204,9 +204,14 @@ export function unregisterTimelineVirtualization(container) {
 const _agendaVirtualizations = new WeakMap();
 
 function _scheduleAgendaViewport(state) {
-    if (state.frame || state.inFlight) return;
+    if (state.frame) return;
     state.frame = requestAnimationFrame(async () => {
         state.frame = 0;
+        if (state.inFlight) {
+            state.queued = true;
+            return;
+        }
+
         state.inFlight = true;
         try {
             const groups = [...state.container.querySelectorAll('[data-calee-agenda-virtual-group]')];
@@ -221,6 +226,11 @@ function _scheduleAgendaViewport(state) {
             });
             if (result && Math.abs(result.scrollAdjustment || 0) > 0.01) {
                 requestAnimationFrame(() => { state.container.scrollTop += result.scrollAdjustment; });
+            }
+        } catch (error) {
+            // Disposal/view switches may race a queued animation frame.
+            if (_agendaVirtualizations.has(state.container)) {
+                console.warn('[calee-scheduler] agenda virtualization update failed:', error);
             }
         } finally {
             state.inFlight = false;

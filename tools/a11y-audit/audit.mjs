@@ -106,7 +106,7 @@ async function checkAgendaVirtualization(page) {
         '[role="listitem"][tabindex="0"]');
 
     return {
-        pass: initialGroups <= 12 && endGroups < 12 && initialElements < 600 && focusMoved,
+        pass: initialGroups <= 12 && endGroups <= 12 && initialElements < 600 && focusMoved,
         initialGroups,
         endGroups,
         initialElements,

@@ -623,6 +623,41 @@ public class CaleeSchedulerTimelineViewTests
     }
 
     [Fact]
+    public async Task Current_Time_Refresh_Interval_Ticks_Only_When_Configured()
+    {
+        using var ctx = NewContext();
+        var todayInTz = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+
+        // (a) Default (null interval) → no timer; RenderCount doesn't advance on its own.
+        var cutDefault = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+        var defaultBaseline = cutDefault.RenderCount;
+        await Task.Delay(150, Xunit.TestContext.Current.CancellationToken);
+        Assert.Equal(defaultBaseline, cutDefault.RenderCount);
+
+        // (b) Short interval + today in range, Day mode → auto re-renders on its own.
+        var cutTicking = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.CurrentTimeRefreshInterval, TimeSpan.FromMilliseconds(50))
+            .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+        var tickingBaseline = cutTicking.RenderCount;
+        cutTicking.WaitForState(() => cutTicking.RenderCount > tickingBaseline, TimeSpan.FromSeconds(2));
+
+        await cutTicking.Instance.DisposeAsync();
+    }
+
+    [Fact]
     public void Aria_Grid_Roles_Present_With_Rowheaders_And_Gridcells()
     {
         using var ctx = NewContext();

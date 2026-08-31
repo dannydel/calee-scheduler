@@ -589,8 +589,11 @@ public class CaleeSchedulerTimelineViewTests
         Assert.Empty(cut1.FindAll(".calee-scheduler-timeline-current-time-label"));
         Assert.Empty(cut1.FindAll(".calee-scheduler-timeline-current-time-node"));
 
-        // ShowCurrentTimeLabel = true → exactly one label + node, with the correct
-        // time text, and aria-hidden on both (no duplicate SR announcement).
+        // ShowCurrentTimeLabel = true → exactly one desktop (tick-row) label + node and,
+        // since this fixture has a single lane, the first-mounted-row also matches, so
+        // exactly one mobile (--inrow) label + node too. Both variants carry the base
+        // class, so distinguish desktop-only via :not(--inrow). Correct time text and
+        // aria-hidden on all four (no duplicate SR announcement).
         var cut2 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
             .Add(c => c.TimeZone, TZ)
             .Add(c => c.Date, todayInTz)
@@ -601,15 +604,22 @@ public class CaleeSchedulerTimelineViewTests
             .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
             .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
 
-        var labels = cut2.FindAll(".calee-scheduler-timeline-current-time-label");
-        var nodes = cut2.FindAll(".calee-scheduler-timeline-current-time-node");
-        Assert.Single(labels);
-        Assert.Single(nodes);
-        Assert.Equal("true", labels[0].GetAttribute("aria-hidden"));
-        Assert.Equal("true", nodes[0].GetAttribute("aria-hidden"));
+        var desktopLabels = cut2.FindAll(".calee-scheduler-timeline-current-time-label:not(.calee-scheduler-timeline-current-time-label--inrow)");
+        var desktopNodes = cut2.FindAll(".calee-scheduler-timeline-current-time-node:not(.calee-scheduler-timeline-current-time-node--inrow)");
+        var inRowLabels = cut2.FindAll(".calee-scheduler-timeline-current-time-label--inrow");
+        var inRowNodes = cut2.FindAll(".calee-scheduler-timeline-current-time-node--inrow");
+        Assert.Single(desktopLabels);
+        Assert.Single(desktopNodes);
+        Assert.Single(inRowLabels);
+        Assert.Single(inRowNodes);
+        Assert.Equal("true", desktopLabels[0].GetAttribute("aria-hidden"));
+        Assert.Equal("true", desktopNodes[0].GetAttribute("aria-hidden"));
+        Assert.Equal("true", inRowLabels[0].GetAttribute("aria-hidden"));
+        Assert.Equal("true", inRowNodes[0].GetAttribute("aria-hidden"));
 
         var expectedText = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ).ToString("h:mm tt");
-        Assert.Equal(expectedText, labels[0].TextContent.Trim());
+        Assert.Equal(expectedText, desktopLabels[0].TextContent.Trim());
+        Assert.Equal(expectedText, inRowLabels[0].TextContent.Trim());
 
         // Week mode with ShowCurrentTimeLabel = true → no label (Day-only gate).
         var cut3 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
@@ -620,6 +630,55 @@ public class CaleeSchedulerTimelineViewTests
             .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
             .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
         Assert.Empty(cut3.FindAll(".calee-scheduler-timeline-current-time-label"));
+    }
+
+    [Fact]
+    public void Current_Time_InRow_Label_Renders_Once_On_First_Mounted_Row_Only()
+    {
+        using var ctx = NewContext();
+        var todayInTz = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+        var lanes = new[] { LaneOf("r1", "R1"), LaneOf("r2", "R2"), LaneOf("r3", "R3") };
+
+        // Multiple lanes + ShowCurrentTimeLabel = true → the mobile (--inrow) label/node
+        // must render exactly once (on the first mounted row), not once per lane — it
+        // must track the scrolling lane-row area, unlike the desktop tick-row copy which
+        // lives in the non-scrolling header (see .razor.css @media max-width:640px, which
+        // hides the tick row and reveals the --inrow copy instead).
+        var cut1 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.ShowCurrentTimeLabel, true)
+            .Add(c => c.Lanes, lanes)
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+
+        var inRowLabels = cut1.FindAll(".calee-scheduler-timeline-current-time-label--inrow");
+        var inRowNodes = cut1.FindAll(".calee-scheduler-timeline-current-time-node--inrow");
+        Assert.Single(inRowLabels);
+        Assert.Single(inRowNodes);
+        Assert.Equal("true", inRowLabels[0].GetAttribute("aria-hidden"));
+        Assert.Equal("true", inRowNodes[0].GetAttribute("aria-hidden"));
+
+        var expectedText = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ).ToString("h:mm tt");
+        Assert.Equal(expectedText, inRowLabels[0].TextContent.Trim());
+
+        // The desktop tick-row copy still renders exactly once too, unaffected by lane count.
+        var desktopLabels = cut1.FindAll(".calee-scheduler-timeline-current-time-label:not(.calee-scheduler-timeline-current-time-label--inrow)");
+        Assert.Single(desktopLabels);
+
+        // ShowCurrentTimeLabel = false → neither --inrow element renders.
+        var cut2 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.Lanes, lanes)
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+        Assert.Empty(cut2.FindAll(".calee-scheduler-timeline-current-time-label--inrow"));
+        Assert.Empty(cut2.FindAll(".calee-scheduler-timeline-current-time-node--inrow"));
     }
 
     [Fact]

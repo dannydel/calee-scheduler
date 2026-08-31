@@ -397,6 +397,24 @@
                                      style="@($"left: {pct:F4}%;")"
                                      title="@CurrentTimeText()"
                                      aria-hidden="true"></div>
+
+                                @* Mobile-only label + node variant (--inrow). The desktop label
+                                   lives in the non-scrolling tick row and is hidden below 640px
+                                   (see .razor.css); this copy lives inside the scrolling lane-row
+                                   area so it tracks horizontal scroll instead of drifting out of
+                                   alignment. Rendered on the first mounted row only, to avoid
+                                   duplicating it per lane. *@
+                                @if (ShowCurrentTimeLabel && rowIndex == FirstMountedRow)
+                                {
+                                    <div class="calee-scheduler-timeline-current-time-node calee-scheduler-timeline-current-time-node--inrow"
+                                         style="@($"left: {pct:F4}%;")"
+                                         aria-hidden="true"></div>
+                                    <div class="calee-scheduler-timeline-current-time-label calee-scheduler-timeline-current-time-label--inrow"
+                                         style="@($"left: {pct:F4}%;")"
+                                         aria-hidden="true">
+                                        @CurrentTimeText()
+                                    </div>
+                                }
                             }
                         }
                     </div>

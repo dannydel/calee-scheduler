@@ -358,6 +358,16 @@
     z-index: 5;
 }
 
+/* Mobile-only --inrow variants (issue: label vanished with the tick row at
+   <=640px, page top). Hidden by default so desktop is untouched; the
+   @media (max-width: 640px) block below reveals them, positioned within the
+   first lane row's time-area — the scrolling context the per-row vertical
+   line already lives in — so the label tracks horizontal scroll. */
+.calee-scheduler-timeline-current-time-node--inrow,
+.calee-scheduler-timeline-current-time-label--inrow {
+    display: none;
+}
+
 .calee-scheduler-overflow-chip {
     position: absolute;
     top: 50%;
@@ -463,5 +473,26 @@
        own time text, so no information is lost. */
     .calee-scheduler-timeline-tick-row {
         display: none;
+    }
+
+    /* Reveal the --inrow current-time label/node inside the first lane row's
+       scrolling time-area, since the tick-row copy above is now hidden. The
+       label sits at the row's top edge (there's no room above it once the
+       tick row is gone); nudged down a couple px rather than negative so the
+       row/rows container doesn't clip it. z-index 5 (inherited from the base
+       classes) keeps it above event chips (z-index 3). */
+    .calee-scheduler-timeline-current-time-node--inrow {
+        display: block;
+        position: absolute;
+        top: 0.5rem;
+    }
+
+    .calee-scheduler-timeline-current-time-label--inrow {
+        display: block;
+        position: absolute;
+        top: 0.125rem;
+        bottom: auto;
+        margin-bottom: 0;
+        transform: translateX(-50%);
     }
 }

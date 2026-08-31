@@ -127,6 +127,24 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     public bool ShowCurrentTimeIndicator { get; set; } = true;
 
     /// <summary>
+    /// When true, renders the current wall-clock time as a visible label and marker node
+    /// on the current-time indicator. Only applies when ShowCurrentTimeIndicator is true and
+    /// TimeScale is Day. Defaults to false to preserve existing behavior.
+    /// </summary>
+    [Parameter]
+    public bool ShowCurrentTimeLabel { get; set; } = false;
+
+    /// <summary>
+    /// When set to a positive interval, the current-time indicator (and label, if enabled)
+    /// auto-refreshes on that cadence so it advances without an unrelated re-render. Null or
+    /// non-positive disables ticking (default), preserving prior behavior. Values below one
+    /// second are clamped up to one second. Only ticks in Day mode while today is in range and
+    /// ShowCurrentTimeIndicator is true.
+    /// </summary>
+    [Parameter]
+    public TimeSpan? CurrentTimeRefreshInterval { get; set; }
+
+    /// <summary>
     /// Max side-by-side overlap stacks within a lane before surplus events collapse into a
     /// "+N" block. Defaults to <c>SchedulerOptions.Value.DefaultMaxOverlapColumns</c>. Must be &gt;= 2.
     /// </summary>
@@ -212,6 +230,10 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     private int _lastMountedRowExclusive;
     private bool _virtualizationRegistered;
     private bool _wasVirtualizingRows;
+
+    private Timer? _currentTimeTimer;
+    private TimeSpan? _appliedCurrentTimeRefreshInterval;
+    private bool _disposed;
 
     // Pointer drags currently resolve lane targets from mounted browser geometry. Keep
     // their proven full-row path until their logical height-index target resolver ships.
@@ -385,6 +407,8 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
         }
         _wasVirtualizingRows = CanVirtualizeRows;
 
+        UpdateCurrentTimeTicker();
+
         // FR-23.
         if (_lastRangeStart != _rangeStart || _lastRangeEnd != _rangeEndExclusive)
         {
@@ -392,6 +416,47 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
             _lastRangeEnd = _rangeEndExclusive;
             _ = OnRangeChanged.InvokeAsync(new SchedulerRange(_rangeStart, _rangeEndExclusive));
         }
+    }
+
+    /// <summary>
+    /// Starts, restarts, or stops the current-time auto-refresh timer to match
+    /// <see cref="CurrentTimeRefreshInterval"/> and the current gate (Day mode, today in
+    /// range, indicator enabled). Ticking only moves the line/label forward via
+    /// <c>StateHasChanged</c> — <see cref="CurrentTimeIndicatorPercent"/> and
+    /// <see cref="SchedulerComponentBase{TEvent}.CurrentTimeText"/> already re-derive from
+    /// wall-clock time on every render.
+    /// </summary>
+    private void UpdateCurrentTimeTicker()
+    {
+        TimeSpan? effectiveInterval = null;
+        if (CurrentTimeRefreshInterval is { } interval && interval > TimeSpan.Zero
+            && ShowCurrentTimeIndicator && IsTodayInDayRange)
+        {
+            effectiveInterval = interval < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : interval;
+        }
+
+        if (effectiveInterval == _appliedCurrentTimeRefreshInterval)
+        {
+            return;
+        }
+
+        _currentTimeTimer?.Dispose();
+        _currentTimeTimer = effectiveInterval is { } resolvedInterval
+            ? new Timer(OnCurrentTimeTick, null, resolvedInterval, resolvedInterval)
+            : null;
+        _appliedCurrentTimeRefreshInterval = effectiveInterval;
+    }
+
+    private void OnCurrentTimeTick(object? state) => _ = TickCurrentTimeAsync();
+
+    private async Task TickCurrentTimeAsync()
+    {
+        if (_disposed) return;
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { /* Component torn down mid-tick. */ }
     }
 
     /// <summary>
@@ -772,6 +837,10 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     /// <inheritdoc/>
     public override async ValueTask DisposeAsync()
     {
+        _disposed = true;
+        _currentTimeTimer?.Dispose();
+        _currentTimeTimer = null;
+
         if (_jsModule is not null && _virtualizationRegistered)
         {
             try { await _jsModule.InvokeVoidAsync("unregisterTimelineVirtualization", _timeAreaScrollContainer); }

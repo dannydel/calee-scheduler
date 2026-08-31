@@ -75,6 +75,25 @@
                         </div>
                     }
                 }
+
+                @* Current-time label + marker node — rendered once here (not per lane row)
+                   so it isn't duplicated down the timeline. Sits on the time axis, above the
+                   per-row vertical line, at the same x-position (FR-07 label variant). *@
+                @if (ShowCurrentTimeLabel && IsTodayInDayRange)
+                {
+                    var labelPct = CurrentTimeIndicatorPercent;
+                    if (labelPct >= 0)
+                    {
+                        <div class="calee-scheduler-timeline-current-time-node"
+                             style="@($"left: {labelPct:F4}%;")"
+                             aria-hidden="true"></div>
+                        <div class="calee-scheduler-timeline-current-time-label"
+                             style="@($"left: {labelPct:F4}%;")"
+                             aria-hidden="true">
+                            @CurrentTimeText()
+                        </div>
+                    }
+                }
             </div>
         </div>
 

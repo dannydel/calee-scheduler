@@ -570,6 +570,59 @@ public class CaleeSchedulerTimelineViewTests
     }
 
     [Fact]
+    public void Current_Time_Label_Shown_Only_When_ShowCurrentTimeLabel_Enabled()
+    {
+        using var ctx = NewContext();
+        var todayInTz = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ);
+
+        // Default (ShowCurrentTimeLabel = false) → no label/node even though the
+        // vertical line indicator is visible.
+        var cut1 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+        Assert.NotEmpty(cut1.FindAll(".calee-scheduler-timeline-current-time-indicator"));
+        Assert.Empty(cut1.FindAll(".calee-scheduler-timeline-current-time-label"));
+        Assert.Empty(cut1.FindAll(".calee-scheduler-timeline-current-time-node"));
+
+        // ShowCurrentTimeLabel = true → exactly one label + node, with the correct
+        // time text, and aria-hidden on both (no duplicate SR announcement).
+        var cut2 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Day)
+            .Add(c => c.StartHour, 0)
+            .Add(c => c.EndHour, 24)
+            .Add(c => c.ShowCurrentTimeLabel, true)
+            .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+
+        var labels = cut2.FindAll(".calee-scheduler-timeline-current-time-label");
+        var nodes = cut2.FindAll(".calee-scheduler-timeline-current-time-node");
+        Assert.Single(labels);
+        Assert.Single(nodes);
+        Assert.Equal("true", labels[0].GetAttribute("aria-hidden"));
+        Assert.Equal("true", nodes[0].GetAttribute("aria-hidden"));
+
+        var expectedText = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TZ).ToString("h:mm tt");
+        Assert.Equal(expectedText, labels[0].TextContent.Trim());
+
+        // Week mode with ShowCurrentTimeLabel = true → no label (Day-only gate).
+        var cut3 = ctx.Render<CaleeSchedulerTimelineView<CalendarEvent>>(p => p
+            .Add(c => c.TimeZone, TZ)
+            .Add(c => c.Date, todayInTz)
+            .Add(c => c.TimeScale, TimelineScale.Week)
+            .Add(c => c.ShowCurrentTimeLabel, true)
+            .Add(c => c.Lanes, new[] { LaneOf("r1", "R1") })
+            .Add(c => c.LaneKey, (Func<CalendarEvent, string?>)(_ => "r1")));
+        Assert.Empty(cut3.FindAll(".calee-scheduler-timeline-current-time-label"));
+    }
+
+    [Fact]
     public void Aria_Grid_Roles_Present_With_Rowheaders_And_Gridcells()
     {
         using var ctx = NewContext();

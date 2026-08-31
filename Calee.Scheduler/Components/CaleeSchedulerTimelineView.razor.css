@@ -325,6 +325,39 @@
     z-index: 4;
 }
 
+/* Current-time label + marker node — rendered once in the tick row's time-gutter
+   (ShowCurrentTimeLabel opt-in). Both are centered on the indicator's x-position
+   via translateX(-50%); the label clamps at the viewport edges via a CSS
+   max-content width and generous horizontal padding so it doesn't clip. */
+.calee-scheduler-timeline-current-time-node {
+    position: absolute;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--calee-scheduler-current-time-indicator-color, #dc2626);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.calee-scheduler-timeline-current-time-label {
+    position: absolute;
+    bottom: 100%;
+    margin-bottom: 0.125rem;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #fff;
+    background: var(--calee-scheduler-current-time-indicator-color, #dc2626);
+    border-radius: 999px;
+    padding: 0.0625rem 0.375rem;
+    pointer-events: none;
+    z-index: 5;
+}
+
 .calee-scheduler-overflow-chip {
     position: absolute;
     top: 50%;

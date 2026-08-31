@@ -127,6 +127,14 @@ public partial class CaleeSchedulerTimelineView<TEvent> : SchedulerStatefulCompo
     public bool ShowCurrentTimeIndicator { get; set; } = true;
 
     /// <summary>
+    /// When true, renders the current wall-clock time as a visible label and marker node
+    /// on the current-time indicator. Only applies when ShowCurrentTimeIndicator is true and
+    /// TimeScale is Day. Defaults to false to preserve existing behavior.
+    /// </summary>
+    [Parameter]
+    public bool ShowCurrentTimeLabel { get; set; } = false;
+
+    /// <summary>
     /// Max side-by-side overlap stacks within a lane before surplus events collapse into a
     /// "+N" block. Defaults to <c>SchedulerOptions.Value.DefaultMaxOverlapColumns</c>. Must be &gt;= 2.
     /// </summary>
